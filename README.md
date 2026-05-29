@@ -1,17 +1,15 @@
 # Aistock_vnpy_Trading
 
-An ensemble trading system that fuses three heavily customized private forks:
+三系统融合决策平台。将三个深度定制的独立股票分析系统整合为统一信号。
 
-- **lynx_vnpy** — vnpy fork with a RandomForest signal engine (daily frequency, technical indicators, probability-based signals)
-- **MindLynx-Aistock** — multi-factor (12 factors + 15 strategies) stock analysis with LLM reasoning, real-time monitoring, and daily decision dashboard
-- **mind_TradingAgent** — multi-agent debating framework (LangGraph-based) that simutes bull/bear debates, risk discussion, and produces a consensus portfolio decision
+- **lynx_vnpy** — RandomForest 量化信号系统（日频数据，技术指标，概率信号）
+- **MindLynx-Aistock** — 多因子（12因子 + 15策略）+ LLM 推理 + 实时盯盘
+- **mind_TradingAgent** — 多智能体辩论框架（LangGraph），模拟多空辩论和风险讨论
 
-Each module independently analyzes market data and outputs a standardized signal (direction, confidence, suggested position). A weighted voting engine fuses the three results — users can assign fixed or dynamic weights (e.g., based on historical Sharpe ratio or regime detection). An uncertainty penalty is applied when modules disagree. The final combined suggestion is formatted for WeCom push and daily CSV/JSON logging.
+每个独立分析市场数据并输出标准化信号（方向、置信度、仓位建议）。
+融合引擎通过加权投票整合三系统结果，支持固定或动态权重分配。
+系统间存在分歧时自动施加不确定性惩罚，缺失系统自动重分配权重。
 
-This architecture reduces single-model bias, improves robustness through agent debate, and leverages both quantitative (RandomForest) and qualitative (LLM reasoning + multi-agent) insights.
+**特性**: 模块化设计，零侵入集成，可配置权重，分歧检测，缺失数据容错，企业微信推送。
 
-**Key features**: modular design, zero-intrusion integration, configurable weights, disagreement detection, missing-data resilience, WeCom notifications.
-
-> ⚠️ This project is for **educational and research purposes only**.  
-> Trading stocks involves substantial risk. No investment advice is implied.  
-> See `NOTICE.md` for upstream project attribution and license information.
+> ⚠️ 仅供学习和研究目的。不构成任何投资建议。市场有风险，投资需谨慎。
