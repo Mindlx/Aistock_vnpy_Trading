@@ -1,0 +1,16 @@
+📰整点分析 | {{ report_timestamp[11:16] }}
+{{ results|length }}只 | 🟢买{{ buy_count }} 🟡持{{ hold_count }} 🔴卖{{ sell_count }}
+
+{% for e in enriched %}
+{% set result = e.result %}
+{% set core = (result.dashboard or {}).get('core_conclusion') or {} %}
+{% set battle = (result.dashboard or {}).get('battle_plan') or {} %}
+{% set sniper = battle.get('sniper_points', {}) if battle else {} %}
+{% set parts = [] %}
+{% set parts = parts + [e.signal_emoji + ' ' + e.stock_name + '(' + result.code|string + ')'] %}
+{% if result.current_price %}{% set parts = parts + ['¥' + '%.2f'|format(result.current_price)] %}{% endif %}
+{% set parts = parts + [result.sentiment_score|string + '分 ' + e.signal_text] %}
+{% if core.get('one_sentence') %}{% set parts = parts + [core.one_sentence[:60]|string] %}{% elif result.analysis_summary %}{% set parts = parts + [result.analysis_summary[:60]|string] %}{% endif %}
+{% if sniper.get('stop_loss') %}{% set parts = parts + ['止损' + sniper.stop_loss|string] %}{% endif %}
+{{ parts|join(' | ') }}
+{% endfor %}

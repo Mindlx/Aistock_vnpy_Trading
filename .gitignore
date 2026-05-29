@@ -1,0 +1,33 @@
+# 融合系统 gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# API Keys & Secrets
+.env
+.env.*
+
+# IDE & Tooling
+.idea/
+.vscode/
+.claude/
+.omo/
+.gitnexus/
+
+# Runtime Data
+config/logs/
+data/fusion_output/
+data/lynx/
+data/mindlynx/
+data/tradingagent/
+
+# mind_TradingAgent runtime (user home)
+.mind_tradingagent/
+
+# Temporary
+*.log
+*.tmp

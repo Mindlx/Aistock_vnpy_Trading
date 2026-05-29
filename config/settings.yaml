@@ -1,0 +1,52 @@
+# 融合系统配置文件
+# ⚠️ 本系统仅供学习和研究目的，不构成任何投资建议
+
+weights:
+  lynx_vnpy: 0.35          # vnpy RandomForest 量化信号权重
+  mindlynx: 0.35           # MindLynx AI 推理信号权重
+  tradingagent: 0.30       # TradingAgent Multi-Agent 辩论信号权重
+
+thresholds:
+  strong_bullish: 0.50     # >0.50 → 🟢 强烈看多（2-3成）
+  weak_bullish: 0.20       # 0.20~0.50 → 🟢 弱看多（0.5-1成）
+  neutral_high: 0.20       # ≤0.20 进入中性区间
+  neutral_low: -0.10       # -0.10~0.20 → ⚪ 中性/观望（0成）
+  weak_bearish: -0.50      # -0.50~-0.10 → 🔴 弱看空（减仓至0.5成以内）
+                           # <-0.50 → 🔴 强烈看空（清仓）
+
+confidence_thresholds:
+  lynx_min_valid: 35       # lynx_vnpy 置信度低于35%视为无效
+
+schedule:
+  run_time: "16:30"         # 每日收盘后运行
+  timezone: "Asia/Shanghai"
+
+wecom:
+  webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE"
+  enabled: false            # 初次部署请设为 false，配置好 webhook 后再开启
+
+data_paths:
+  lynx_root: "systems/lynx_vnpy"                     # lynx_vnpy 项目根目录
+  mindlynx_reports: "systems/MindLynx-Aistock/reports/"  # MindLynx 报告目录
+  tradingagent_logs: "~/.mind_tradingagent/logs/"     # TradingAgent 状态日志目录
+  fusion_output: "data/fusion_output/"                # 融合结果输出
+
+fusion_output:
+  save_daily_csv: true      # 每日输出 CSV 格式融合结果
+  save_daily_json: true     # 每日输出 JSON 格式融合结果
+  history_retention_days: 90
+
+logging:
+  level: "INFO"
+  retention_days: 90
+
+backtest:
+  enabled: false            # 回测功能默认关闭
+  initial_weights:          # 回测使用的权重起始值（与 weights 保持一致即可）
+    lynx_vnpy: 0.35
+    mindlynx: 0.35
+    tradingagent: 0.30
+  weight_search_range:      # 网格搜索范围
+    lynx_vnpy: [0.2, 0.3, 0.35, 0.4]
+    mindlynx: [0.2, 0.3, 0.35, 0.4]
+    tradingagent: [0.2, 0.3, 0.35, 0.4]

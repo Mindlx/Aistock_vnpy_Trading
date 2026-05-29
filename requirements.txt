@@ -1,0 +1,8 @@
+# 融合系统依赖
+# pip install -r requirements.txt
+pandas>=2.0.0
+pyyaml>=6.0
+requests>=2.28.0
+schedule>=1.1.0
+# 可选: TradingAgent 信号解析（如需直接 import）
+# 路径依赖: sys.path.append('../mind_TradingAgent')

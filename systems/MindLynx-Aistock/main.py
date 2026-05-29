@@ -1,0 +1,1538 @@
+"""
+===================================
+A股自选股智能分析系统 - 主调度程序
+===================================
+
+职责：
+1. 协调各模块完成股票分析流程
+2. 实现低并发的线程池调度
+3. 全局异常处理，确保单股失败不影响整体
+4. 提供命令行入口
+
+使用方式：
+    python main.py              # 正常运行
+    python main.py --debug      # 调试模式
+    python main.py --dry-run    # 仅获取数据不分析
+
+交易理念（已融入分析）：
+- 严进策略：不追高，乖离率 > 5% 不买入
+- 趋势交易：只做 MA5>MA10>MA20 多头排列
+- 效率优先：关注筹码集中度好的股票
+- 买点偏好：缩量回踩 MA5/MA10 支撑
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from dotenv import dotenv_values
+
+from src.config import setup_env
+from src.notification_noise import get_importance_emoji
+
+_INITIAL_PROCESS_ENV = dict(os.environ)
+setup_env()
+
+# 代理配置 - 通过 USE_PROXY 环境变量控制，默认关闭
+# GitHub Actions 环境自动跳过代理配置
+if os.getenv("GITHUB_ACTIONS") != "true" and os.getenv("USE_PROXY", "false").lower() == "true":
+    # 本地开发环境，启用代理（可在 .env 中配置 PROXY_HOST 和 PROXY_PORT）
+    proxy_host = os.getenv("PROXY_HOST", "127.0.0.1")
+    proxy_port = os.getenv("PROXY_PORT", "10809")
+    proxy_url = f"http://{proxy_host}:{proxy_port}"
+    os.environ["http_proxy"] = proxy_url
+    os.environ["https_proxy"] = proxy_url
+
+import argparse
+import logging
+import sys
+import time
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from data_provider.base import canonical_stock_code
+from src.config import Config, get_config
+from src.logging_config import setup_logging
+from src.webui_frontend import prepare_webui_frontend_assets
+
+logger = logging.getLogger(__name__)
+_RUNTIME_ENV_FILE_KEYS = set()
+
+
+def _get_active_env_path() -> Path:
+    env_file = os.getenv("ENV_FILE")
+    if env_file:
+        return Path(env_file)
+    return Path(__file__).resolve().parent / ".env"
+
+
+def _read_active_env_values() -> dict[str, str] | None:
+    env_path = _get_active_env_path()
+    if not env_path.exists():
+        return {}
+
+    try:
+        values = dotenv_values(env_path)
+    except Exception as exc:  # pragma: no cover - defensive branch
+        logger.warning("读取配置文件 %s 失败，继续沿用当前环境变量: %s", env_path, exc)
+        return None
+
+    return {str(key): "" if value is None else str(value) for key, value in values.items() if key is not None}
+
+
+_ACTIVE_ENV_FILE_VALUES = _read_active_env_values() or {}
+_RUNTIME_ENV_FILE_KEYS = {key for key in _ACTIVE_ENV_FILE_VALUES if key not in _INITIAL_PROCESS_ENV}
+
+# setup_env() already ran at import time above.
+_env_bootstrapped = True
+
+
+def _bootstrap_environment() -> None:
+    """Load .env and apply optional local proxy settings.
+
+    Guarded to be idempotent so it can safely be called from lazy-import
+    paths used by API / bot consumers.
+    """
+    global _env_bootstrapped
+    if _env_bootstrapped:
+        return
+
+    from src.config import setup_env
+
+    setup_env()
+
+    if os.getenv("GITHUB_ACTIONS") != "true" and os.getenv("USE_PROXY", "false").lower() == "true":
+        proxy_host = os.getenv("PROXY_HOST", "127.0.0.1")
+        proxy_port = os.getenv("PROXY_PORT", "10809")
+        proxy_url = f"http://{proxy_host}:{proxy_port}"
+        os.environ["http_proxy"] = proxy_url
+        os.environ["https_proxy"] = proxy_url
+
+    _env_bootstrapped = True
+
+
+def _setup_bootstrap_logging(debug: bool = False) -> None:
+    """Initialize stderr-only logging before config is loaded.
+
+    File handlers are deferred until ``config.log_dir`` is known (via the
+    subsequent ``setup_logging()`` call) so that healthy runs never create
+    log files in a hard-coded directory.
+    """
+    level = logging.DEBUG if debug else logging.INFO
+    root = logging.getLogger()
+    root.setLevel(level)
+    if not any(
+        isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is sys.stderr for h in root.handlers
+    ):
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setLevel(level)
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        root.addHandler(handler)
+
+
+def _setup_runtime_logging(log_dir: str, debug: bool = False) -> bool:
+    """Switch to configured logging, falling back to console on file I/O errors."""
+    try:
+        setup_logging(log_prefix="stock_analysis", debug=debug, log_dir=log_dir)
+        return True
+    except OSError as exc:
+        logger.warning(
+            "文件日志初始化失败，已降级为控制台日志输出；日志目录 %r 当前不可写或不可创建: %s。"
+            "官方 Docker 镜像启动入口会自动修复默认挂载目录权限；若仍失败，"
+            "请检查是否使用了 --user、只读挂载、rootless Docker 或 NFS 等限制写入的环境。",
+            log_dir,
+            exc,
+        )
+        return False
+
+
+def _get_stock_analysis_pipeline():
+    """Lazily import StockAnalysisPipeline for external consumers.
+
+    Also ensures env/proxy bootstrap has run so that API / bot consumers
+    that never call ``main()`` still get ``USE_PROXY`` applied.
+    """
+    _bootstrap_environment()
+    from src.core.pipeline import StockAnalysisPipeline as _Pipeline
+
+    return _Pipeline
+
+
+class _LazyPipelineDescriptor:
+    """Descriptor that resolves StockAnalysisPipeline on first attribute access."""
+
+    _resolved = None
+
+    def __set_name__(self, owner, name):
+        self._name = name
+
+    def __get__(self, obj, objtype=None):
+        if self._resolved is None:
+            self._resolved = _get_stock_analysis_pipeline()
+        return self._resolved
+
+
+class _ModuleExports:
+    StockAnalysisPipeline = _LazyPipelineDescriptor()
+
+
+_exports = _ModuleExports()
+
+
+def __getattr__(name: str):
+    if name == "StockAnalysisPipeline":
+        return _exports.StockAnalysisPipeline
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _reload_env_file_values_preserving_overrides() -> None:
+    """Refresh `.env`-managed env vars without clobbering process env overrides."""
+    global _RUNTIME_ENV_FILE_KEYS
+
+    latest_values = _read_active_env_values()
+    if latest_values is None:
+        return
+
+    managed_keys = {key for key in latest_values if key not in _INITIAL_PROCESS_ENV}
+
+    for key in _RUNTIME_ENV_FILE_KEYS - managed_keys:
+        os.environ.pop(key, None)
+
+    for key in managed_keys:
+        os.environ[key] = latest_values[key]
+
+    _RUNTIME_ENV_FILE_KEYS = managed_keys
+
+
+def parse_arguments() -> argparse.Namespace:
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(
+        description="A股自选股智能分析系统",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  python main.py                    # 正常运行
+  python main.py --debug            # 调试模式
+  python main.py --dry-run          # 仅获取数据，不进行 AI 分析
+  python main.py --stocks 600519,000001  # 指定分析特定股票
+  python main.py --no-notify        # 不发送推送通知
+  python main.py --check-notify     # 检查通知配置，不发送通知
+  python main.py --single-notify    # 启用单股推送模式（每分析完一只立即推送）
+  python main.py --schedule         # 启用定时任务模式
+  python main.py --market-review    # 仅运行大盘复盘
+        """,
+    )
+
+    parser.add_argument("--debug", action="store_true", help="启用调试模式，输出详细日志")
+
+    parser.add_argument("--dry-run", action="store_true", help="仅获取数据，不进行 AI 分析")
+
+    parser.add_argument("--stocks", type=str, help="指定要分析的股票代码，逗号分隔（覆盖配置文件）")
+
+    parser.add_argument("--no-notify", action="store_true", help="不发送推送通知")
+
+    parser.add_argument("--check-notify", action="store_true", help="只读检查通知渠道配置，不发送通知")
+
+    parser.add_argument(
+        "--single-notify", action="store_true", help="启用单股推送模式：每分析完一只股票立即推送，而不是汇总推送"
+    )
+
+    parser.add_argument("--workers", type=int, default=None, help="并发线程数（默认使用配置值）")
+
+    parser.add_argument("--schedule", action="store_true", help="启用定时任务模式，每日定时执行")
+
+    parser.add_argument("--no-run-immediately", action="store_true", help="定时任务启动时不立即执行一次")
+
+    parser.add_argument("--market-review", action="store_true", help="仅运行大盘复盘分析")
+
+    parser.add_argument("--no-market-review", action="store_true", help="跳过大盘复盘分析")
+
+    parser.add_argument("--force-run", action="store_true", help="跳过交易日检查，强制执行全量分析（Issue #373）")
+
+    parser.add_argument("--webui", action="store_true", help="启动 Web 管理界面")
+
+    parser.add_argument("--webui-only", action="store_true", help="仅启动 Web 服务，不执行自动分析")
+
+    parser.add_argument("--serve", action="store_true", help="启动 FastAPI 后端服务（同时执行分析任务）")
+
+    parser.add_argument("--serve-only", action="store_true", help="仅启动 FastAPI 后端服务，不自动执行分析")
+
+    parser.add_argument("--port", type=int, default=8000, help="FastAPI 服务端口（默认 8000）")
+
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="FastAPI 服务监听地址（默认 0.0.0.0）")
+
+    parser.add_argument("--no-context-snapshot", action="store_true", help="不保存分析上下文快照")
+
+    # === Backtest ===
+    parser.add_argument("--backtest", action="store_true", help="运行回测（对历史分析结果进行评估）")
+
+    parser.add_argument("--backtest-code", type=str, default=None, help="仅回测指定股票代码")
+
+    parser.add_argument("--backtest-days", type=int, default=None, help="回测评估窗口（交易日数，默认使用配置）")
+
+    parser.add_argument("--backtest-force", action="store_true", help="强制回测（即使已有回测结果也重新计算）")
+
+    parser.add_argument(
+        "--backtest-report", action="store_true", help="生成回测报告（对已有回测结果生成报告不重新回测）"
+    )
+
+    # === 盘中实时监控 ===
+    parser.add_argument(
+        "--realtime-monitor", action="store_true", help="启动盘中实时监控服务（WebSocket + ATR止损 + 量价异动）"
+    )
+    parser.add_argument(
+        "--realtime-monitor-daemon", action="store_true", help="启动实时监控守护进程模式（自动跟随A股交易时段）"
+    )
+
+    # === 事件驱动分析服务 ===
+    parser.add_argument("--event-monitor", action="store_true", help="启动事件驱动分析服务（公告+互动易监控）")
+    parser.add_argument("--event-monitor-daemon", action="store_true", help="启动事件驱动分析守护进程模式")
+
+    # === 周末情报搜集 ===
+    parser.add_argument("--weekend-intel", action="store_true", help="周末情报搜集（搜索+存储，不AI分析，重要性≥7可推送）")
+    parser.add_argument("--weekend-refresh", action="store_true", help="周末情报补量（周一晨间，max_results更小，覆盖周日深夜）")
+    parser.add_argument("--weekend-intel-no-push", action="store_true", help="周末情报搜集：仅存储不推送")
+
+    # === 每日情报搜集（三时段） ===
+    parser.add_argument("--daily-intel", action="store_true", help="每日情报搜集（午间/晚间/盘前，搜索+存储+高重要推送）")
+    parser.add_argument("--daily-intel-slot", choices=["midday", "evening", "preopen"], default="midday",
+                       help="每日情报时段: midday(午间12:00), evening(晚间17:00), preopen(盘前08:30)")
+
+    return parser.parse_args()
+
+
+def _run_weekend_intel(config: Config, is_refresh: bool = False, no_push: bool = False) -> int:
+    """Weekend intelligence gathering: search news → score importance → store → optionally push.
+
+    Args:
+        config: application config
+        is_refresh: True for Monday morning differential (smaller max_results)
+        no_push: True to store only without notification
+    """
+    stock_codes = config.stock_list
+    if not stock_codes:
+        logger.warning("周末情报: 自选股列表为空")
+        return 1
+
+    mode_label = "补量" if is_refresh else "主力采集"
+    logger.info("模式: 周末情报搜集 (%s)", mode_label)
+    logger.info("股票: %s", ", ".join(stock_codes[:10]))
+
+    # ── 数据源：东方财富个股新闻（免费，akshare 封装，无需 API Key） ──
+    from src.search_service import EastMoneyNewsProvider
+
+    news_provider = EastMoneyNewsProvider()
+
+    # ── 数据源：东方财富公告 API（结构化，带日期/分类/重要性） ──
+    #  注意：东方财富公告API近期返回405，备用巨潮资讯(cninfo)工作正常
+    from src.services.event_monitor import CninfoFetcher
+
+    ann_fetcher = CninfoFetcher()
+
+    max_results = 3 if is_refresh else 5
+    importance_threshold = 7
+    collected: list[dict] = []
+
+    # Populate stock name map for push formatting
+    for code in stock_codes:
+        try:
+            from data_provider.base import DataFetcherManager
+            mgr = DataFetcherManager()
+            name = mgr.get_stock_name(code)
+            if name and name != code:
+                _STOCK_NAME_MAP[code] = name
+        except Exception:
+            pass
+
+    for code in stock_codes:
+        import random as _random
+        import time as _time
+
+        _time.sleep(1.0 + _random.uniform(0, 0.8))
+
+        # ── 1. 个股新闻 ──
+        try:
+            response = news_provider.search(
+                code, max_results=max_results, days=2 if is_refresh else 7
+            )
+            if response and response.success and response.results:
+                for item in response.results:
+                    importance = _score_weekend_importance(item.title, item.snippet)
+                    collected.append({
+                        "code": code,
+                        "title": item.title,
+                        "url": item.url,
+                        "snippet": (item.snippet or "")[:200],
+                        "importance": importance,
+                        "source": getattr(item, "source", "东方财富"),
+                    })
+                    if importance >= importance_threshold:
+                        logger.info("周末情报 %s [新闻 重要性%d]: %s", code, importance, item.title[:60])
+        except Exception as e:
+            logger.debug("周末情报 %s: 新闻抓取失败: %s", code, e)
+
+        # ── 2. 官方公告 ──
+        try:
+            import asyncio
+
+            announcements = asyncio.run(ann_fetcher.fetch(code, page_size=3))
+            for ann in announcements:
+                event = CninfoFetcher.parse_announcement(ann, code)
+                if event is None:
+                    continue
+                importance = min(event.importance + 2, 10)  # 公告类适度提升
+                collected.append({
+                    "code": code,
+                    "title": event.title,
+                    "url": event.url or "",
+                    "snippet": event.content[:200],
+                    "importance": importance,
+                    "source": "公告",
+                })
+                if importance >= importance_threshold:
+                    logger.info("周末情报 %s [公告 重要性%d]: %s", code, importance, event.title[:60])
+        except Exception as e:
+            logger.debug("周末情报 %s: 公告抓取失败: %s", code, e)
+
+    if not collected:
+        logger.info("周末情报: 未发现相关新闻")
+        return 0
+
+    # Store in news_intel
+    try:
+        from src.storage import get_db
+
+        db = get_db()
+        with db.session_scope() as session:
+            from src.storage import NewsIntel
+
+            stored = 0
+            for item in collected:
+                try:
+                    with session.begin_nested():
+                        record = NewsIntel(
+                            code=item["code"],
+                            name=item["title"][:50],
+                            title=item["title"][:300],
+                            url=item.get("url", ""),
+                            dimension="weekend_intel",
+                            query=f"weekend:{mode_label}",
+                            provider=item.get("source", "search"),
+                            snippet=item["snippet"],
+                            source="weekend",
+                        )
+                        session.add(record)
+                    stored += 1
+                except Exception:
+                    pass
+            if stored:
+                session.commit()
+                logger.info("周末情报: 已存储 %d 条新闻（去重 %d 条）", stored, len(collected) - stored)
+            else:
+                logger.warning("周末情报: 全部 %d 条因重复被跳过", len(collected))
+    except Exception as e:
+        logger.warning("周末情报: 存储失败: %s", e)
+
+    # Push high-importance events
+    if not no_push:
+        highlights = [i for i in collected if i["importance"] >= importance_threshold]
+        if highlights:
+            _push_weekend_highlights(config, highlights, mode_label, is_refresh=is_refresh)
+
+    logger.info("周末情报 (%s) 完成: 共 %d 条, 高重要性 %d 条",
+                mode_label, len(collected), len(highlights) if not no_push else 0)
+    return 0
+
+
+_HIGH_IMPORTANCE_KEYWORDS = [
+    ("重组", 9), ("并购", 8), ("减持", 8), ("增持", 7), ("回购", 7),
+    ("业绩预增", 8), ("业绩预减", 8), ("预亏", 9), ("亏损", 8),
+    ("ST", 10), ("退市", 10), ("立案", 10), ("处罚", 9),
+    ("政策", 7), ("新规", 7), ("改革", 7), ("利好", 7),
+    ("中标", 7), ("合同", 6), ("定增", 7), ("分红", 6),
+    ("停牌", 8), ("复牌", 7), ("问询函", 8), ("监管函", 8),
+]
+
+
+def _score_weekend_importance(title: str, snippet: str = "") -> int:
+    """Simple keyword-based importance scoring for weekend news."""
+    text = f"{title} {snippet}".lower()
+    score = 3  # base score
+    for keyword, weight in _HIGH_IMPORTANCE_KEYWORDS:
+        if keyword in text:
+            score = max(score, weight)
+    return min(score, 10)
+
+
+def _push_weekend_highlights(config: Config, highlights: list[dict], mode_label: str, is_refresh: bool = False) -> None:
+    """Push high-importance weekend events via notification alert channels.
+
+    When is_refresh=True, queries the DB for already-pushed weekend_intel
+    URLs and skips duplicates to avoid re-pushing the same content.
+    """
+    try:
+        from src.notification import NotificationService
+
+        notifier = NotificationService(config)
+        if not notifier.is_available():
+            return
+
+        # ── 周一补量时，查询已推送记录做去重 ──
+        if is_refresh and highlights:
+            try:
+                from src.storage import get_db, NewsIntel
+                from sqlalchemy import select
+                db = get_db()
+                with db.session_scope() as session:
+                    urls_to_check = [h.get("url", "") for h in highlights if h.get("url")]
+                    if urls_to_check:
+                        stmt = select(NewsIntel.url).where(
+                            NewsIntel.dimension == "weekend_intel",
+                            NewsIntel.url.in_(urls_to_check),
+                        )
+                        existing_urls = {row[0] for row in session.execute(stmt).fetchall()}
+                        before = len(highlights)
+                        highlights = [h for h in highlights if h.get("url", "") not in existing_urls]
+                        skipped = before - len(highlights)
+                        if skipped:
+                            logger.info("周末情报补量: DB 去重跳过 %d 条已推送新闻", skipped)
+            except Exception as e:
+                logger.debug("周末情报补量去重查询失败，按原始列表推送: %s", e)
+
+        # Build mobile-friendly compact digest, grouped by stock
+        lines = [f"📰 周末要闻 | {mode_label}"]
+        import re as _re
+
+        # Group by code: merge summaries per stock
+        grouped: dict[str, dict] = {}
+        for h in sorted(highlights, key=lambda x: -x["importance"]):
+            code = h.get("code", "")
+            title = _re.sub(r"<[^>]+>", "", h.get("title", ""))[:50]
+            sentiment = _score_sentiment(title, h.get("snippet", ""))
+            if code not in grouped:
+                imp = h.get("importance", 0)
+                imp_icon = get_importance_emoji(imp)
+                name = _STOCK_NAME_MAP.get(code, code)
+                grouped[code] = {"icon": imp_icon, "name": name, "items": [], "max_importance": imp}
+            grouped[code]["items"].append(f"{title}-{sentiment}")
+            grouped[code]["max_importance"] = max(grouped[code]["max_importance"], h.get("importance", 0))
+
+        for code, entry in grouped.items():
+            summaries = " | ".join(entry["items"])
+            lines.append(f"{entry['icon']} {entry['name']}({code}) | {summaries}")
+        lines.append(f"📊 {len(highlights)}条 | 完整分析下个交易日推送")
+
+        content = "\n".join(lines)
+        import hashlib
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
+        notifier.send(content, route_type="alert", dedup_key=f"weekend:{content_hash}")
+        logger.info("周末情报: 已推送 %d 条重要事件", len(highlights))
+    except Exception as e:
+        logger.warning("周末情报: 推送失败: %s", e)
+
+
+def _run_daily_intel(config: Config, slot: str = "midday") -> int:
+    """Daily intelligence gathering: search news → score → store → optionally push.
+
+    Only runs at 08:30 preopen once per trading day (midday/evening removed 2026-05-28).
+    days_lookback=2 covers overnight + previous day news.
+    Midday/evening cancelled due to triple push duplication.
+    Daytime news is handled by hourlies (10/11/14/15) which have built-in news search.
+
+    All stored in news_intel with dimension='daily_intel', TTL=24h.
+    """
+    stock_codes = config.stock_list
+    if not stock_codes:
+        logger.warning("每日情报: 自选股列表为空")
+        return 1
+
+    slot_labels = {"midday": "午间", "evening": "晚间", "preopen": "盘前"}
+    label = slot_labels.get(slot, slot)
+    logger.info("每日情报 (%s): 开始搜集", label)
+
+    from src.search_service import EastMoneyNewsProvider
+    news_provider = EastMoneyNewsProvider()
+
+    from src.services.event_monitor import CninfoFetcher
+    ann_fetcher = CninfoFetcher()
+
+    max_results = 3 if slot == "evening" else 2
+    importance_threshold = 6
+    collected: list[dict] = []
+    days_lookback = 2 if slot == "preopen" else 1
+
+    for code in stock_codes:
+        import random as _random, time as _time
+        _time.sleep(1.0 + _random.uniform(0, 0.5))
+
+        try:
+            response = news_provider.search(code, max_results=max_results, days=days_lookback)
+            if response and response.success and response.results:
+                for item in response.results:
+                    importance = _score_weekend_importance(item.title, item.snippet)
+                    collected.append({
+                        "code": code, "title": item.title, "url": item.url,
+                        "snippet": (item.snippet or "")[:200], "importance": importance,
+                        "source": getattr(item, "source", "东方财富"),
+                    })
+                    if importance >= importance_threshold:
+                        logger.info("每日情报 %s [新闻%d]: %s", label, importance, item.title[:60])
+        except Exception as e:
+            logger.debug("每日情报 %s: 新闻抓取失败: %s", code, e)
+
+        try:
+            import asyncio
+            announcements = asyncio.run(ann_fetcher.fetch(code, page_size=2))
+            for ann in announcements:
+                event = CninfoFetcher.parse_announcement(ann, code)
+                if event is None:
+                    continue
+                importance = min(event.importance + 1, 10)
+                collected.append({
+                    "code": code, "title": event.title, "url": event.url or "",
+                    "snippet": event.content[:200], "importance": importance,
+                    "source": "公告",
+                })
+                if importance >= importance_threshold:
+                    logger.info("每日情报 %s [公告%d]: %s", label, importance, event.title[:60])
+        except Exception as e:
+            logger.debug("每日情报 %s: 公告抓取失败: %s", code, e)
+
+    if not collected:
+        logger.info("每日情报 (%s): 未发现相关新闻", label)
+        return 0
+
+    try:
+        from src.storage import get_db, NewsIntel
+        db = get_db()
+        with db.session_scope() as session:
+            stored = 0
+            for item in collected:
+                try:
+                    with session.begin_nested():
+                        record = NewsIntel(
+                            code=item["code"], name=item["title"][:50],
+                            title=item["title"][:300], url=item.get("url", ""),
+                            dimension="daily_intel",
+                            query=f"daily:{slot}",
+                            provider=item.get("source", "search"),
+                            snippet=item["snippet"], source="daily",
+                        )
+                        session.add(record)
+                    stored += 1
+                except Exception:
+                    pass
+            if stored:
+                session.commit()
+                logger.info("每日情报 (%s): 已存储 %d 条", label, stored)
+    except Exception as e:
+        logger.warning("每日情报 (%s): 存储失败: %s", label, e)
+
+    highlights = [i for i in collected if i["importance"] >= importance_threshold]
+    if highlights:
+        _push_daily_highlights(config, highlights, label)
+
+    logger.info("每日情报 (%s) 完成: 共 %d 条, 高重要 %d 条", label, len(collected), len(highlights))
+    return 0
+
+
+def _push_daily_highlights(config: Config, highlights: list[dict], label: str) -> None:
+    """Push high-importance daily events via notification alert channels."""
+    try:
+        from src.notification import NotificationService
+        notifier = NotificationService()
+        if not notifier.is_available():
+            return
+
+        lines = [f"📰 每日要闻 | {label}"]
+        import re as _re
+        grouped: dict[str, dict] = {}
+        for h in sorted(highlights, key=lambda x: -x["importance"]):
+            code = h.get("code", "")
+            title = _re.sub(r"<[^>]+>", "", h.get("title", ""))[:45]
+            sentiment = _score_sentiment(title, h.get("snippet", ""))
+            if code not in grouped:
+                imp = h.get("importance", 0)
+                imp_icon = get_importance_emoji(imp)
+                name = _STOCK_NAME_MAP.get(code, code)
+                grouped[code] = {"icon": imp_icon, "name": name, "items": [], "max_importance": imp}
+            grouped[code]["items"].append(f"{title}-{sentiment}")
+            grouped[code]["max_importance"] = max(grouped[code]["max_importance"], h.get("importance", 0))
+
+        for code, entry in grouped.items():
+            summaries = " | ".join(entry["items"])
+            lines.append(f"{entry['icon']} {entry['name']}({code}) | {summaries}")
+        lines.append(f"📊 {len(highlights)}条 | 下个交易时段分析将自动注入")
+
+        import hashlib
+        content = "\n".join(lines)
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
+        notifier.send(content, route_type="alert", dedup_key=f"daily:{label}:{content_hash}")
+        logger.info("每日情报 (%s): 已推送 %d 条", label, len(highlights))
+    except Exception as e:
+        logger.warning("每日情报 (%s): 推送失败: %s", label, e)
+
+
+_SENTIMENT_BULLISH = {"增持", "回购", "中标", "合同", "利好", "预增", "分红", "重组", "获批", "签约", "突破"}
+_SENTIMENT_BEARISH = {"减持", "预亏", "亏损", "ST", "退市", "立案", "处罚", "问询", "监管", "违规", "暴雷"}
+
+# Stock name mapping for push formatting
+_STOCK_NAME_MAP = {}  # populated from config at runtime
+
+
+def _score_sentiment(title: str, snippet: str = "") -> str:
+    """Simple bullish/bearish sentiment classifier for push labels."""
+    text = f"{title} {snippet}".lower()
+    if any(k in text for k in _SENTIMENT_BEARISH):
+        return "利空"
+    if any(k in text for k in _SENTIMENT_BULLISH):
+        return "利好"
+    return "中性"
+
+
+def _compute_trading_day_filter(
+    config: Config,
+    args: argparse.Namespace,
+    stock_codes: list[str],
+) -> tuple[list[str], str | None, bool]:
+    """
+    Compute filtered stock list and effective market review region (Issue #373).
+
+    Returns:
+        (filtered_codes, effective_region, should_skip_all)
+        - effective_region None = use config default (check disabled)
+        - effective_region '' = all relevant markets closed, skip market review
+        - should_skip_all: skip entire run when no stocks and no market review to run
+    """
+    force_run = getattr(args, "force_run", False)
+    if force_run or not getattr(config, "trading_day_check_enabled", True):
+        return (stock_codes, None, False)
+
+    from src.core.trading_calendar import (
+        compute_effective_region,
+        get_market_for_stock,
+        get_open_markets_today,
+    )
+
+    open_markets = get_open_markets_today()
+    filtered_codes = []
+    for code in stock_codes:
+        mkt = get_market_for_stock(code)
+        if mkt in open_markets or mkt is None:
+            filtered_codes.append(code)
+
+    if config.market_review_enabled and not getattr(args, "no_market_review", False):
+        effective_region = compute_effective_region(getattr(config, "market_review_region", "cn") or "cn", open_markets)
+    else:
+        effective_region = None
+
+    should_skip_all = (not filtered_codes) and (effective_region or "") == ""
+    return (filtered_codes, effective_region, should_skip_all)
+
+
+def _run_market_review_with_shared_lock(
+    config: Config,
+    run_market_review_func: Callable[..., str | None],
+    **kwargs: Any,
+) -> str | None:
+    from src.core.market_review_lock import (
+        release_market_review_lock,
+        try_acquire_market_review_lock,
+    )
+
+    lock_token = try_acquire_market_review_lock(config)
+    if lock_token is None:
+        logger.warning("大盘复盘正在执行中，跳过本次大盘复盘")
+        return None
+
+    try:
+        return run_market_review_func(**kwargs)
+    finally:
+        release_market_review_lock(lock_token)
+
+
+def run_full_analysis(config: Config, args: argparse.Namespace, stock_codes: list[str] | None = None):
+    """
+    执行完整的分析流程（个股 + 大盘复盘）
+
+    这是定时任务调用的主函数
+    """
+    # Import pipeline modules outside the broad try/except so that import-time
+    # failures propagate to the caller instead of being silently swallowed.
+    from src.core.market_review import run_market_review
+    from src.core.pipeline import StockAnalysisPipeline
+
+    try:
+        # Issue #529: Hot-reload STOCK_LIST from .env on each scheduled run
+        if stock_codes is None:
+            config.refresh_stock_list()
+
+        # Issue #373: Trading day filter (per-stock, per-market)
+        effective_codes = stock_codes if stock_codes is not None else config.stock_list
+        filtered_codes, effective_region, should_skip = _compute_trading_day_filter(config, args, effective_codes)
+        if should_skip:
+            logger.info("今日所有相关市场均为非交易日，跳过执行。可使用 --force-run 强制执行。")
+            return
+        if set(filtered_codes) != set(effective_codes):
+            skipped = set(effective_codes) - set(filtered_codes)
+            logger.info("今日休市股票已跳过: %s", skipped)
+        stock_codes = filtered_codes
+
+        # 命令行参数 --single-notify 覆盖配置（#55）
+        if getattr(args, "single_notify", False):
+            config.single_stock_notify = True
+
+        # Issue #190: 个股与大盘复盘合并推送
+        merge_notification = (
+            getattr(config, "merge_email_notification", False)
+            and config.market_review_enabled
+            and not getattr(args, "no_market_review", False)
+            and not config.single_stock_notify
+        )
+
+        # 创建调度器
+        save_context_snapshot = None
+        if getattr(args, "no_context_snapshot", False):
+            save_context_snapshot = False
+        query_id = uuid.uuid4().hex
+        pipeline = StockAnalysisPipeline(
+            config=config,
+            max_workers=args.workers,
+            query_id=query_id,
+            query_source="cli",
+            save_context_snapshot=save_context_snapshot,
+        )
+
+        # 1. 运行个股分析
+        results = pipeline.run(
+            stock_codes=stock_codes,
+            dry_run=args.dry_run,
+            send_notification=not args.no_notify,
+            merge_notification=merge_notification,
+        )
+
+        # Issue #128: 分析间隔 - 在个股分析和大盘分析之间添加延迟
+        analysis_delay = getattr(config, "analysis_delay", 0)
+        if analysis_delay > 0 and config.market_review_enabled and not args.no_market_review and effective_region != "":
+            logger.info(f"等待 {analysis_delay} 秒后执行大盘复盘（避免API限流）...")
+            time.sleep(analysis_delay)
+
+        # 2. 运行大盘复盘（如果启用且不是仅个股模式）
+        market_report = ""
+        if config.market_review_enabled and not args.no_market_review and effective_region != "":
+            review_result = _run_market_review_with_shared_lock(
+                config,
+                run_market_review,
+                notifier=pipeline.notifier,
+                analyzer=pipeline.analyzer,
+                search_service=pipeline.search_service,
+                send_notification=not args.no_notify,
+                merge_notification=merge_notification,
+                override_region=effective_region,
+            )
+            # 如果有结果，赋值给 market_report 用于后续飞书文档生成
+            if review_result:
+                market_report = review_result
+
+        # Issue #190: 合并推送（个股+大盘复盘）
+        if merge_notification and (results or market_report) and not args.no_notify:
+            parts = []
+            if market_report:
+                parts.append(f"# 📈 大盘复盘\n\n{market_report}")
+            if results:
+                dashboard_content = pipeline.notifier.generate_aggregate_report(
+                    results,
+                    getattr(config, "report_type", "simple"),
+                )
+                parts.append(f"# 🚀 个股决策仪表盘\n\n{dashboard_content}")
+            if parts:
+                combined_content = "\n\n---\n\n".join(parts)
+                if pipeline.notifier.is_available():
+                    if pipeline.notifier.send(combined_content, email_send_to_all=True, route_type="report"):
+                        logger.info("已合并推送（个股+大盘复盘）")
+                    else:
+                        logger.warning("合并推送失败")
+
+        # 输出摘要
+        if results:
+            logger.info("\n===== 分析结果摘要 =====")
+            for r in sorted(results, key=lambda x: x.sentiment_score, reverse=True):
+                emoji = r.get_emoji()
+                logger.info(
+                    f"{emoji} {r.name}({r.code}): {r.operation_advice} | "
+                    f"评分 {r.sentiment_score} | {r.trend_prediction}"
+                )
+
+        logger.info("\n任务执行完成")
+
+        # === 新增：生成飞书云文档 ===
+        try:
+            from src.feishu_doc import FeishuDocManager
+
+            feishu_doc = FeishuDocManager()
+            if feishu_doc.is_configured() and (results or market_report):
+                logger.info("正在创建飞书云文档...")
+
+                # 1. 准备标题 "01-01 13:01大盘复盘"
+                tz_cn = timezone(timedelta(hours=8))
+                now = datetime.now(tz_cn)
+                doc_title = f"{now.strftime('%Y-%m-%d %H:%M')} 大盘复盘"
+
+                # 2. 准备内容 (拼接个股分析和大盘复盘)
+                full_content = ""
+
+                # 添加大盘复盘内容（如果有）
+                if market_report:
+                    full_content += f"# 📈 大盘复盘\n\n{market_report}\n\n---\n\n"
+
+                # 添加个股决策仪表盘（使用 NotificationService 生成，按 report_type 分支）
+                if results:
+                    dashboard_content = pipeline.notifier.generate_aggregate_report(
+                        results,
+                        getattr(config, "report_type", "simple"),
+                    )
+                    full_content += f"# 🚀 个股决策仪表盘\n\n{dashboard_content}"
+
+                # 3. 创建文档
+                doc_url = feishu_doc.create_daily_doc(doc_title, full_content)
+                if doc_url:
+                    logger.info(f"飞书云文档创建成功: {doc_url}")
+                    # 可选：将文档链接也推送到群里
+                    if not args.no_notify:
+                        pipeline.notifier.send(
+                            f"[{now.strftime('%Y-%m-%d %H:%M')}] 复盘文档创建成功: {doc_url}",
+                            route_type="report",
+                        )
+
+        except Exception as e:
+            logger.error(f"飞书文档生成失败: {e}")
+
+        # === Auto backtest ===
+        try:
+            if getattr(config, "backtest_enabled", False):
+                from src.services.backtest_service import BacktestService
+
+                service = BacktestService()
+                for eval_window in [5, 10, 20]:
+                    logger.info("开始自动回测 (eval_window=%d)...", eval_window)
+                    stats = service.run_backtest(
+                        force=False,
+                        eval_window_days=eval_window,
+                        min_age_days=getattr(config, "backtest_min_age_days", 14),
+                        limit=200,
+                    )
+                    logger.info(
+                        f"自动回测完成 (eval_window={eval_window}): processed={stats.get('processed')} saved={stats.get('saved')} "
+                        f"completed={stats.get('completed')} insufficient={stats.get('insufficient')} errors={stats.get('errors')}"
+                    )
+
+                    # Auto-generate backtest report after automatic backtest
+                    if getattr(config, "backtest_report_enabled", True):
+                        try:
+                            from src.core.backtest_report import BacktestReportGenerator
+
+                            gen = BacktestReportGenerator()
+                            summary = service.get_summary(
+                                scope="overall",
+                                code=None,
+                                eval_window_days=eval_window,
+                            )
+                            if summary:
+                                gen.generate(summary, strategy_name=f"Auto Backtest ({eval_window}d)")
+                                logger.info(f"自动回测报告已生成 (eval_window={eval_window})")
+                        except Exception as rpt_exc:
+                            logger.warning("自动生成回测报告失败（已忽略）: %s", rpt_exc)
+        except Exception as e:
+            logger.warning(f"自动回测失败（已忽略）: {e}")
+
+    except Exception as e:
+        logger.exception(f"分析流程执行失败: {e}")
+
+
+def start_api_server(host: str, port: int, config: Config) -> None:
+    """
+    在后台线程启动 FastAPI 服务
+
+    Args:
+        host: 监听地址
+        port: 监听端口
+        config: 配置对象
+    """
+    import threading
+
+    import uvicorn
+
+    def run_server():
+        level_name = (config.log_level or "INFO").lower()
+        uvicorn.run(
+            "api.app:app",
+            host=host,
+            port=port,
+            log_level=level_name,
+            log_config=None,
+        )
+
+    thread = threading.Thread(target=run_server, daemon=True)
+    thread.start()
+    logger.info(f"FastAPI 服务已启动: http://{host}:{port}")
+
+
+def _is_truthy_env(var_name: str, default: str = "true") -> bool:
+    """Parse common truthy / falsy environment values."""
+    value = os.getenv(var_name, default).strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def start_bot_stream_clients(config: Config) -> None:
+    """Start bot stream clients when enabled in config."""
+    # 启动钉钉 Stream 客户端
+    if config.dingtalk_stream_enabled:
+        try:
+            from bot.platforms import DINGTALK_STREAM_AVAILABLE, start_dingtalk_stream_background
+
+            if DINGTALK_STREAM_AVAILABLE:
+                if start_dingtalk_stream_background():
+                    logger.info("[Main] Dingtalk Stream client started in background.")
+                else:
+                    logger.warning("[Main] Dingtalk Stream client failed to start.")
+            else:
+                logger.warning("[Main] Dingtalk Stream enabled but SDK is missing.")
+                logger.warning("[Main] Run: pip install dingtalk-stream")
+        except Exception as exc:
+            logger.error(f"[Main] Failed to start Dingtalk Stream client: {exc}")
+
+    # 启动飞书 Stream 客户端
+    if getattr(config, "feishu_stream_enabled", False):
+        try:
+            from bot.platforms import FEISHU_SDK_AVAILABLE, start_feishu_stream_background
+
+            if FEISHU_SDK_AVAILABLE:
+                if start_feishu_stream_background():
+                    logger.info("[Main] Feishu Stream client started in background.")
+                else:
+                    logger.warning("[Main] Feishu Stream client failed to start.")
+            else:
+                logger.warning("[Main] Feishu Stream enabled but SDK is missing.")
+                logger.warning("[Main] Run: pip install lark-oapi")
+        except Exception as exc:
+            logger.error(f"[Main] Failed to start Feishu Stream client: {exc}")
+
+
+def _resolve_scheduled_stock_codes(stock_codes: list[str] | None) -> list[str] | None:
+    """Scheduled runs should always read the latest persisted watchlist."""
+    if stock_codes is not None:
+        logger.warning(
+            "定时模式下检测到 --stocks 参数；计划执行将忽略启动时股票快照，并在每次运行前重新读取最新的 STOCK_LIST。"
+        )
+    return None
+
+
+def _reload_runtime_config() -> Config:
+    """Reload config from the latest persisted `.env` values for scheduled runs."""
+    _reload_env_file_values_preserving_overrides()
+    Config.reset_instance()
+    return get_config()
+
+
+def _build_schedule_time_provider(default_schedule_time: str):
+    """Read the latest schedule time directly from the active config file.
+
+    Fallback order:
+    1. Process-level env override (set before launch) → honour it.
+    2. Persisted config file value (written by WebUI) → use it.
+    3. Documented system default ``"18:00"`` → always fall back here so
+       that clearing SCHEDULE_TIME in WebUI correctly resets the schedule.
+    """
+    from src.core.config_manager import ConfigManager
+
+    _SYSTEM_DEFAULT_SCHEDULE_TIME = "18:00"
+    manager = ConfigManager()
+
+    def _provider() -> str:
+        if "SCHEDULE_TIME" in _INITIAL_PROCESS_ENV:
+            return os.getenv("SCHEDULE_TIME", default_schedule_time)
+
+        config_map = manager.read_config_map()
+        schedule_time = (config_map.get("SCHEDULE_TIME", "") or "").strip()
+        if schedule_time:
+            return schedule_time
+        return _SYSTEM_DEFAULT_SCHEDULE_TIME
+
+    return _provider
+
+
+def main() -> int:
+    """
+    主入口函数
+
+    Returns:
+        退出码（0 表示成功）
+    """
+    # 解析命令行参数
+    args = parse_arguments()
+
+    # 在配置加载前先初始化 bootstrap 日志，确保早期失败也能落盘
+    try:
+        _setup_bootstrap_logging(debug=args.debug)
+    except Exception as exc:
+        logging.basicConfig(
+            level=logging.DEBUG if getattr(args, "debug", False) else logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            stream=sys.stderr,
+        )
+        logger.warning("Bootstrap 日志初始化失败，已回退到 stderr: %s", exc)
+
+    # 加载配置（在 bootstrap logging 之后执行，确保异常有日志）
+    try:
+        config = get_config()
+    except Exception as exc:
+        logger.exception("加载配置失败: %s", exc)
+        return 1
+
+    # 配置日志（输出到控制台和文件）
+    try:
+        _setup_runtime_logging(config.log_dir, debug=args.debug)
+    except Exception as exc:
+        logger.exception("切换到配置日志目录失败: %s", exc)
+        return 1
+
+    logger.info("=" * 60)
+    logger.info("A股自选股智能分析系统 启动")
+    logger.info(f"运行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
+
+    # 验证配置
+    warnings = config.validate()
+    for warning in warnings:
+        logger.warning(warning)
+
+    if getattr(args, "check_notify", False):
+        from src.services.notification_diagnostics import (
+            format_notification_diagnostics,
+            run_notification_diagnostics,
+        )
+
+        result = run_notification_diagnostics(config)
+        print(format_notification_diagnostics(result))
+        return 0 if result.ok else 1
+
+    # 解析股票列表（统一为大写 Issue #355）
+    stock_codes = None
+    if args.stocks:
+        stock_codes = [canonical_stock_code(c) for c in args.stocks.split(",") if (c or "").strip()]
+        logger.info(f"使用命令行指定的股票列表: {stock_codes}")
+
+    # === 处理 --webui / --webui-only 参数，映射到 --serve / --serve-only ===
+    if args.webui:
+        args.serve = True
+    if args.webui_only:
+        args.serve_only = True
+
+    # 兼容旧版 WEBUI_ENABLED 环境变量
+    if config.webui_enabled and not (args.serve or args.serve_only):
+        args.serve = True
+
+    # === 启动 Web 服务 (如果启用) ===
+    start_serve = (args.serve or args.serve_only) and os.getenv("GITHUB_ACTIONS") != "true"
+
+    # 兼容旧版 WEBUI_HOST/WEBUI_PORT：如果用户未通过 --host/--port 指定，则使用旧变量
+    if start_serve:
+        if args.host == "0.0.0.0" and os.getenv("WEBUI_HOST"):
+            args.host = os.getenv("WEBUI_HOST")
+        if args.port == 8000 and os.getenv("WEBUI_PORT"):
+            args.port = int(os.getenv("WEBUI_PORT"))
+
+    bot_clients_started = False
+    if start_serve:
+        if not prepare_webui_frontend_assets():
+            logger.warning("前端静态资源未就绪，继续启动 FastAPI 服务（Web 页面可能不可用）")
+        try:
+            start_api_server(host=args.host, port=args.port, config=config)
+            bot_clients_started = True
+        except Exception as e:
+            logger.error(f"启动 FastAPI 服务失败: {e}")
+
+    if bot_clients_started:
+        start_bot_stream_clients(config)
+
+    # === 仅 Web 服务模式：不自动执行分析 ===
+    if args.serve_only:
+        logger.info("模式: 仅 Web 服务")
+        logger.info(f"Web 服务运行中: http://{args.host}:{args.port}")
+        logger.info("通过 /api/v1/analysis/analyze 接口触发分析")
+        logger.info(f"API 文档: http://{args.host}:{args.port}/docs")
+        logger.info("按 Ctrl+C 退出...")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("\n用户中断，程序退出")
+        return 0
+
+    try:
+        # 模式0: 回测
+        if getattr(args, "backtest", False):
+            logger.info("模式: 回测")
+            from src.services.backtest_service import BacktestService
+
+            service = BacktestService()
+            stats = service.run_backtest(
+                code=getattr(args, "backtest_code", None),
+                force=getattr(args, "backtest_force", False),
+                eval_window_days=getattr(args, "backtest_days", None),
+            )
+            logger.info(
+                f"回测完成: processed={stats.get('processed')} saved={stats.get('saved')} "
+                f"completed={stats.get('completed')} insufficient={stats.get('insufficient')} errors={stats.get('errors')}"
+            )
+
+            # Auto-generate backtest report
+            if getattr(config, "backtest_report_enabled", True):
+                try:
+                    from src.core.backtest_report import BacktestReportGenerator
+
+                    gen = BacktestReportGenerator()
+                    summary = service.get_summary(
+                        scope="overall",
+                        code=None,
+                        eval_window_days=getattr(args, "backtest_days", None),
+                    )
+                    if summary:
+                        gen.generate(summary, strategy_name="Overall Backtest")
+                        logger.info("回测报告已生成")
+                    else:
+                        logger.warning("回测概要为空，跳过报告生成")
+                except Exception as exc:
+                    logger.warning("生成回测报告失败（已忽略）: %s", exc)
+
+            return 0
+
+        # 模式0b: 直接生成回测报告（不重新回测）
+        if getattr(args, "backtest_report", False):
+            logger.info("模式: 回测报告生成")
+            from src.services.backtest_service import BacktestService
+
+            service = BacktestService()
+            try:
+                from src.core.backtest_report import BacktestReportGenerator
+
+                gen = BacktestReportGenerator()
+                summary = service.get_summary(
+                    scope="overall",
+                    code=getattr(args, "backtest_code", None) or None,
+                    eval_window_days=getattr(args, "backtest_days", None),
+                )
+                if summary:
+                    stock_code = getattr(args, "backtest_code", None) or None
+                    gen.generate(
+                        summary,
+                        strategy_name=f"Stock {stock_code}" if stock_code else "Overall Backtest",
+                        stock_code=stock_code,
+                    )
+                    logger.info("回测报告已生成")
+                else:
+                    logger.warning("回测概要为空，跳过报告生成")
+            except Exception as exc:
+                logger.exception("生成回测报告失败: %s", exc)
+                return 1
+            return 0
+
+        # 模式0c: 盘中实时监控
+        realtime_monitor_flag = getattr(args, "realtime_monitor", False) or getattr(
+            config, "realtime_monitor_enabled", False
+        )
+        realtime_monitor_daemon_flag = getattr(args, "realtime_monitor_daemon", False) or getattr(
+            config, "realtime_monitor_daemon_enabled", False
+        )
+
+        if realtime_monitor_flag or realtime_monitor_daemon_flag:
+            mode_label = "盘中实时监控守护进程" if realtime_monitor_daemon_flag else "盘中实时监控"
+            logger.info("模式: %s", mode_label)
+            stock_codes = None
+            if args.stocks:
+                stock_codes = [canonical_stock_code(c) for c in args.stocks.split(",") if (c or "").strip()]
+            from src.services.realtime_monitor import run_realtime_monitor
+
+            run_realtime_monitor(
+                stock_codes=stock_codes,
+                config=config,
+                daemon_mode=realtime_monitor_daemon_flag,
+            )
+            return 0
+
+        # 模式0d: 事件驱动分析服务
+        event_monitor_flag = getattr(args, "event_monitor", False) or getattr(config, "event_monitor_enabled", False)
+        event_monitor_daemon_flag = getattr(args, "event_monitor_daemon", False)
+
+        if event_monitor_flag or event_monitor_daemon_flag:
+            mode_label = "事件驱动分析守护进程" if event_monitor_daemon_flag else "事件驱动分析"
+            logger.info("模式: %s", mode_label)
+
+            # 确定监控的股票列表
+            event_codes = getattr(config, "event_monitor_stock_codes", [])
+            if not event_codes:
+                event_codes = stock_codes or config.stock_list
+            if args.stocks:
+                event_codes = [canonical_stock_code(c) for c in args.stocks.split(",") if (c or "").strip()]
+
+            if not event_codes:
+                logger.warning("事件驱动分析: 未配置监控股票，使用默认股票列表")
+                event_codes = config.stock_list
+
+            import asyncio
+            from src.services.event_monitor import run_event_monitor_cli
+
+            asyncio.run(
+                run_event_monitor_cli(
+                    stock_codes=event_codes,
+                    config=config,
+                    daemon=event_monitor_daemon_flag or event_monitor_flag,
+                )
+            )
+            return 0
+
+        # 模式1: 仅大盘复盘
+        if args.market_review:
+            from src.core.market_review import run_market_review
+            from src.core.market_review_runtime import build_market_review_runtime
+
+            # Issue #373: Trading day check for market-review-only mode.
+            # Do NOT use _compute_trading_day_filter here: that helper checks
+            # config.market_review_enabled, which would wrongly block an
+            # explicit --market-review invocation when the flag is disabled.
+            effective_region = None
+            if not getattr(args, "force_run", False) and getattr(config, "trading_day_check_enabled", True):
+                from src.core.trading_calendar import compute_effective_region as _compute_region
+                from src.core.trading_calendar import get_open_markets_today
+
+                open_markets = get_open_markets_today()
+                effective_region = _compute_region(getattr(config, "market_review_region", "cn") or "cn", open_markets)
+                if effective_region == "":
+                    logger.info("今日大盘复盘相关市场均为非交易日，跳过执行。可使用 --force-run 强制执行。")
+                    return 0
+
+            logger.info("模式: 仅大盘复盘")
+            notifier, analyzer, search_service = build_market_review_runtime(config)
+
+            _run_market_review_with_shared_lock(
+                config,
+                run_market_review,
+                notifier=notifier,
+                analyzer=analyzer,
+                search_service=search_service,
+                send_notification=not args.no_notify,
+                override_region=effective_region,
+            )
+            return 0
+
+        # 模式: 周末情报搜集
+        if getattr(args, "weekend_intel", False) or getattr(args, "weekend_refresh", False):
+            return _run_weekend_intel(config, is_refresh=getattr(args, "weekend_refresh", False),
+                                      no_push=getattr(args, "weekend_intel_no_push", False))
+
+        # 模式: 每日情报（修复死代码：argparse 已定义但 main() 未分发）
+        if getattr(args, "daily_intel", False):
+            slot = getattr(args, "daily_intel_slot", "midday") or "midday"
+            return _run_daily_intel(config, slot)
+
+        # 模式2: 定时任务模式
+        explicit_single_run = (
+            args.force_run or args.stocks is not None or args.dry_run or args.backtest or args.backtest_report
+        )
+        if (args.schedule or config.schedule_enabled) and not explicit_single_run:
+            logger.info("模式: 定时任务")
+            logger.info(f"每日执行时间: {config.schedule_time}")
+
+            # Determine whether to run immediately:
+            # Command line arg --no-run-immediately overrides config if present.
+            # Otherwise use config (defaults to True).
+            should_run_immediately = False
+            logger.info("已禁用启动时立即执行")
+
+            from src.scheduler import run_with_schedule
+
+            scheduled_stock_codes = _resolve_scheduled_stock_codes(stock_codes)
+            schedule_time_provider = _build_schedule_time_provider(config.schedule_time)
+
+            def scheduled_task():
+                pass  # 主任务已废弃，全量分析由整点任务 10/11/14/15 负责
+
+            background_tasks = []
+            if getattr(config, "agent_event_monitor_enabled", False):
+                from src.services.event_monitor import (
+                    ThresholdEventMonitor,
+                    parse_threshold_alert_rules,
+                    TriggeredThresholdAlert,
+                )
+
+                interval_minutes = max(1, getattr(config, "agent_event_monitor_interval_minutes", 5))
+                raw_rules = getattr(config, "agent_event_alert_rules_json", "")
+                threshold_rules = parse_threshold_alert_rules(raw_rules)
+
+                if threshold_rules:
+                    threshold_monitor = ThresholdEventMonitor.from_dict_list(threshold_rules)
+                    from src.notification import NotificationBuilder, NotificationService
+
+                    notification_service = NotificationService()
+
+                    def _notify(triggered: TriggeredThresholdAlert) -> None:
+                        title = f"Event Alert | {triggered.rule.stock_code}"
+                        content = triggered.message or triggered.rule.description or "Alert triggered"
+                        alert_text = NotificationBuilder.build_simple_alert(
+                            title=title, content=content, alert_type="warning"
+                        )
+                        sent = notification_service.send(alert_text, route_type="alert")
+                        if not sent:
+                            logger.info("[ThresholdMonitor] No channel available for: %s", title)
+
+                    threshold_monitor.on_trigger(_notify)
+
+                    def threshold_monitor_task():
+                        import asyncio
+                        triggered = asyncio.run(threshold_monitor.check_all())
+                        if triggered:
+                            logger.info("[ThresholdMonitor] 本轮触发 %d 条提醒", len(triggered))
+
+                    background_tasks.append({
+                        "task": threshold_monitor_task,
+                        "interval_seconds": interval_minutes * 60,
+                        "run_immediately": True,
+                        "name": "threshold_event_monitor",
+                    })
+
+            # DB maintenance: weekly TTL purge + VACUUM
+            def db_maintenance_task():
+                try:
+                    from scripts.db_maintenance import main as db_maint
+                    db_maint()
+                except Exception as e:
+                    logger.warning("DB maintenance failed: %s", e)
+
+            background_tasks.append({
+                "task": db_maintenance_task,
+                "interval_seconds": 7 * 24 * 3600,  # weekly
+                "run_immediately": False,
+                "name": "db_maintenance",
+            })
+
+            # ── 原生定时推送任务（大盘复盘 + 每日/周末情报）──
+
+            additional_daily_tasks = []
+            additional_weekly_tasks = []
+
+            # 大盘复盘 11:45/15:45
+            def _sched_market_review():
+                try:
+                    from src.core.market_review import run_market_review
+                    from src.core.market_review_runtime import build_market_review_runtime
+                    _cfg = _reload_runtime_config()
+                    notifier, analyzer, search_service = build_market_review_runtime(_cfg)
+                    _run_market_review_with_shared_lock(
+                        _cfg, run_market_review,
+                        notifier=notifier, analyzer=analyzer, search_service=search_service,
+                        send_notification=True,
+                    )
+                except Exception as e:
+                    logger.exception("大盘复盘执行失败: %s", e)
+
+            for t in ("11:45", "15:45"):
+                additional_daily_tasks.append({
+                    "task": _sched_market_review, "time": t, "name": f"大盘复盘@{t}",
+                })
+
+            # 整点全量分析 10:00/11:00/14:00/15:00（交易时段每小时一次）
+            for t in ("10:00", "11:00", "14:00", "15:00"):
+                def _make_整点_analysis(time_slot: str = t):
+                    def _run():
+                        try:
+                            _cfg = _reload_runtime_config()
+                            _cfg.market_review_enabled = False
+                            run_full_analysis(_cfg, args, scheduled_stock_codes)
+                        except Exception as e:
+                            logger.exception("整点分析@%s 执行失败: %s", time_slot, e)
+                    return _run
+                additional_daily_tasks.append({
+                    "task": _make_整点_analysis(), "time": t, "name": f"整点分析@{t}",
+                })
+
+            # 日间情报（仅盘前一次，取消午间/晚间避免重复推送）
+            def _sched_daily_intel_preopen():
+                try:
+                    _cfg = _reload_runtime_config()
+                    _run_daily_intel(_cfg, "preopen")
+                except Exception as e:
+                    logger.exception("日间情报(盘前)执行失败: %s", e)
+
+            additional_daily_tasks.append({
+                "task": _sched_daily_intel_preopen, "time": "08:30", "name": "日间情报(盘前)",
+            })
+
+            # 周末情报 周日 20:00
+            def _sched_weekend_intel():
+                try:
+                    _cfg = _reload_runtime_config()
+                    _run_weekend_intel(_cfg, is_refresh=False, no_push=False)
+                except Exception as e:
+                    logger.exception("周末情报执行失败: %s", e)
+
+            additional_weekly_tasks.append({
+                "task": _sched_weekend_intel, "time": "20:00", "day": "sunday", "name": "周末情报",
+            })
+
+            # 周末情报补量 周一 07:30
+            def _sched_weekend_refresh():
+                try:
+                    _cfg = _reload_runtime_config()
+                    _run_weekend_intel(_cfg, is_refresh=True, no_push=False)
+                except Exception as e:
+                    logger.exception("周末情报补量执行失败: %s", e)
+
+            additional_weekly_tasks.append({
+                "task": _sched_weekend_refresh, "time": "07:30", "day": "monday", "name": "周末情报补量",
+            })
+
+            run_with_schedule(
+                task=scheduled_task,
+                schedule_time=config.schedule_time,
+                run_immediately=should_run_immediately,
+                background_tasks=background_tasks,
+                schedule_time_provider=schedule_time_provider,
+                additional_daily_tasks=additional_daily_tasks,
+                additional_weekly_tasks=additional_weekly_tasks,
+            )
+            return 0
+
+        # 模式3: 正常单次运行
+        if config.run_immediately:
+            run_full_analysis(config, args, stock_codes)
+        else:
+            logger.info("配置为不立即运行分析 (RUN_IMMEDIATELY=false)")
+
+        logger.info("\n程序执行完成")
+
+        # 如果启用了服务且是非定时任务模式，保持程序运行
+        keep_running = start_serve and not (args.schedule or config.schedule_enabled)
+        if keep_running:
+            logger.info("API 服务运行中 (按 Ctrl+C 退出)...")
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                pass
+
+        return 0
+
+    except KeyboardInterrupt:
+        logger.info("\n用户中断，程序退出")
+        return 130
+
+    except Exception as e:
+        logger.exception(f"程序执行失败: {e}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

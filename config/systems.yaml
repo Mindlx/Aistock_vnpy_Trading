@@ -1,0 +1,18 @@
+# 三系统路径配置
+# 融合系统全量拷贝了三个独立系统到 systems/ 目录下
+# 原始 GitHub 仓库作为上游 Source of Truth
+
+lynx_vnpy:
+  root: "systems/lynx_vnpy"
+  models: "systems/lynx_vnpy/models"
+  reports: "systems/lynx_vnpy/data/output"    # lynx 输出（暂未启用文件输出）
+
+MindLynx_Aistock:
+  root: "systems/MindLynx-Aistock"
+  reports: "systems/MindLynx-Aistock/reports"
+  db: "systems/MindLynx-Aistock/data/stock_analysis.db"
+
+mind_TradingAgent:
+  root: "systems/mind_TradingAgent"
+  logs: "~/.mind_tradingagent/logs"
+  config: "systems/mind_TradingAgent/.env"

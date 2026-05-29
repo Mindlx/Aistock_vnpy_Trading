@@ -1,0 +1,21 @@
+schema: spec-driven
+context: |
+  MindLynx-Aistock: AI-driven personal investment research assistant.
+  Supports A-shares (CN), Hong Kong (HK), and US stocks.
+
+  Core domains:
+  - config: env-var driven monolithic Config singleton (2804 lines)
+  - data-provider: 17 fetchers with priority/failover chain
+  - pipeline: StockAnalysisPipeline orchestrating data→analyze→notify
+  - agent-llm: Multi-agent orchestration (single→multi arch), LiteLLM wrapper
+  - notification: 13+ channels with noise control and routing
+  - factor-engine: 12-factor IC/IR weighted scoring (1658-sample calibrated)
+  - strategies: 15 YAML-defined trading strategies (skills)
+  - backtest: Walk-forward with Sharpe/Calmar/Sortino, trade cost model
+  - monitoring: Real-time WebSocket + ATR + volume anomaly detection
+  - event-monitor: 14-type corporate event detection with auto-reanalysis
+
+  All config is env-var driven. Python 3.10+. Strategy files are YAML.
+  Market code conventions: A-share (600519), HK (hk00700), US (AAPL).
+  Pipeline lazy-loaded via __getattr__ — never import at module level.
+  setup_env() called at main.py module level before any other imports.
