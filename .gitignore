@@ -25,6 +25,9 @@ data/lynx/
 data/mindlynx/
 data/tradingagent/
 
+# System runtime data (not tracked)
+systems/MindLynx-Aistock/data/
+
 # mind_TradingAgent runtime (user home)
 .mind_tradingagent/
 
