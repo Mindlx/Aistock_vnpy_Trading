@@ -1,8 +1,7 @@
 """
-企业微信推送模块
+企业微信推送模块 — v3.0 7 级信号格式
 
-发送融合决策结果到企业微信群机器人。
-
+按信号强度分组展示，每只股票附带仓位建议。
 ⚠️ 仅供学习和研究目的，不构成任何投资建议
 """
 from __future__ import annotations
@@ -14,8 +13,30 @@ from typing import Any, Dict, List, Optional
 import requests
 
 
+# L7 信号 → 图标/颜色映射（7 级）
+L7_EMOJI = {
+    "strong_bullish": "🟢",
+    "bullish": "🟢",
+    "cautious_bullish": "🟡",
+    "neutral": "⚪",
+    "cautious_bearish": "🟠",
+    "bearish": "🔴",
+    "strong_bearish": "🔴",
+}
+
+L7_LABEL_CN = {
+    "strong_bullish": "强烈看多",
+    "bullish": "看多",
+    "cautious_bullish": "谨慎看多",
+    "neutral": "中性/持有",
+    "cautious_bearish": "谨慎看空",
+    "bearish": "看空",
+    "strong_bearish": "强烈看空",
+}
+
+
 class WeComNotifier:
-    """企业微信群机器人消息推送"""
+    """企业微信群机器人消息推送 — v3.0"""
 
     def __init__(self, webhook_url: str, enabled: bool = True):
         self.webhook_url = webhook_url
@@ -53,124 +74,119 @@ class WeComNotifier:
 
     @staticmethod
     def _tz_cn_now() -> datetime:
-        """获取北京时间"""
         return datetime.now(timezone(timedelta(hours=8)))
 
     @staticmethod
-    def _score_emoji(score: float) -> str:
-        """融合分 → 图标"""
-        if score > 0.50: return "🟢"
-        if score > 0.20: return "🟡"
-        if score > -0.10: return "⚪"
-        if score > -0.50: return "🟠"
-        return "🔴"
-
-    @staticmethod
-    def _format_per_system(r) -> str:
-        """单只股票的三系统得分摘要"""
+    def _system_line(r) -> str:
+        """三系统得分摘要（紧凑格式）"""
         parts = []
-        if r.get("lynx_valid"):
-            lynx_em = "🟢" if r.get("lynx_score", 0) > 0 else "🔴"
-            parts.append(f"lynx{lynx_em}{r['lynx_score']:.2f}")
-        parts.append(f"mind{r['mindlynx_score']:.2f}")
-        parts.append(f"ta{r['tradingagent_score']:.2f}")
-        stale = " ⏳过期" if r.get("ta_is_stale") else ""
+        ls = r.get("lynx_score", 0)
+        ms = r.get("mindlynx_score", 0)
+        ts = r.get("tradingagent_score", 0)
+        parts.append(f"ly{'🟢' if ls > 0 else '🔴'}{ls:+.2f}")
+        parts.append(f"ml{'🟢' if ms > 0 else '🔴'}{ms:+.2f}")
+        parts.append(f"at{'🟢' if ts > 0 else '🔴'}{ts:+.2f}")
+        stale = " ⏳" if r.get("ta_is_stale") else ""
         return " ".join(parts) + stale
 
     def format_daily_summary(self, results: List[Dict[str, Any]], date: str) -> str:
         """
-        格式化每日融合结果摘要（Markdown 格式）
+        格式化每日融合结果摘要。
 
-        按分歧/共识优先展示，突出融合系统的核心价值。
+        按信号强度分组展示，清晰标注操作建议。
         """
-        valid_results = [r for r in results if r.get("valid", False)]
+        valid = [r for r in results if r.get("valid", False)]
         invalid = [r for r in results if not r.get("valid", False)]
 
-        total = len(valid_results)
-        disagreements = [r for r in valid_results if r.get("has_disagreement")]
-        degraded = [r for r in valid_results if r.get("is_degraded")]
-        stale_ta = [r for r in valid_results if r.get("ta_is_stale")]
+        # 统计
+        disagree = [r for r in valid if r.get("has_disagreement")]
+        degraded = [r for r in valid if r.get("is_degraded")]
+        stale_ta = [r for r in valid if r.get("ta_is_stale")]
 
-        # 按融合分降序排列
-        valid_results.sort(key=lambda r: r.get("fusion_score", 0), reverse=True)
-
-        # 标题
         lines = [
-            f"## 🔗 三系统融合信号 | {date}",
-            f"> 有效{total}只 | "
-            f"分歧{len(disagreements)} | "
-            f"降级{len(degraded)} | "
-            f"过期TA{len(stale_ta)}",
+            f"## 📊 三系统融合决策 | {date}",
+            f"> 有效{len(valid)}只 | "
+            f"分歧{len(disagree)} | "
+            f"数据降级{len(degraded)}{' | TA⏳' + str(len(stale_ta)) if stale_ta else ''}",
             "",
         ]
 
-        # ── 第一部分：系统分歧（最高价值信号）──
-        if disagreements:
-            lines.append("### ⚡ 系统分歧 — 需重点关注")
-            for r in disagreements:
-                emoji = self._score_emoji(r["fusion_score"])
-                cap = " ⚡仓位受限" if r.get("disagreement_capped") else ""
+        # ── 1. 系统分歧（最高优先级） ──
+        if disagree:
+            lines.append("### ⚡ 系统分歧 — 注意仓位控制")
+            for r in disagree:
+                sig = r.get("signal", "neutral")
+                emoji = L7_EMOJI.get(sig, "⚪")
+                pos = r.get("position_advice", "0成")
+                cap = " ⚠分歧仓位上限1成" if r.get("disagreement_capped") else ""
                 lines.append(
                     f"{emoji} **{r.get('stock_name', '')}({r['stock_code']})** "
-                    f"融合{r['fusion_score']:.2f} {self._format_per_system(r)}"
-                    f"{cap}"
+                    f"→ {r.get('signal_name', '中性')} | 仓位:{pos}{cap}"
                 )
+                lines.append(f"   └ {self._system_line(r)}")
             lines.append("")
 
-        # ── 第二部分：三系统共识（高置信度信号）──
-        consensuses = [r for r in valid_results if not r.get("has_disagreement")]
+        # ── 2. 按信号强度分组 ──
+        # 无分歧的股票
+        consensuses = [r for r in valid if not r.get("has_disagreement")]
 
-        # 只看多共识（所有系统同向且偏多）
-        bullish_consensus = [
-            r for r in consensuses
-            if r.get("fusion_score", 0) > 0.20
+        # 定义信号分组顺序（从强到弱）
+        signal_groups = [
+            ("🟢 **强烈看多** — 可重点参与，仓位2-3成", "strong_bullish"),
+            ("🟢 **看多** — 可参与，仓位1-2成", "bullish"),
+            ("🟡 **谨慎看多** — 轻仓试探，仓位0.5-1成", "cautious_bullish"),
+            ("⚪ **中性/持有** — 观望或维持现有仓位", "neutral"),
+            ("🟠 **谨慎看空** — 减仓观察，仓位减至0.5成以内", "cautious_bearish"),
+            ("🔴 **看空** — 大幅减仓", "bearish"),
+            ("🔴 **强烈看空** — 清仓离场", "strong_bearish"),
         ]
-        if bullish_consensus:
-            lines.append("### ✅ 三系统共识 — 高置信度")
-            for r in bullish_consensus:
+
+        grouped = {sig: [] for _, sig in signal_groups}
+        for r in consensuses:
+            sig = r.get("signal", "neutral")
+            if sig in grouped:
+                grouped[sig].append(r)
+            else:
+                grouped["neutral"].append(r)
+
+        has_any_group = False
+        for title, sig_key in signal_groups:
+            stocks = grouped[sig_key]
+            if not stocks:
+                continue
+            has_any_group = True
+            lines.append(f"### {title}")
+            for r in stocks:
+                deg = " ⚠降级" if r.get("is_degraded") else ""
                 lines.append(
-                    f"🟢 **{r.get('stock_name', '')}({r['stock_code']})** "
-                    f"融合{r['fusion_score']:.2f} | {r['signal_name']} | {r['position_advice']}"
+                    f"- **{r.get('stock_name', '')}({r['stock_code']})** "
+                    f"融合{r.get('fusion_score', 0):+.2f}{deg}"
                 )
-                lines.append(f"   └ {self._format_per_system(r)}")
+                lines.append(f"  {self._system_line(r)}")
             lines.append("")
 
-        # ── 第三部分：其余股票简表 ──
-        remaining = [r for r in consensuses if r not in bullish_consensus]
-        if remaining:
-            lines.append("### 📋 其余信号")
-            for r in remaining:
-                emoji = self._score_emoji(r["fusion_score"])
-                stale_mark = " ⏳" if r.get("ta_is_stale") else ""
-                deg_mark = " ⚠降级" if r.get("is_degraded") else ""
-                lines.append(
-                    f"{emoji} **{r.get('stock_name', '')}({r['stock_code']})** "
-                    f"融合{r['fusion_score']:.2f} {self._format_per_system(r)}"
-                    f"{stale_mark}{deg_mark}"
-                )
+        if not has_any_group:
+            lines.append("_无有效信号_")
             lines.append("")
 
-        # ── 第四部分：无信号股票 ──
+        # ── 3. 无信号股票 ──
         if invalid:
             lines.append("### ⚠️ 无信号")
             for r in invalid:
                 lines.append(f"- {r['stock_code']}: {r.get('message', '')}")
             lines.append("")
 
-        # ── 底部建议 ──
+        # ── 底部说明 ──
         lines.append("---")
-        advice_parts = []
-        if disagreements:
-            advice_parts.append("分歧标的注意仓位控制")
+        notes = []
         if stale_ta:
-            advice_parts.append("TradingAgent 数据为昨日结果")
-        if bullish_consensus:
-            advice_parts.append(f"重点关注共识标的 {', '.join(r['stock_code'] for r in bullish_consensus[:3])}")
-        if advice_parts:
-            lines.append(f"**建议**: {' | '.join(advice_parts)}")
-        lines.append(
-            "> ⚠️ 本报告仅供学习参考，不构成投资建议。市场有风险，投资需谨慎。"
-        )
+            notes.append("⏳ TA数据为昨日结果（TA定时器16:00运行）")
+        if degraded:
+            notes.append("⚠ 部分系统数据缺失，结果仅供参考")
+        if notes:
+            lines.extend(notes)
+            lines.append("")
+        lines.append("> ⚠️ 本报告仅供学习参考，不构成投资建议。市场有风险，投资需谨慎。")
 
         return "\n".join(lines)
 
