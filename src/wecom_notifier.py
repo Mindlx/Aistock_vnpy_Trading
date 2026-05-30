@@ -77,112 +77,103 @@ class WeComNotifier:
         return datetime.now(timezone(timedelta(hours=8)))
 
     @staticmethod
-    def _system_line(r) -> str:
-        """三系统得分摘要（紧凑格式）"""
-        parts = []
+    def _stock_line(r) -> str:
+        """单只股票一行式摘要（适合微信阅读）"""
+        emoji = L7_EMOJI.get(r.get("signal", "neutral"), "⚪")
+        name = r.get('stock_name', '')
+        code = r['stock_code']
         ls = r.get("lynx_score", 0)
         ms = r.get("mindlynx_score", 0)
         ts = r.get("tradingagent_score", 0)
-        parts.append(f"ly{'🟢' if ls > 0 else '🔴'}{ls:+.2f}")
-        parts.append(f"ml{'🟢' if ms > 0 else '🔴'}{ms:+.2f}")
-        parts.append(f"at{'🟢' if ts > 0 else '🔴'}{ts:+.2f}")
-        stale = " ⏳" if r.get("ta_is_stale") else ""
-        return " ".join(parts) + stale
+        sig = r.get('signal_name', '中性')
+        pos = r.get('position_advice', '0成')
+
+        # 备注
+        notes = []
+        if r.get("has_disagreement"):
+            notes.append("分歧")
+        if r.get("disagreement_capped"):
+            notes.append("仓位上限1成")
+        if r.get("ta_is_stale"):
+            notes.append("⏳TA")
+        if r.get("is_degraded"):
+            notes.append("⚠降级")
+        note_str = f" | {' '.join(notes)}" if notes else ""
+
+        return (
+            f"{emoji} **{name}({code})** "
+            f"| ly{ls:+.2f} ml{ms:+.2f} at{ts:+.2f}"
+            f" | {sig} | 仓位{pos}{note_str}"
+        )
 
     def format_daily_summary(self, results: List[Dict[str, Any]], date: str) -> str:
         """
-        格式化每日融合结果摘要。
-
-        按信号强度分组展示，清晰标注操作建议。
+        格式化每日融合结果摘要 — 一行式，适合微信阅读。
         """
         valid = [r for r in results if r.get("valid", False)]
         invalid = [r for r in results if not r.get("valid", False)]
 
-        # 统计
         disagree = [r for r in valid if r.get("has_disagreement")]
         degraded = [r for r in valid if r.get("is_degraded")]
         stale_ta = [r for r in valid if r.get("ta_is_stale")]
 
         lines = [
             f"## 📊 三系统融合决策 | {date}",
-            f"> 有效{len(valid)}只 | "
-            f"分歧{len(disagree)} | "
-            f"数据降级{len(degraded)}{' | TA⏳' + str(len(stale_ta)) if stale_ta else ''}",
+            f"> 有效{len(valid)}只"
+            f"{' | 分歧' + str(len(disagree)) if disagree else ''}"
+            f"{' | 降级' + str(len(degraded)) if degraded else ''}"
+            f"{' | TA⏳' + str(len(stale_ta)) if stale_ta else ''}",
             "",
         ]
 
-        # ── 1. 系统分歧（最高优先级） ──
+        # ── 分歧优先 ──
         if disagree:
-            lines.append("### ⚡ 系统分歧 — 注意仓位控制")
+            lines.append("**⚡ 系统分歧 — 注意仓位控制**")
             for r in disagree:
-                sig = r.get("signal", "neutral")
-                emoji = L7_EMOJI.get(sig, "⚪")
-                pos = r.get("position_advice", "0成")
-                cap = " ⚠分歧仓位上限1成" if r.get("disagreement_capped") else ""
-                lines.append(
-                    f"{emoji} **{r.get('stock_name', '')}({r['stock_code']})** "
-                    f"→ {r.get('signal_name', '中性')} | 仓位:{pos}{cap}"
-                )
-                lines.append(f"   └ {self._system_line(r)}")
+                lines.append(self._stock_line(r))
             lines.append("")
 
-        # ── 2. 按信号强度分组 ──
-        # 无分歧的股票
+        # ── 按信号强度分组 ──
         consensuses = [r for r in valid if not r.get("has_disagreement")]
 
-        # 定义信号分组顺序（从强到弱）
         signal_groups = [
-            ("🟢 **强烈看多** — 可重点参与，仓位2-3成", "strong_bullish"),
-            ("🟢 **看多** — 可参与，仓位1-2成", "bullish"),
-            ("🟡 **谨慎看多** — 轻仓试探，仓位0.5-1成", "cautious_bullish"),
-            ("⚪ **中性/持有** — 观望或维持现有仓位", "neutral"),
-            ("🟠 **谨慎看空** — 减仓观察，仓位减至0.5成以内", "cautious_bearish"),
-            ("🔴 **看空** — 大幅减仓", "bearish"),
-            ("🔴 **强烈看空** — 清仓离场", "strong_bearish"),
+            ("🟢 强烈看多", "strong_bullish"),
+            ("🟢 看多", "bullish"),
+            ("🟡 谨慎看多", "cautious_bullish"),
+            ("⚪ 中性/持有", "neutral"),
+            ("🟠 谨慎看空", "cautious_bearish"),
+            ("🔴 看空", "bearish"),
+            ("🔴 强烈看空", "strong_bearish"),
         ]
 
         grouped = {sig: [] for _, sig in signal_groups}
         for r in consensuses:
             sig = r.get("signal", "neutral")
-            if sig in grouped:
-                grouped[sig].append(r)
-            else:
-                grouped["neutral"].append(r)
+            grouped.get(sig, []).append(r)
 
-        has_any_group = False
         for title, sig_key in signal_groups:
             stocks = grouped[sig_key]
             if not stocks:
                 continue
-            has_any_group = True
-            lines.append(f"### {title}")
+            lines.append(f"**{title}**")
             for r in stocks:
-                deg = " ⚠降级" if r.get("is_degraded") else ""
-                lines.append(
-                    f"- **{r.get('stock_name', '')}({r['stock_code']})** "
-                    f"融合{r.get('fusion_score', 0):+.2f}{deg}"
-                )
-                lines.append(f"  {self._system_line(r)}")
+                lines.append(self._stock_line(r))
             lines.append("")
 
-        if not has_any_group:
-            lines.append("_无有效信号_")
-            lines.append("")
-
-        # ── 3. 无信号股票 ──
+        # ── 无信号 ──
         if invalid:
-            lines.append("### ⚠️ 无信号")
+            lines.append("**⚠️ 无信号**")
             for r in invalid:
                 lines.append(f"- {r['stock_code']}: {r.get('message', '')}")
             lines.append("")
 
-        # ── 底部说明 ──
+        # ── 底部 ──
         lines.append("---")
         notes = []
         if stale_ta:
-            notes.append("⏳ TA数据为昨日结果（TA定时器16:00运行）")
+            notes.append("⏳ TA为昨日结果（定时器16:00运行）")
         if degraded:
-            notes.append("⚠ 部分系统数据缺失，结果仅供参考")
+            notes.append("⚠ 部分数据缺失，结果仅供参考")
         if notes:
             lines.extend(notes)
             lines.append("")
