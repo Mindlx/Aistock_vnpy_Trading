@@ -123,18 +123,6 @@ class WeComNotifier:
             resist = max(ma10, ma20)
             sup_str = f"支撑{support:.2f} 压力{resist:.2f}"
 
-        # 备注
-        notes = []
-        if r.get("has_disagreement"):
-            notes.append("分歧")
-        if r.get("disagreement_capped"):
-            notes.append("仓位上限1成")
-        if r.get("ta_is_stale"):
-            notes.append("⏳TA")
-        if r.get("is_degraded"):
-            notes.append("⚠降级")
-        note_str = f"| {' '.join(notes)}" if notes else ""
-
         extras = [x for x in [vr_str, sup_str] if x]
         extra_str = f"| {' '.join(extras)}" if extras else ""
 
@@ -142,7 +130,7 @@ class WeComNotifier:
             f"{emoji} **{name}({code})** {price_str} {chg_str}"
             f" | {sys_str}"
             f" | {sig} | 仓位{pos}"
-            f"{note_str}{extra_str}"
+            f"{extra_str}"
         )
 
     def format_daily_summary(self, results: List[Dict[str, Any]], date: str) -> str:
