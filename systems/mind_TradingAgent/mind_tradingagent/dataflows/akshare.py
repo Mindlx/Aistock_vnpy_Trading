@@ -24,6 +24,47 @@ def _bare_code(symbol: str) -> str:
     return symbol.replace(".SS", "").replace(".SZ", "").replace(".SH", "").strip()
 
 
+def _bs_code(symbol: str) -> str:
+    """Convert ticker to baostock format: '601801.SS' -> 'sh.601801'."""
+    code = _bare_code(symbol)
+    if symbol.upper().endswith(".SS"):
+        return f"sh.{code}"
+    return f"sz.{code}"
+
+
+def _try_baostock_ohlcv(symbol: str, start_date: str, end_date: str) -> Optional[str]:
+    """Fallback: fetch daily OHLCV from baostock when akshare is unavailable."""
+    try:
+        import baostock as bs
+        lg = bs.login()
+        if lg.error_code != '0':
+            return None
+        try:
+            rs = bs.query_history_k_data_plus(
+                _bs_code(symbol),
+                "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,peTTM,pbMRQ",
+                start_date=start_date, end_date=end_date,
+                frequency="d", adjustflag="2",
+            )
+            if rs.error_code != '0':
+                return None
+            rows = []
+            while rs.next():
+                rows.append(rs.get_row_data())
+            if not rows:
+                return None
+            df = pd.DataFrame(rows[1:], columns=rows[0]) if len(rows) > 1 else pd.DataFrame(rows, columns=rs.fields)
+            for col in ["open","high","low","close","volume","amount","pctChg","peTTM","pbMRQ"]:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+            return _csv_string(df, f"BaoStock data for {_bare_code(symbol)} ({symbol})")
+        finally:
+            bs.logout()
+    except Exception as e:
+        logger.warning(f"baostock fallback failed for {symbol}: {e}")
+        return None
+
+
 def _csv_string(df: pd.DataFrame, title: str) -> str:
     """Convert DataFrame to CSV string with header."""
     if df is None or df.empty:
@@ -37,7 +78,10 @@ def get_stock_data(
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
 ) -> str:
-    """Get daily OHLCV data for an A-share stock via akshare."""
+    """Get daily OHLCV data for an A-share stock via akshare.
+
+    Falls back to baostock if akshare is unavailable (e.g., rate-limited).
+    """
     code = _bare_code(symbol)
     try:
         df = ak.stock_zh_a_hist(
@@ -52,6 +96,11 @@ def get_stock_data(
         return _csv_string(df, f"A-share stock data for {code} ({symbol})")
     except Exception as e:
         logger.warning(f"akshare get_stock_data({symbol}) failed: {e}")
+        # Fallback to baostock before giving up
+        result = _try_baostock_ohlcv(symbol, start_date, end_date)
+        if result is not None:
+            logger.info(f"baostock fallback succeeded for {symbol}")
+            return result
         return f"# Error fetching data for {symbol}: {e}\n"
 
 
