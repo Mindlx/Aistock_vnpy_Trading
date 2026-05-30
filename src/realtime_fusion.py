@@ -54,6 +54,22 @@ class RealtimeFusion:
         REALTIME_DIR.mkdir(parents=True, exist_ok=True)
         self._last_scores: Dict[str, float] = {}
         self._notifier: Optional[WeComNotifier] = None
+        self._stock_names: Dict[str, str] = self._load_stock_names()
+
+    @staticmethod
+    def _load_stock_names() -> Dict[str, str]:
+        """从 stock_pool.csv 加载股票代码→名称映射"""
+        import csv
+        names = {}
+        path = Path("config/stock_pool.csv")
+        if path.exists():
+            with open(path, encoding="utf-8") as f:
+                for row in csv.DictReader(f, skipinitialspace=True):
+                    code = (row.get("code") or "").strip()
+                    name = (row.get("name") or "").strip()
+                    if code:
+                        names[code] = name
+        return names
 
     @property
     def notifier(self):
@@ -149,7 +165,11 @@ class RealtimeFusion:
         now = datetime.now().strftime("%H:%M")
         lines = [f"📊 盘中融合速报 ({now})", ""]
         for c in changes:
-            lines.append(f"  {c['code']}: {c['signal']} (Δ{c['score']:+.2f})")
+            name = self._stock_names.get(c['code'], c['code'])
+            signal = c['signal']
+            score = c['score']
+            emoji = "🟢" if score > 0 else "🔴" if score < 0 else "⚪"
+            lines.append(f"{emoji} **{name}({c['code']})** {signal} (Δ{score:+.2f})")
         lines.append("")
         lines.append("📡 ly昨日 | ml实时 | at盘中")
         self.notifier.send_markdown("\n".join(lines))
@@ -188,7 +208,8 @@ def main():
         changes = service.run_once()
         if changes:
             for c in changes:
-                print(f"{c['code']}: {c['signal']} (score={c['score']:+.2f})")
+                name = service._stock_names.get(c['code'], c['code'])
+                print(f"{name}({c['code']}): {c['signal']} (score={c['score']:+.2f})")
         else:
             print("无变化")
 
