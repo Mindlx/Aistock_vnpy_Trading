@@ -89,6 +89,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "geopolitical risk trade war sanctions",
         "ECB Bank of England BOJ central bank policy",
         "oil commodities supply chain energy",
+        # China macro
+        "PBOC LPR interest rate policy China economy",
+        "Chinese GDP CPI PMI economic data 2025",
+        "China A-share market PBOC liquidity stimulus",
+        "North-bound capital south-bound Shanghai Shenzhen Connect",
+        "China regulatory policy stock market tech property",
     ],
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)

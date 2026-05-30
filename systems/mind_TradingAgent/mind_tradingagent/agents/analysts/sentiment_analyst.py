@@ -29,6 +29,15 @@ from mind_tradingagent.agents.utils.agent_utils import (
 )
 from mind_tradingagent.dataflows.reddit import fetch_reddit_posts
 from mind_tradingagent.dataflows.stocktwits import fetch_stocktwits_messages
+from mind_tradingagent.dataflows.xueqiu import (
+    fetch_xueqiu_hot_tweets,
+    fetch_xueqiu_stock_comments,
+)
+
+
+def _is_ashare(ticker: str) -> bool:
+    """Detect A-share tickers by exchange suffix."""
+    return ticker.upper().endswith((".SS", ".SZ", ".SH"))
 
 
 def _seven_days_back(trade_date: str) -> str:
@@ -38,9 +47,12 @@ def _seven_days_back(trade_date: str) -> str:
 def create_sentiment_analyst(llm):
     """Create a sentiment analyst node for the trading graph.
 
-    Pre-fetches news + StockTwits + Reddit data, injects them into the
+    Pre-fetches news + social sentiment data, injects them into the
     prompt as structured blocks, and produces a sentiment report in a
     single LLM call.
+
+    For A-share tickers, uses Xueqiu (雪球) + EastMoney (东方财富股吧)
+    as sentiment sources instead of StockTwits/Reddit (which only cover US stocks).
     """
 
     def sentiment_analyst_node(state):
@@ -48,13 +60,19 @@ def create_sentiment_analyst(llm):
         end_date = state["trade_date"]
         start_date = _seven_days_back(end_date)
         instrument_context = build_instrument_context(ticker)
+        is_ashare = _is_ashare(ticker)
 
-        # Pre-fetch all three sources. Each fetcher degrades gracefully and
-        # returns a string (no exceptions surface from here), so the LLM
-        # always sees something — either real data or a clear placeholder.
+        # Pre-fetch data sources. Each fetcher degrades gracefully.
         news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+
+        if is_ashare:
+            # A-share: use Chinese sentiment sources
+            stocktwits_block = fetch_xueqiu_hot_tweets(ticker, limit=20)
+            reddit_block = fetch_xueqiu_stock_comments(ticker, limit=30)
+        else:
+            # Non-A-share: use original Western sources
+            stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
+            reddit_block = fetch_reddit_posts(ticker)
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -63,6 +81,7 @@ def create_sentiment_analyst(llm):
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
+            is_ashare=is_ashare,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -104,9 +123,75 @@ def _build_system_message(
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
+    is_ashare: bool = False,
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
+    if is_ashare:
+        sentiment_source_desc = """
+### 雪球 (Xueqiu) hot tweets — Chinese retail-trader social platform
+Fast-moving signal. China's largest retail investor community. Hot tweets reflect trending discussion topics with retweet and like counts.
+
+<start_of_social_a>
+{stocktwits_block}
+<end_of_social_a>
+
+### 东方财富股吧 (EastMoney Guba) stock comments — Chinese stock forum
+Community discussion. Largest A-share investor forum. Includes a simple bullish/bearish sentiment breakdown based on keyword analysis.
+
+<start_of_social_b>
+{reddit_block}
+<end_of_social_b>
+"""
+        analysis_guide = """
+1. **Read the Xueqiu hot tweet engagement** as a leading retail-sentiment signal. High retweet/like counts indicate strong community attention. Topics that appear across multiple tweets suggest a dominant narrative.
+
+2. **Look for cross-source divergences.** If news framing is bearish but Guba comments are overwhelmingly bullish, that mismatch is itself a signal.
+
+3. **Distinguish opinion from event.** A news headline is an event; a Guba comment is opinion. Weight them accordingly.
+
+4. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
+
+5. **Be honest about data limits.** If a source returned '<unavailable>', flag this caveat explicitly.
+
+6. **Identify catalysts and risks** that emerge across sources.
+
+7. **Past sentiment is not predictive.** Frame as signal for the trader alongside fundamentals and technicals.
+"""
+    else:
+        sentiment_source_desc = """
+### StockTwits messages — retail-trader social platform indexed by cashtag
+Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
+
+<start_of_social_a>
+{stocktwits_block}
+<end_of_social_a>
+
+### Reddit posts — r/wallstreetbets, r/stocks, r/investing (past 7 days)
+Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
+
+<start_of_social_b>
+{reddit_block}
+<end_of_social_b>
+"""
+        analysis_guide = """
+1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
+
+2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal.
+
+3. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context.
+
+4. **Distinguish opinion from event.** A news headline is an event; a StockTwits post is opinion. Both are inputs but weight differently.
+
+5. **Identify recurring narrative themes.** What topic keeps coming up across sources?
+
+6. **Be honest about data limits.** If a source returned '<unavailable>', flag this caveat explicitly.
+
+7. **Identify catalysts and risks** that emerge across sources.
+
+8. **Past sentiment is not predictive.** Frame as signal for the trader alongside fundamentals and technicals.
+"""
+
+    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on complementary data sources that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
 
@@ -117,44 +202,18 @@ Institutional framing. Fact-driven, slower-moving signal.
 {news_block}
 <end_of_news>
 
-### StockTwits messages — retail-trader social platform indexed by cashtag
-Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
-
-<start_of_stocktwits>
-{stocktwits_block}
-<end_of_stocktwits>
-
-### Reddit posts — r/wallstreetbets, r/stocks, r/investing (past 7 days)
-Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
-
-<start_of_reddit>
-{reddit_block}
-<end_of_reddit>
+{sentiment_source_desc}
 
 ## How to analyze this data (best practices)
 
-1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
-
-2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
-
-3. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
-
-4. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
-
-5. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
-
-6. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this caveat explicitly. If the sources are silent on a given subreddit, say so.
-
-7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
-
-8. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
+{analysis_guide}
 
 ## Output
 
 Produce a sentiment report covering, in order:
 
 1. **Overall sentiment direction** — Bullish / Bearish / Neutral / Mixed — with a brief confidence note based on data quality and sample size.
-2. **Source-by-source breakdown** — what each of news / StockTwits / Reddit is telling you, with specific evidence (cite message counts, ratios, notable posts).
+2. **Source-by-source breakdown** — what each data source is telling you, with specific evidence (cite message counts, ratios, notable posts).
 3. **Divergences, alignments, and key narratives** across sources.
 4. **Catalysts and risks** surfaced by the data.
 5. **Markdown table** at the end summarizing key sentiment signals, their direction, source, and supporting evidence.
