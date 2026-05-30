@@ -91,9 +91,9 @@
 
 ### 待实施
 
-- [ ] 4. 实现 TA 异步执行：在快速融合后触发 `--run-ta`，结果缓存供次日使用
-- [ ] 5. 修改融合推送格式：以分歧/共识为核心呈现
-- [ ] 6. 添加 `ta_stale` 标志逻辑：TA 未就绪时使用前次结果
+- [x] 4. 实现 TA 异步执行：`Aistock_vnpy_Trading-TA.timer` 工作日 16:00 触发
+- [x] 5. 修改融合推送格式：以分歧→共识→其余排序，显示三系统得分摘要
+- [x] 6. 添加 `ta_stale` 标志逻辑：TA 未就绪时自动降权 30%，标记结果
 
 ---
 
@@ -101,9 +101,10 @@
 
 | 组件 | 状态 |
 |------|------|
-| MindLynx RTM 守护进程 | ✅ 已运行（`Aistock_vnpy_Trading-monitor.service`） |
-| MindLynx 定时调度 | ✅ 已运行（`Aistock_vnpy_Trading-scheduler.service`） |
-| 日终 crontab 16:30 | ⏳ 待修改为 15:30 |
-| 晨间 crontab 08:00 | ❌ 待创建 |
-| TA 异步执行 | ❌ 待实现 |
-| 推送格式优化 | ❌ 待实现 |
+| MindLynx RTM 守护进程 | ✅ `Aistock_vnpy_Trading-monitor.service` |
+| MindLynx 定时调度 | ✅ `Aistock_vnpy_Trading-scheduler.service` |
+| 日终融合定时器 | ✅ `Aistock_vnpy_Trading-fusion.timer` 工作日 15:30 |
+| TA 深度论证定时器 | ✅ `Aistock_vnpy_Trading-TA.timer` 工作日 16:00 |
+| TA 过期降权 | ✅ `ta_stale` 已实现 |
+| 推送格式优化 | ✅ 分歧/共识优先 |
+| 晨间自定义推送 | 📌 后续考虑 |
