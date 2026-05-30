@@ -213,6 +213,7 @@ class FusionEngine:
         mindlynx_score: int = 50,
         mindlynx_trend: Optional[str] = None,
         tradingagent_rating: str = "Hold",
+        ta_is_stale: bool = False,
     ) -> Dict[str, Any]:
         """
         对单只股票进行融合分析。
@@ -221,6 +222,7 @@ class FusionEngine:
           ⚡ 分歧检测 + 不确定性惩罚
           ⚡ 置信度调制（lynx prob_up 已自然调制，mindlynx 用评分细分）
           ⚡ 缺失系统自动重分配权重
+          ⚡ TA 数据过期自动降权
 
         参数:
             stock_code: 股票代码
@@ -231,6 +233,7 @@ class FusionEngine:
             mindlynx_score: MindLynx 评分（0-100）
             mindlynx_trend: MindLynx 趋势预测（可选）
             tradingagent_rating: TradingAgent 评级（Buy/Overweight/Hold/Underweight/Sell）
+            ta_is_stale: TA 数据是否为前次结果（延时降权）
 
         返回:
             融合决策字典
@@ -250,6 +253,14 @@ class FusionEngine:
         mindlynx_valid = True
         tradingagent_valid = True
 
+        # ⚡ TA 数据过期处理：降权 30%，权重重新分配
+        ta_stale_penalty = 0.0
+        if ta_is_stale:
+            ta_stale_penalty = 0.30  # TA 权重打七折
+            self.logger.info(
+                f"[{stock_code}] TA 数据为前次结果，权重降低 {ta_stale_penalty*100:.0f}%"
+            )
+
         # ── Step 2: 分歧检测 + 不确定性惩罚 (Oracle 建议 1) ──
         has_disagreement, disagreement_score = self._detect_disagreement(
             lynx_normalized, mindlynx_normalized, tradingagent_normalized,
@@ -261,6 +272,18 @@ class FusionEngine:
         adjusted_weights, valid_count, is_degraded = self._compute_adjusted_weights(
             lynx_valid, mindlynx_valid, tradingagent_valid,
         )
+
+        # ⚡ TA 数据过期：降低 TA 权重，分配给 lynx 和 mindlynx
+        if ta_is_stale and "tradingagent" in adjusted_weights:
+            ta_weight = adjusted_weights["tradingagent"]
+            penalty = ta_weight * ta_stale_penalty
+            adjusted_weights["tradingagent"] = ta_weight - penalty
+            # 平均分配给其他有效系统
+            others = [k for k in adjusted_weights if k != "tradingagent"]
+            if others:
+                split = penalty / len(others)
+                for k in others:
+                    adjusted_weights[k] += split
 
         if valid_count == 0:
             return {
@@ -310,6 +333,8 @@ class FusionEngine:
             "signal_name": final["name"],
             "position_advice": final["position"],
             "disagreement_capped": final.get("disagreement_capped", False),
+            "ta_is_stale": ta_is_stale,
+            "ta_stale_penalty": ta_stale_penalty,
         }
 
         # 记录日志
@@ -328,7 +353,8 @@ class FusionEngine:
         return result
 
     def fuse_stock_pool(
-        self, stock_signals: List[Dict[str, Any]]
+        self, stock_signals: List[Dict[str, Any]],
+        ta_is_stale: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         对多只股票批量融合。
@@ -342,6 +368,7 @@ class FusionEngine:
             },
             ...
         ]
+        ta_is_stale: TA 数据是否为前次结果（延时降权）
         """
         results = []
         for item in stock_signals:
@@ -353,6 +380,7 @@ class FusionEngine:
                 mindlynx_advice=item.get("mindlynx_advice", "观望"),
                 mindlynx_score=item.get("mindlynx_score", 50),
                 tradingagent_rating=item.get("tradingagent_rating", "Hold"),
+                ta_is_stale=ta_is_stale,
             )
             results.append(result)
 

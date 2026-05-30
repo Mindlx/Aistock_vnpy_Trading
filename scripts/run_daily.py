@@ -7,6 +7,8 @@
     python scripts/run_daily.py --dry-run                # 仅打印，不推送
     python scripts/run_daily.py --date 2026-05-29        # 回测指定日期
     python scripts/run_daily.py --mock                   # 使用模拟数据测试
+    python scripts/run_daily.py --schedule               # 定时模式，每日 16:30 自动执行
+    python scripts/run_daily.py --schedule --time 16:00  # 自定义时间
 
 数据流:
     1. 从三个系统读取每日输出
@@ -14,8 +16,6 @@
     3. 线性积分融合（含分歧检测+置信度调制）
     4. 推送结果到企业微信
     5. 保存融合结果到日志/CSV/JSON
-
-推荐 crontab: 30 16 * * 1-5 cd /path/to/fusion && python scripts/run_daily.py
 
 ⚠️ 仅供学习和研究目的，不构成任何投资建议
 """
@@ -26,6 +26,7 @@ import csv
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -57,6 +58,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mock", action="store_true",
         help="使用模拟数据（不读取真实系统输出）",
+    )
+    parser.add_argument(
+        "--schedule", action="store_true",
+        help="定时模式，每日指定时间自动执行融合分析",
+    )
+    parser.add_argument(
+        "--time", type=str, default="16:30",
+        help="定时执行时间，格式 HH:MM（默认 16:30）",
     )
     parser.add_argument(
         "--run-ta", action="store_true",
@@ -274,9 +283,20 @@ def main():
 
     print(f"\n🔄 开始融合分析 ({len(stock_signals)} 只股票)...")
 
+    # 判断 TA 数据是否过期（15:30 融合时 TA 尚未运行）
+    ta_is_stale = True
+    ta_today_path = Path(f"data/tradingagent/ta_signals_{today.replace('-', '')}.json")
+    if ta_today_path.exists():
+        ta_is_stale = False
+    elif args.run_ta:
+        ta_is_stale = False  # 正在运行 TA，即将有新鲜数据
+
+    if ta_is_stale:
+        print("  ⏳ TradingAgent 数据为前次结果（TA 定时器 16:00 运行）")
+
     # 执行融合
     engine = FusionEngine(args.config)
-    results = engine.fuse_stock_pool(stock_signals)
+    results = engine.fuse_stock_pool(stock_signals, ta_is_stale=ta_is_stale)
 
     # 输出结果
     print(f"\n{'='*55}")
@@ -323,8 +343,39 @@ def main():
     else:
         print("\nℹ️  企业微信推送跳过 (dry-run 或未配置)")
 
-    print(f"\n✅ 融合完成")
+    print(f'\n✅ 融合完成')
 
 
-if __name__ == "__main__":
+def _schedule_loop(schedule_time: str):
+    """定时调度模式：交易日每天 schedule_time 执行一次"""
+    try:
+        import schedule
+    except ImportError:
+        print('请安装 schedule 库: pip install schedule')
+        return 1
+
+    schedule.every().monday.at(schedule_time).do(main)
+    schedule.every().tuesday.at(schedule_time).do(main)
+    schedule.every().wednesday.at(schedule_time).do(main)
+    schedule.every().thursday.at(schedule_time).do(main)
+    schedule.every().friday.at(schedule_time).do(main)
+
+    next_run = schedule.next_run()
+    print(f'  执行时间: 交易日 {schedule_time}')
+    print(f"  下次执行: {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+    print('  按 Ctrl+C 退出')
+
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(30)
+    except KeyboardInterrupt:
+        print('\n⏹ 定时模式已退出')
+    return 0
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    if args.schedule:
+        exit(_schedule_loop(args.time))
     main()

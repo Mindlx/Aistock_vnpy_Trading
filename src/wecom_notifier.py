@@ -56,120 +56,118 @@ class WeComNotifier:
         """获取北京时间"""
         return datetime.now(timezone(timedelta(hours=8)))
 
+    @staticmethod
+    def _score_emoji(score: float) -> str:
+        """融合分 → 图标"""
+        if score > 0.50: return "🟢"
+        if score > 0.20: return "🟡"
+        if score > -0.10: return "⚪"
+        if score > -0.50: return "🟠"
+        return "🔴"
+
+    @staticmethod
+    def _format_per_system(r) -> str:
+        """单只股票的三系统得分摘要"""
+        parts = []
+        if r.get("lynx_valid"):
+            lynx_em = "🟢" if r.get("lynx_score", 0) > 0 else "🔴"
+            parts.append(f"lynx{lynx_em}{r['lynx_score']:.2f}")
+        parts.append(f"mind{r['mindlynx_score']:.2f}")
+        parts.append(f"ta{r['tradingagent_score']:.2f}")
+        stale = " ⏳过期" if r.get("ta_is_stale") else ""
+        return " ".join(parts) + stale
+
     def format_daily_summary(self, results: List[Dict[str, Any]], date: str) -> str:
         """
         格式化每日融合结果摘要（Markdown 格式）
 
-        按信号强度分组展示，含融合得分和仓位建议。
+        按分歧/共识优先展示，突出融合系统的核心价值。
         """
         valid_results = [r for r in results if r.get("valid", False)]
-
-        # 分组
-        strong_bullish = [r for r in valid_results if r.get("signal") == "strong_bullish"]
-        weak_bullish = [r for r in valid_results if r.get("signal") == "weak_bullish"]
-        neutral = [r for r in valid_results if r.get("signal") == "neutral"]
-        weak_bearish = [r for r in valid_results if r.get("signal") == "weak_bearish"]
-        strong_bearish = [r for r in valid_results if r.get("signal") == "strong_bearish"]
         invalid = [r for r in results if not r.get("valid", False)]
 
-        # 统计信息
         total = len(valid_results)
-        degraded_count = sum(1 for r in valid_results if r.get("is_degraded", False))
-        disagreement_count = sum(1 for r in valid_results if r.get("has_disagreement", False))
+        disagreements = [r for r in valid_results if r.get("has_disagreement")]
+        degraded = [r for r in valid_results if r.get("is_degraded")]
+        stale_ta = [r for r in valid_results if r.get("ta_is_stale")]
 
-        # 构建消息
+        # 按融合分降序排列
+        valid_results.sort(key=lambda r: r.get("fusion_score", 0), reverse=True)
+
+        # 标题
         lines = [
-            f"## 📊 三系统融合决策报告",
-            f"**{date}**",
-            f"",
-            f"> 统计: {total}只股票 | "
-            f"🟢强烈看多{len(strong_bullish)} 🟡弱看多{len(weak_bullish)} "
-            f"⚪中性{len(neutral)} 🔴弱看空{len(weak_bearish)} 🔴强烈看空{len(strong_bearish)}",
+            f"## 🔗 三系统融合信号 | {date}",
+            f"> 有效{total}只 | "
+            f"分歧{len(disagreements)} | "
+            f"降级{len(degraded)} | "
+            f"过期TA{len(stale_ta)}",
+            "",
         ]
 
-        # 降级和分歧提示
-        degradation_parts = []
-        if degraded_count > 0:
-            degradation_parts.append(f"⚠ {degraded_count}只系统降级")
-        if disagreement_count > 0:
-            degradation_parts.append(f"⚠ {disagreement_count}只系统分歧")
-        if degradation_parts:
-            lines.append(f"> {' | '.join(degradation_parts)}")
+        # ── 第一部分：系统分歧（最高价值信号）──
+        if disagreements:
+            lines.append("### ⚡ 系统分歧 — 需重点关注")
+            for r in disagreements:
+                emoji = self._score_emoji(r["fusion_score"])
+                cap = " ⚡仓位受限" if r.get("disagreement_capped") else ""
+                lines.append(
+                    f"{emoji} **{r.get('stock_name', '')}({r['stock_code']})** "
+                    f"融合{r['fusion_score']:.2f} {self._format_per_system(r)}"
+                    f"{cap}"
+                )
             lines.append("")
 
-        # 强烈看多
-        lines.append("### 🟢 强烈看多")
-        if strong_bullish:
-            for r in strong_bullish:
-                extra = ""
-                if r.get("is_degraded"):
-                    extra += " ⚠降级"
-                if r.get("disagreement_capped"):
-                    extra += " ⚡分歧"
-                lines.append(
-                    f"- **{r.get('stock_name', '')}({r['stock_code']})** "
-                    f"融合分 {r['fusion_score']:.2f} | 仓位 {r['position_advice']}{extra}"
-                )
-        else:
-            lines.append("- 无")
+        # ── 第二部分：三系统共识（高置信度信号）──
+        consensuses = [r for r in valid_results if not r.get("has_disagreement")]
 
-        # 弱看多
-        lines.append("")
-        lines.append("### 🟢 弱看多")
-        if weak_bullish:
-            for r in weak_bullish:
-                extra = ""
-                if r.get("is_degraded"):
-                    extra += " ⚠降级"
+        # 只看多共识（所有系统同向且偏多）
+        bullish_consensus = [
+            r for r in consensuses
+            if r.get("fusion_score", 0) > 0.20
+        ]
+        if bullish_consensus:
+            lines.append("### ✅ 三系统共识 — 高置信度")
+            for r in bullish_consensus:
                 lines.append(
-                    f"- **{r.get('stock_name', '')}({r['stock_code']})** "
-                    f"融合分 {r['fusion_score']:.2f} | 仓位 {r['position_advice']}{extra}"
+                    f"🟢 **{r.get('stock_name', '')}({r['stock_code']})** "
+                    f"融合{r['fusion_score']:.2f} | {r['signal_name']} | {r['position_advice']}"
                 )
-        else:
-            lines.append("- 无")
+                lines.append(f"   └ {self._format_per_system(r)}")
+            lines.append("")
 
-        # 中性/观望
-        lines.append("")
-        lines.append("### ⚪ 中性/观望")
-        if neutral:
-            for r in neutral:
+        # ── 第三部分：其余股票简表 ──
+        remaining = [r for r in consensuses if r not in bullish_consensus]
+        if remaining:
+            lines.append("### 📋 其余信号")
+            for r in remaining:
+                emoji = self._score_emoji(r["fusion_score"])
+                stale_mark = " ⏳" if r.get("ta_is_stale") else ""
+                deg_mark = " ⚠降级" if r.get("is_degraded") else ""
                 lines.append(
-                    f"- **{r.get('stock_name', '')}({r['stock_code']})** "
-                    f"融合分 {r['fusion_score']:.2f}"
+                    f"{emoji} **{r.get('stock_name', '')}({r['stock_code']})** "
+                    f"融合{r['fusion_score']:.2f} {self._format_per_system(r)}"
+                    f"{stale_mark}{deg_mark}"
                 )
-        else:
-            lines.append("- 无")
+            lines.append("")
 
-        # 看空汇总
-        all_bearish = weak_bearish + strong_bearish
-        lines.append("")
-        lines.append("### 🔴 弱看空/强烈看空")
-        if all_bearish:
-            for r in all_bearish:
-                lines.append(
-                    f"- **{r.get('stock_name', '')}({r['stock_code']})** "
-                    f"{r['signal_name']} 融合分 {r['fusion_score']:.2f} | {r['position_advice']}"
-                )
-        else:
-            lines.append("- 无")
-
-        # 失效股票
+        # ── 第四部分：无信号股票 ──
         if invalid:
-            lines.append("")
             lines.append("### ⚠️ 无信号")
             for r in invalid:
                 lines.append(f"- {r['stock_code']}: {r.get('message', '')}")
+            lines.append("")
 
-        # 底部建议
-        lines.append("")
+        # ── 底部建议 ──
         lines.append("---")
-        lines.append(
-            "**操作建议**: 优先关注强烈看多标的，弱看多仅观察或极低仓位试错。"
-        )
-        if degraded_count > 0 or disagreement_count > 0:
-            lines.append(
-                "**提示**: 部分系统信号缺失或存在分歧，请降低仓位、注意风险。"
-            )
+        advice_parts = []
+        if disagreements:
+            advice_parts.append("分歧标的注意仓位控制")
+        if stale_ta:
+            advice_parts.append("TradingAgent 数据为前日结果")
+        if bullish_consensus:
+            advice_parts.append(f"重点关注共识标的 {', '.join(r['stock_code'] for r in bullish_consensus[:3])}")
+        if advice_parts:
+            lines.append(f"**建议**: {' | '.join(advice_parts)}")
         lines.append(
             "> ⚠️ 本报告仅供学习参考，不构成投资建议。市场有风险，投资需谨慎。"
         )
