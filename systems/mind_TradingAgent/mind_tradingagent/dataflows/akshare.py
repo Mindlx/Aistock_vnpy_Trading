@@ -239,18 +239,19 @@ def _append_capital_flow(result: list, code: str) -> None:
         pass
 
     try:
-        # North-bound capital flow (北向资金) - only meaningful for Shanghai/Shenzhen connect stocks
+        # North-bound capital flow (北向资金)
+        import datetime as dt
+        end = dt.date.today().strftime("%Y%m%d")
+        start = (dt.date.today() - dt.timedelta(days=30)).strftime("%Y%m%d")
         df_north = ak.stock_hsgt_individual_detail_em(
-            symbol=code, market="沪股通" if code.startswith(('6', '5', '9')) else "深股通",
-            indicator="持股信息"
+            symbol=code, start_date=start, end_date=end,
         )
         if df_north is not None and not df_north.empty:
             latest_n = df_north.iloc[-1]
             result.append("")
             result.append("--- 北向资金持股 ---")
-            for col in ["持股日期", "持股数量", "持股市值"]:
-                if col in latest_n:
-                    result.append(f"{col}: {latest_n[col]}")
+            for col in latest_n.index[:5]:
+                result.append(f"{col}: {latest_n[col]}")
     except Exception:
         pass
 

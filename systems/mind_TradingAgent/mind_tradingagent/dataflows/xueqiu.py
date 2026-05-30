@@ -26,11 +26,14 @@ def _bare_code(ticker: str) -> str:
 
 
 def fetch_xueqiu_hot_tweets(ticker: str, limit: int = 20) -> str:
-    """Fetch hot Xueqiu tweets for an A-share ticker.
+    """Fetch market sentiment data via EastMoney comment analysis.
+
+    Uses per-stock comment detail APIs from EastMoney as a proxy for
+    retail investor sentiment (replaces StockTwits for A-shares).
 
     Args:
         ticker: A-share symbol (e.g., 601801.SS, 000001.SZ)
-        limit: Max tweets to return
+        limit: Max items to return
 
     Returns:
         Formatted text block for prompt injection, or placeholder.
@@ -39,41 +42,39 @@ def fetch_xueqiu_hot_tweets(ticker: str, limit: int = 20) -> str:
     try:
         import akshare as ak
 
-        df = ak.stock_hot_tweet_xq(symbol=code)
+        # Stock rating commentary from EastMoney (per-stock)
+        df = ak.stock_comment_detail_scrd_desire_em(symbol=code)
         if df is None or df.empty:
-            return _placeholder(f"雪球: No hot tweets found for {code}")
+            return _placeholder(f"东方财富: No rating data for {code}")
 
         lines = [
-            f"## 雪球热门讨论 — {code}",
-            f"来源: 雪球 (xueqiu.com) · {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            f"## 东方财富个股评级 — {code}",
+            f"来源: 东方财富 (data.eastmoney.com) · {datetime.now().strftime('%Y-%m-%d %H:%M')}",
             "",
         ]
         for _, row in df.head(limit).iterrows():
-            title = row.get("标题", row.get("title", ""))
-            text = row.get("内容", row.get("text", ""))
-            user = row.get("用户名", row.get("user", ""))
-            retweet = row.get("转发数", row.get("retweet_count", 0))
-            like = row.get("点赞数", row.get("like_count", 0))
-            if title or text:
-                lines.append(f"**{title or text[:80]}**")
-                lines.append(f"  作者: {user} | 转发: {retweet} 点赞: {like}")
-                lines.append("")
-        return "\n".join(lines) if len(lines) > 2 else _placeholder(f"雪球: No data for {code}")
+            item = " | ".join(f"{k}: {v}" for k, v in row.items() if v)
+            if item:
+                lines.append(f"- {item}")
+        return "\n".join(lines) if len(lines) > 2 else _placeholder(f"东方财富: No data for {code}")
 
     except ImportError:
-        logger.warning("akshare not installed, cannot fetch Xueqiu data")
-        return _placeholder("雪球: Library not available")
+        logger.warning("akshare not installed")
+        return _placeholder("东方财富: Library not available")
     except Exception as e:
-        logger.warning(f"Xueqiu fetch failed for {ticker}: {e}")
-        return _placeholder(f"雪球: Fetch failed ({e})")
+        logger.warning(f"EastMoney rating fetch failed for {ticker}: {e}")
+        return _placeholder(f"东方财富: Fetch failed ({e})")
 
 
 def fetch_xueqiu_stock_comments(ticker: str, limit: int = 30) -> str:
-    """Fetch Xueqiu stock comments — replaces StockTwits Bullish/Bearish sentiment.
+    """Fetch investor focus/sentiment data — replaces Reddit for A-shares.
+
+    Uses EastMoney per-stock investor focus analysis API to gauge
+    retail investor attention and sentiment.
 
     Args:
         ticker: A-share symbol
-        limit: Max comments to return
+        limit: Max items to return
 
     Returns:
         Formatted text block with sentiment-like data.
@@ -82,47 +83,27 @@ def fetch_xueqiu_stock_comments(ticker: str, limit: int = 30) -> str:
     try:
         import akshare as ak
 
-        df = ak.stock_comment_em(symbol=code)
+        # Investor focus analysis (per-stock)
+        df = ak.stock_comment_detail_scrd_focus_em(symbol=code)
         if df is None or df.empty:
-            return _placeholder(f"东方财富股吧: No comments for {code}")
+            return _placeholder(f"东方财富: No focus data for {code}")
 
         lines = [
-            f"## 东方财富股吧讨论 — {code}",
-            f"来源: 东方财富 (guba.eastmoney.com) · {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            f"## 东方财富投资者关注度 — {code}",
+            f"来源: 东方财富 · {datetime.now().strftime('%Y-%m-%d %H:%M')}",
             "",
         ]
-        bullish = 0
-        bearish = 0
-        neutral = 0
         for _, row in df.head(limit).iterrows():
-            title = str(row.get("评论标题", row.get("title", "")))
-            content = str(row.get("评论内容", row.get("content", "")))
-            read_count = row.get("阅读数", row.get("read_count", 0))
-            # Simple sentiment heuristic based on keywords
-            text = (title + " " + content).lower()
-            if any(k in text for k in ["涨", "买", "多", "牛", "利好", "突破"]):
-                bullish += 1
-            elif any(k in text for k in ["跌", "卖", "空", "熊", "利空", "风险"]):
-                bearish += 1
-            else:
-                neutral += 1
-            snippet = (title or content)[:100]
-            if snippet:
-                lines.append(f"- {snippet} (阅读:{read_count})")
-                lines.append("")
-
-        total = max(bullish + bearish + neutral, 1)
-        lines.append(f"---")
-        lines.append(f"情绪统计: 🟢看涨 {bullish} | ⚪中性 {neutral} | 🔴看空 {bearish}")
-        lines.append(f"看涨比: {bullish/total*100:.0f}% ({bullish}/{total})")
-
-        return "\n".join(lines)
+            parts = [f"{k}: {v}" for k, v in row.items() if v]
+            if parts:
+                lines.append(f"- {' | '.join(parts)}")
+        return "\n".join(lines) if len(lines) > 2 else _placeholder(f"东方财富: No focus data for {code}")
 
     except ImportError:
-        return _placeholder("东方财富股吧: Library not available")
+        return _placeholder("东方财富: Library not available")
     except Exception as e:
-        logger.warning(f"EastMoney comments fetch failed for {ticker}: {e}")
-        return _placeholder(f"东方财富股吧: Fetch failed ({e})")
+        logger.warning(f"EastMoney focus fetch failed for {ticker}: {e}")
+        return _placeholder(f"东方财富: Fetch failed ({e})")
 
 
 def _placeholder(reason: str) -> str:
