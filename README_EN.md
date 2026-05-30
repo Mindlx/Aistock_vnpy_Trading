@@ -54,13 +54,13 @@ The **fusion engine** receives all three signals, applies configurable weighted 
 
 The complete vnpy library is preserved (alpha factor research, CTA strategy engine, trading gateways) for future expansion.
 
-### MindLynx-Aistock — AI-Powered Personal Investment Research Assistant
+### MindLynx-Aistock — AI Stock Analysis System (heavily customized fork)
 
-**Upstream**: [MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) (MIT) — independently developed and maintained by ZhuLinsen
+**Upstream**: [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) (MIT) — heavily customized fork
 
-> 🤖 Fully automated AI investment research: scheduled analysis → factor computation → LLM reasoning → knowledge accumulation → push notifications. A complete pipeline from data to decision for individual investors.
+> 🤖 LLM-powered stock analysis system for A-share markets: factor computation → LLM reasoning → decision dashboard → multi-channel push.
 
-- **AI Decision**: 10 factors + 30+ TA indicators + Regime state + ATR position → LLM final judgment
+- **AI Decision**: 10 factor scores + 30+ TA indicators + Regime state + ATR position → LLM final judgment
 - **Strategy Engine**: 15 strategy agents (bull trend, golden cross, pullback, etc.) with automatic weighted fusion
 - **LLM Reasoning**: Combines technical + fundamental + news analysis, outputs score 0-100
 - **Decision Dashboard**: Core conclusion, price position, chip structure, battle plan
@@ -162,7 +162,7 @@ Aistock_vnpy_Trading/
 | Subsystem | Upstream | License |
 |-----------|----------|---------|
 | lynx_vnpy | [vnpy/vnpy](https://github.com/vnpy/vnpy) | MIT |
-| MindLynx-Aistock | [MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) | MIT |
+| MindLynx-Aistock | [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) | MIT |
 | mind_TradingAgent | [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) | Apache 2.0 |
 
 See [NOTICE.md](NOTICE.md).

@@ -84,12 +84,11 @@ Aistock_vnpy_Trading 是一个 **三系统信号融合平台**，不是单一的
 
 本项目保留 vnpy 完整库代码（alpha 因子研究框架、CTA 策略引擎、交易接口等），可供后续扩展。
 
-### MindLynx-Aistock — 个人AI投研副驾
+### MindLynx-Aistock — AI 股票分析系统（深度定制）
 
-**上游**: [MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) (MIT) — ZhuLinsen 独立开发维护
+**上游**: [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) (MIT) — 深度定制分支
 
-> 🤖 全自动AI投研系统：定时分析 → 因子计算 → LLM推理 → 知识积累 → 微信推送。
-> 覆盖数据获取到决策推送的完整链路，让个人投资者享受机构级投研支持。
+> 🤖 基于 AI 大模型的 A股自选股智能分析系统，因子计算 → LLM推理 → 决策仪表盘 → 多渠道推送。
 
 - **AI 决策**: 10 因子得分 + 30+ TA指标 + Regime状态 + ATR仓位 → LLM综合判决
 - **策略引擎**: 15 策略 Agent 编排（多头趋势、均线金叉、缩量回踩等），自动加权融合
@@ -243,7 +242,7 @@ Aistock_vnpy_Trading/
 | 子系统 | 上游 | 许可证 |
 |--------|------|--------|
 | lynx_vnpy | [vnpy/vnpy](https://github.com/vnpy/vnpy) | MIT |
-| MindLynx-Aistock | [MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) | MIT |
+| MindLynx-Aistock | [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) | MIT |
 | mind_TradingAgent | [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) | Apache 2.0 |
 
 详见 [NOTICE.md](NOTICE.md)。
