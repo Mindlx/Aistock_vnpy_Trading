@@ -24,11 +24,11 @@ Aistock_vnpy_Trading 是一个 **三系统信号融合平台**，不是单一的
 
 **三个子系统各有侧重：**
 
-| 系统 | 方法 | 频率 | 核心输出 | 仓库 |
-|------|------|------|---------|------|
-| lynx_vnpy | RandomForest 量化模型 | 日频 | 上涨概率 + 信号等级 | [Mindlx/lynx_vnpy](https://github.com/Mindlx/lynx_vnpy) |
-| MindLynx-Aistock | 因子+策略+LLM 推理 | 日频/实时 | 综合评分 + 决策仪表盘 | [Mindlx/MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) |
-| mind_TradingAgent | 多智能体辩论（LangGraph） | 盘后 | 5级评级 + 决策摘要 | [Mindlx/mind_TradingAgents](https://github.com/Mindlx/mind_TradingAgents) |
+| 系统 | 方法 | 频率 | 核心输出 |
+|------|------|------|---------|
+| lynx_vnpy | RandomForest 量化模型 | 日频 | 上涨概率 + 信号等级 |
+| MindLynx-Aistock | 因子+策略+LLM 推理 | 日频/实时 | 综合评分 + 决策仪表盘 |
+| mind_TradingAgent | 多智能体辩论（LangGraph） | 盘后 | 5级评级 + 决策摘要 |
 
 **融合引擎** 接收三路信号，通过可配置权重线性积分，自动检测系统间分歧并施加减仓惩罚。
 
@@ -73,8 +73,7 @@ Aistock_vnpy_Trading 是一个 **三系统信号融合平台**，不是单一的
 
 ### lynx_vnpy — 量化信号系统
 
-**仓库**: [Mindlx/lynx_vnpy](https://github.com/Mindlx/lynx_vnpy)
-**上游**: [vnpy/vnpy](https://github.com/vnpy/vnpy) (MIT)
+**上游**: [Mindlx/lynx_vnpy](https://github.com/Mindlx/lynx_vnpy) ← [vnpy/vnpy](https://github.com/vnpy/vnpy) (MIT)
 
 基于 RandomForest 的量化信号系统：
 
@@ -87,8 +86,7 @@ Aistock_vnpy_Trading 是一个 **三系统信号融合平台**，不是单一的
 
 ### MindLynx-Aistock — AI 股票分析系统
 
-**仓库**: [Mindlx/MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock)
-**上游**: [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) (MIT)
+**上游**: [Mindlx/MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) ← [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) (MIT)
 
 > 🤖 基于 AI 大模型的 A股自选股智能分析系统，因子计算 → LLM推理 → 决策仪表盘 → 多渠道推送。
 
@@ -99,8 +97,7 @@ Aistock_vnpy_Trading 是一个 **三系统信号融合平台**，不是单一的
 
 ### mind_TradingAgent — 多智能体交易系统
 
-**仓库**: [Mindlx/mind_TradingAgents](https://github.com/Mindlx/mind_TradingAgents)
-**上游**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) (Apache 2.0)
+**上游**: [Mindlx/mind_TradingAgents](https://github.com/Mindlx/mind_TradingAgents) ← [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) (Apache 2.0)
 
 基于 LangGraph 的多智能体辩论框架：
 
@@ -242,8 +239,8 @@ Aistock_vnpy_Trading/
 
 ## 上游来源
 
-| 子系统 | 本系统仓库 | 原始上游 | 许可证 |
-|--------|-----------|---------|--------|
+| 子系统（systems/ 内） | 上游（Mindlx 独立仓库） | 原始上游 | 许可证 |
+|----------------------|-------------------------|---------|--------|
 | lynx_vnpy | [Mindlx/lynx_vnpy](https://github.com/Mindlx/lynx_vnpy) | [vnpy/vnpy](https://github.com/vnpy/vnpy) | MIT |
 | MindLynx-Aistock | [Mindlx/MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) | [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) | MIT |
 | mind_TradingAgent | [Mindlx/mind_TradingAgents](https://github.com/Mindlx/mind_TradingAgents) | [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) | Apache 2.0 |
