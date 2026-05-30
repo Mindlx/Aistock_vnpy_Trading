@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# 从上游仓库同步三个系统的最新代码
+# 从上游 GitHub 仓库同步三个子系统的最新代码
 # 用法: ./scripts/sync_systems.sh
 #
-# 三个系统的 GitHub 仓库作为上游 Source of Truth。
-# 融合系统保留全量拷贝，定期从此脚本同步更新。
+# 三个子系统各自在独立的 GitHub 仓库中开发维护。
+# 开发完成后通过此脚本同步到本融合系统的 systems/ 目录。
 #
-# rsync 排除规则:
-#   .git/       - git 元数据（不追踪）
-#   venv/       - 虚拟环境（路径硬编码 + 体积大）
-#   __pycache__/ - Python 缓存
-#   .env        - API 密钥（逐个仓库单独管理）
-#   logs/       - 运行时日志
-#   docs/       - 文档（融合系统不需要）
+# 同步来源（环境变量覆盖）:
+#   SYNC_SRC_LYNX  默认: ../lynx_vnpy
+#   SYNC_SRC_MIND  默认: ../MindLynx-Aistock
+#   SYNC_SRC_TA    默认: ../mind_TradingAgent
+#
+# GitHub 上游:
+#   lynx_vnpy:         https://github.com/Mindlx/lynx_vnpy
+#   MindLynx-Aistock:  https://github.com/Mindlx/MindLynx-Aistock
+#   mind_TradingAgent: https://github.com/Mindlx/mind_TradingAgents
 
 set -euo pipefail
 
@@ -27,49 +29,84 @@ EXCLUDES=(
     --exclude='.git/'
     --exclude='__pycache__/'
     --exclude='*.pyc'
-    --exclude='.mypy_cache/'
-    --exclude='.pytest_cache/'
-    --exclude='.ruff_cache/'
-    --exclude='.gitnexus/'
-    --exclude='.claude/'
-    --exclude='.github/'
-    --exclude='.omo/'
-    --exclude='.hermes/'
+    --exclude='.gitignore'
+    --exclude='README.md'
+    --exclude='LICENSE'
 )
 
-# 1. lynx_vnpy
+# lynx_vnpy
 echo "[1/3] lynx_vnpy..."
-rsync -a --delete \
-    "${EXCLUDES[@]}" \
-    --exclude='lynx_env/' \
-    --exclude='examples/' \
-    --exclude='.gitignore' \
-    ../lynx_vnpy/ systems/lynx_vnpy/
+SYNC_SRC_LYNX="${SYNC_SRC_LYNX:-../lynx_vnpy}"
+if [ -d "$SYNC_SRC_LYNX" ]; then
+    rsync -a --delete "${EXCLUDES[@]}" \
+        --exclude='lynx_env/' \
+        --exclude='docs/' \
+        --exclude='examples/' \
+        --exclude='tests/' \
+        --exclude='CHANGELOG.md' \
+        --exclude='AGENTS.md' \
+        --exclude='CLAUDE.md' \
+        --exclude='install*' \
+        "$SYNC_SRC_LYNX/" systems/lynx_vnpy/
+    echo "  从 $SYNC_SRC_LYNX 同步完成"
+else
+    echo "  ⚠️  $SYNC_SRC_LYNX 不存在，跳过"
+    echo "  设置 SYNC_SRC_LYNX 环境变量指定源码路径"
+fi
 
-# 2. MindLynx-Aistock
+# MindLynx-Aistock
 echo "[2/3] MindLynx-Aistock..."
-rsync -a --delete \
-    "${EXCLUDES[@]}" \
-    --exclude='.venv/' \
-    --exclude='logs/' \
-    --exclude='docs/' \
-    --exclude='data/' \
-    --exclude='.env' \
-    --exclude='.env.example' \
-    --exclude='.gitignore' \
-    ../MindLynx-Aistock/ systems/MindLynx-Aistock/
+SYNC_SRC_MIND="${SYNC_SRC_MIND:-../MindLynx-Aistock}"
+if [ -d "$SYNC_SRC_MIND" ]; then
+    rsync -a --delete "${EXCLUDES[@]}" \
+        --exclude='.venv/' \
+        --exclude='logs/' \
+        --exclude='docs/' \
+        --exclude='tests/' \
+        --exclude='scripts/' \
+        --exclude='api/' \
+        --exclude='bot/' \
+        --exclude='apps/' \
+        --exclude='openspec/' \
+        --exclude='templates/' \
+        --exclude='docker/' \
+        --exclude='.editorconfig' \
+        --exclude='.pre-commit-config.yaml' \
+        --exclude='.gitattributes' \
+        --exclude='.dockerignore' \
+        --exclude='setup.cfg' \
+        --exclude='pyrightconfig.json' \
+        --exclude='SKILL.md' \
+        --exclude='AGENTS.md' \
+        --exclude='CLAUDE.md' \
+        --exclude='wecom_push_types_inventory.md' \
+        "$SYNC_SRC_MIND/" systems/MindLynx-Aistock/
+    echo "  从 $SYNC_SRC_MIND 同步完成"
+else
+    echo "  ⚠️  $SYNC_SRC_MIND 不存在，跳过"
+fi
 
-# 3. mind_TradingAgent
+# mind_TradingAgent
 echo "[3/3] mind_TradingAgent..."
-rsync -a --delete \
-    "${EXCLUDES[@]}" \
-    --exclude='.env' \
-    --exclude='.env.example' \
-    --exclude='assets/' \
-    --exclude='.gitignore' \
-    ../mind_TradingAgent/ systems/mind_TradingAgent/
+SYNC_SRC_TA="${SYNC_SRC_TA:-../mind_TradingAgent}"
+if [ -d "$SYNC_SRC_TA" ]; then
+    rsync -a --delete "${EXCLUDES[@]}" \
+        --exclude='assets/' \
+        --exclude='tests/' \
+        --exclude='scripts/' \
+        --exclude='Dockerfile' \
+        --exclude='docker-compose.yml' \
+        --exclude='.dockerignore' \
+        --exclude='CHANGELOG.md' \
+        --exclude='uv.lock' \
+        --exclude='.env.example' \
+        --exclude='.env.enterprise.example' \
+        "$SYNC_SRC_TA/" systems/mind_TradingAgent/
+    echo "  从 $SYNC_SRC_TA 同步完成"
+else
+    echo "  ⚠️  $SYNC_SRC_TA 不存在，跳过"
+fi
 
 echo ""
 echo "=== 完成 ==="
-echo "各系统大小:"
 du -sh systems/*/
