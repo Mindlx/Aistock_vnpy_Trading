@@ -36,3 +36,5 @@ systems/MindLynx-Aistock/data/
 # Temporary
 *.log
 *.tmp
+systems/*/.venv
+systems/lynx_vnpy/lynx_env
