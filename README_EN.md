@@ -11,7 +11,7 @@ Aistock_vnpy_Trading is a **signal fusion platform**, not a single strategy mode
 | Subsystem | Method | Frequency | Output |
 |-----------|--------|-----------|--------|
 | lynx_vnpy | RandomForest quantitative model | Daily | Up-probability + signal grade |
-| MindLynx-Aistock | 12 factors + 15 strategies + LLM | Daily/Real-time | Composite score + action advice |
+| MindLynx-Aistock | AI Research Assistant: factors+strategies+LLM | Daily/Real-time | Composite score + decision dashboard |
 | mind_TradingAgent | Multi-agent debate (LangGraph) | Post-market | 5-tier rating + decision summary |
 
 The **fusion engine** receives all three signals, applies configurable weighted averaging, automatically detects inter-system disagreement, and applies an uncertainty penalty.
@@ -54,14 +54,16 @@ The **fusion engine** receives all three signals, applies configurable weighted 
 
 The complete vnpy library is preserved (alpha factor research, CTA strategy engine, trading gateways) for future expansion.
 
-### MindLynx-Aistock — AI Stock Analysis
+### MindLynx-Aistock — AI-Powered Personal Investment Research Assistant
 
-**Upstream**: [MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) (MIT) — heavily customized
+**Upstream**: [MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) (MIT) — independently developed and maintained by ZhuLinsen
 
-- 12-factor quantitative model (momentum, volatility, volume, sentiment, etc.)
-- 15 strategy framework (trend, golden cross, breakout, chan theory, etc.)
-- LLM reasoning combining technical + fundamental + news analysis
-- Decision dashboard with price position, chip structure, battle plan
+> 🤖 Fully automated AI investment research: scheduled analysis → factor computation → LLM reasoning → knowledge accumulation → push notifications. A complete pipeline from data to decision for individual investors.
+
+- **AI Decision**: 10 factors + 30+ TA indicators + Regime state + ATR position → LLM final judgment
+- **Strategy Engine**: 15 strategy agents (bull trend, golden cross, pullback, etc.) with automatic weighted fusion
+- **LLM Reasoning**: Combines technical + fundamental + news analysis, outputs score 0-100
+- **Decision Dashboard**: Core conclusion, price position, chip structure, battle plan
 
 ### mind_TradingAgent — Multi-Agent Trading System
 

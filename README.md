@@ -27,7 +27,7 @@ Aistock_vnpy_Trading 是一个 **三系统信号融合平台**，不是单一的
 | 系统 | 方法 | 频率 | 核心输出 |
 |------|------|------|---------|
 | lynx_vnpy | RandomForest 量化模型 | 日频 | 上涨概率 + 信号等级 |
-| MindLynx-Aistock | 12因子 + 15策略 + LLM 推理 | 日频/实时 | 综合评分 + 操作建议 |
+| MindLynx-Aistock | 个人AI投研副驾：因子+策略+LLM | 日频/实时 | 综合评分 + 决策仪表盘 |
 | mind_TradingAgent | 多智能体辩论（LangGraph） | 盘后 | 5级评级 + 决策摘要 |
 
 **融合引擎** 接收三路信号，通过可配置权重线性积分，自动检测系统间分歧并施加减仓惩罚。
@@ -84,14 +84,15 @@ Aistock_vnpy_Trading 是一个 **三系统信号融合平台**，不是单一的
 
 本项目保留 vnpy 完整库代码（alpha 因子研究框架、CTA 策略引擎、交易接口等），可供后续扩展。
 
-### MindLynx-Aistock — AI 股票分析系统
+### MindLynx-Aistock — 个人AI投研副驾
 
-**上游**: [MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) (MIT) — 深度定制
+**上游**: [MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) (MIT) — ZhuLinsen 独立开发维护
 
-融合量化因子与 LLM 推理的综合分析系统：
+> 🤖 全自动AI投研系统：定时分析 → 因子计算 → LLM推理 → 知识积累 → 微信推送。
+> 覆盖数据获取到决策推送的完整链路，让个人投资者享受机构级投研支持。
 
-- **12 因子模型**: 动量反转、低波动、量价配合、换手率情绪等
-- **15 策略框架**: 多头趋势、均线金叉、放量突破、缠论、波浪理论等
+- **AI 决策**: 10 因子得分 + 30+ TA指标 + Regime状态 + ATR仓位 → LLM综合判决
+- **策略引擎**: 15 策略 Agent 编排（多头趋势、均线金叉、缩量回踩等），自动加权融合
 - **LLM 推理**: 结合技术面 + 基本面 + 消息面，输出综合评分 0-100
 - **决策仪表盘**: 核心结论、价格位置、筹码结构、作战计划
 
