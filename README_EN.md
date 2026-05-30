@@ -8,11 +8,11 @@ A three-system ensemble trading platform that fuses signals from three independe
 
 Aistock_vnpy_Trading is a **signal fusion platform**, not a single strategy model. Three subsystems with fundamentally different methodologies analyze the market independently — when they reach consensus, the signal reliability is significantly improved.
 
-| Subsystem | Method | Frequency | Output |
-|-----------|--------|-----------|--------|
-| lynx_vnpy | RandomForest quantitative model | Daily | Up-probability + signal grade |
-| MindLynx-Aistock | AI Research Assistant: factors+strategies+LLM | Daily/Real-time | Composite score + decision dashboard |
-| mind_TradingAgent | Multi-agent debate (LangGraph) | Post-market | 5-tier rating + decision summary |
+| Subsystem | Method | Frequency | Output | Repo |
+|-----------|--------|-----------|--------|------|
+| lynx_vnpy | RandomForest quantitative model | Daily | Up-probability + signal grade | [Mindlx/lynx_vnpy](https://github.com/Mindlx/lynx_vnpy) |
+| MindLynx-Aistock | Factors+Strategies+LLM | Daily/Real-time | Score + decision dashboard | [Mindlx/MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) |
+| mind_TradingAgent | Multi-agent debate (LangGraph) | Post-market | 5-tier rating | [Mindlx/mind_TradingAgents](https://github.com/Mindlx/mind_TradingAgents) |
 
 The **fusion engine** receives all three signals, applies configurable weighted averaging, automatically detects inter-system disagreement, and applies an uncertainty penalty.
 
@@ -45,7 +45,8 @@ The **fusion engine** receives all three signals, applies configurable weighted 
 
 ### lynx_vnpy — Quantitative Signal Engine
 
-**Upstream**: [vnpy/vnpy](https://github.com/vnpy/vnpy) (MIT) — heavily customized
+**Repo**: [Mindlx/lynx_vnpy](https://github.com/Mindlx/lynx_vnpy)
+**Upstream**: [vnpy/vnpy](https://github.com/vnpy/vnpy) (MIT)
 
 - 15 technical indicators (RSI, MACD, ATR, Bollinger, CCI, etc.)
 - RandomForest classifier predicting next-day direction
@@ -54,9 +55,10 @@ The **fusion engine** receives all three signals, applies configurable weighted 
 
 The complete vnpy library is preserved (alpha factor research, CTA strategy engine, trading gateways) for future expansion.
 
-### MindLynx-Aistock — AI Stock Analysis System (heavily customized fork)
+### MindLynx-Aistock — AI Stock Analysis System
 
-**Upstream**: [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) (MIT) — heavily customized fork
+**Repo**: [Mindlx/MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock)
+**Upstream**: [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) (MIT)
 
 > 🤖 LLM-powered stock analysis system for A-share markets: factor computation → LLM reasoning → decision dashboard → multi-channel push.
 
@@ -67,7 +69,8 @@ The complete vnpy library is preserved (alpha factor research, CTA strategy engi
 
 ### mind_TradingAgent — Multi-Agent Trading System
 
-**Upstream**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) (Apache 2.0) — heavily customized
+**Repo**: [Mindlx/mind_TradingAgents](https://github.com/Mindlx/mind_TradingAgents)
+**Upstream**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) (Apache 2.0)
 
 - LangGraph-based multi-agent debating framework
 - 4 analysts (Market, Sentiment, News, Fundamentals)
@@ -159,11 +162,11 @@ Aistock_vnpy_Trading/
 
 ## Attribution
 
-| Subsystem | Upstream | License |
-|-----------|----------|---------|
-| lynx_vnpy | [vnpy/vnpy](https://github.com/vnpy/vnpy) | MIT |
-| MindLynx-Aistock | [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) | MIT |
-| mind_TradingAgent | [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) | Apache 2.0 |
+| Subsystem | Our Repo | Original Upstream | License |
+|-----------|----------|-------------------|---------|
+| lynx_vnpy | [Mindlx/lynx_vnpy](https://github.com/Mindlx/lynx_vnpy) | [vnpy/vnpy](https://github.com/vnpy/vnpy) | MIT |
+| MindLynx-Aistock | [Mindlx/MindLynx-Aistock](https://github.com/Mindlx/MindLynx-Aistock) | [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) | MIT |
+| mind_TradingAgent | [Mindlx/mind_TradingAgents](https://github.com/Mindlx/mind_TradingAgents) | [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) | Apache 2.0 |
 
 See [NOTICE.md](NOTICE.md).
 
