@@ -36,7 +36,6 @@ systems/MindLynx-Aistock/data/
 *.tmp
 
 # Cleaned up - not tracked
-systems/lynx_vnpy/lynx_vnpy/
 systems/MindLynx-Aistock/tests/
 systems/MindLynx-Aistock/scripts/
 systems/MindLynx-Aistock/api/
