@@ -76,6 +76,11 @@ def parse_args() -> argparse.Namespace:
         help="配置文件路径",
     )
     parser.add_argument(
+        "--mode", type=str, default=None,
+        choices=["linear", "bayesian", "dual"],
+        help="融合模式（覆盖 settings.yaml 中的 fusion_mode）",
+    )
+    parser.add_argument(
         "--stock-pool", type=str, default="config/stock_pool.csv",
         help="股票池 CSV 路径",
     )
@@ -160,14 +165,12 @@ def load_real_data(
     stock_pool_path: str = "config/stock_pool.csv",
 ) -> List[Dict[str, Any]]:
     """
-    从三个系统读取真实输出数据（零侵入版）。
+    从三个子系统读取真实输出数据。
 
-    使用 UnifiedDataLoader 统一加载，不修改任何原有系统代码。
-    - lynx_vnpy:    通过 Python import 直接调用 (sys.path)
-    - MindLynx:     读取 reports/ 下的 Markdown 报告（不修改）
-    - TradingAgent: 读取 ~/.mind_tradingagent/logs/ 下的 JSON 日志（不修改）
-
-    任何一个系统不可用时，融合引擎会自动处理缺失数据。
+    数据来源（均位于本项目内部）:
+    - lynx_vnpy:    systems/lynx_vnpy/ — 直接 import 调用 (sys.path)
+    - MindLynx:     systems/MindLynx-Aistock/reports/ — 解析 Markdown 报告
+    - TradingAgent: ~/.mind_tradingagent/logs/ — TA 自身输出的 JSON 日志
     """
     loader = UnifiedDataLoader(
         lynx_root="systems/lynx_vnpy",
@@ -177,11 +180,39 @@ def load_real_data(
     )
     stock_signals = loader.load_all(date)
 
+    # TA 当日日志不存在时，自动使用前一日数据（标记 stale）
+    _supply_ta_stale_data(stock_signals, date)
+
     if not stock_signals:
         print("⚠️  所有系统数据为空。各系统可能尚未运行或输出文件尚未生成。")
         print("   使用 --mock 模式测试融合引擎逻辑。")
 
     return stock_signals
+
+
+def _supply_ta_stale_data(
+    stock_signals: List[Dict[str, Any]], date: str,
+) -> None:
+    """补充 TA 数据：当日日志不存在时，尝试用昨日数据（标记为 stale）"""
+    date_obj = datetime.strptime(date, "%Y-%m-%d")
+    for offset in range(1, 3):
+        prev_date = (date_obj - timedelta(days=offset)).strftime("%Y-%m-%d")
+        need_ta = [s for s in stock_signals
+                   if not s.get("tradingagent_rating") or s["tradingagent_rating"] in ("", "Hold")]
+        if not need_ta:
+            return
+        from src.data_loader import TradingAgentDataLoader
+        ta_loader = TradingAgentDataLoader()
+        for s in need_ta:
+            code = s["code"]
+            result = ta_loader.load_by_stock_and_date(code, prev_date)
+            if result and result.get("rating"):
+                s["tradingagent_rating"] = result["rating"]
+                s["ta_debate_state"] = result.get("debate_state", {})
+                s["ta_is_stale"] = True
+                print(f"  ⏳ TA [{code}] 使用 {prev_date} 数据 (stale, rating={result['rating']})")
+        if any(s.get("ta_is_stale") for s in need_ta):
+            break
 
 
 def save_fusion_output(
@@ -227,6 +258,50 @@ def save_fusion_output(
                 })
         print(f"  CSV: {csv_path}")
 
+    # ── 写入 ly_signal.json（准实时文件交换区） ──
+    write_ly_signal(results, date)
+
+
+def write_ly_signal(results: List[Dict[str, Any]], date: str):
+    """将 ly 信号写入准实时文件交换区"""
+    ly_data = {"stocks": {}, "updated_at": date, "source": "ly_daily_fusion"}
+    for r in results:
+        if r.get("valid"):
+            code = r["stock_code"]
+            ly_data["stocks"][code] = {
+                "score": r.get("lynx_score", 0),
+                "signal": r.get("signal_name", ""),
+            }
+    rt_dir = Path("data/realtime")
+    rt_dir.mkdir(parents=True, exist_ok=True)
+    tmp = rt_dir / "ly_signal.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(ly_data, f, ensure_ascii=False)
+    os.rename(tmp, rt_dir / "ly_signal.json")
+    print(f"  📡 ly_signal.json 已写入 (准实时文件交换区)")
+
+
+def write_at_signal(ta_results: List[Dict[str, Any]], date: str):
+    """将 TA 评级写入准实时文件交换区"""
+    at_data = {"stocks": {}, "updated_at": date, "source": "ta_run"}
+    for r in ta_results:
+        if r.get("success") and r.get("rating"):
+            code = r.get("code", "")
+            if code:
+                from src.normalizer import SignalNormalizer
+                score = SignalNormalizer.normalize_tradingagent(r["rating"])
+                at_data["stocks"][code] = {
+                    "rating": r["rating"],
+                    "score": score,
+                }
+    rt_dir = Path("data/realtime")
+    rt_dir.mkdir(parents=True, exist_ok=True)
+    tmp = rt_dir / "at_signal.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(at_data, f, ensure_ascii=False)
+    os.rename(tmp, rt_dir / "at_signal.json")
+    print(f"  📡 at_signal.json 已写入 (准实时文件交换区)")
+
 
 def main():
     args = parse_args()
@@ -259,6 +334,8 @@ def main():
             )
             success = sum(1 for r in ta_results if r.get("success"))
             print(f"  ✅ TradingAgent: {success}/{len(ta_results)} 只分析完成")
+            # 写入准实时信号文件
+            write_at_signal(ta_results, today)
         except ImportError as e:
             print(f"  ⚠️  TradingAgent 导入失败: {e}")
             print(f"     确保已 clone mind_TradingAgent 并安装依赖")
@@ -292,10 +369,13 @@ def main():
         ta_is_stale = False  # 正在运行 TA，即将有新鲜数据
 
     if ta_is_stale:
-        print("  ⏳ TradingAgent 数据为前次结果（TA 定时器 16:00 运行）")
+        print("  ⏳ TradingAgent 数据为昨日结果（TA 定时器 16:00 运行）")
 
-    # 执行融合
+    # 执行融合（支持模式覆盖）
     engine = FusionEngine(args.config)
+    if args.mode:
+        engine.fusion_mode = args.mode
+        print(f"  🔄 融合模式: {args.mode} (覆盖配置)")
     results = engine.fuse_stock_pool(stock_signals, ta_is_stale=ta_is_stale)
 
     # 输出结果

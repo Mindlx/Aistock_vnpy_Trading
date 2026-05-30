@@ -333,9 +333,12 @@ def get_news(
     """Get news for an A-share stock.
 
     Primary source: EastMoney (东方财富) — rich A-share news coverage.
+    Enhanced with: official announcements from Cninfo (巨潮资讯) via EastMoney notice API.
     Fallback: stock_info_news (generic).
     """
     code = _bare_code(ticker)
+    parts = []
+
     try:
         # Primary: EastMoney news (rich, A-share specific)
         df = ak.stock_news_em(symbol=code)
@@ -357,9 +360,36 @@ def get_news(
                     if content:
                         lines.append(f"{content}...")
                     lines.append("")
-            return "\n".join(lines)
+            parts.append("\n".join(lines))
     except Exception as e:
         logger.warning(f"EastMoney news failed for {ticker}: {e}")
+
+    try:
+        # Enhanced: Cninfo official announcements via EastMoney notice API
+        # This covers 重大事项, 财务报告, 风险提示 etc. — more authoritative than news
+        df_notice = ak.stock_individual_notice_report(
+            security=code, symbol="全部",
+            begin_date=start_date.replace("-", ""),
+            end_date=end_date.replace("-", ""),
+        )
+        if df_notice is not None and not df_notice.empty:
+            lines = [
+                f"# Official Announcements for {code} ({ticker})",
+                f"# Source: 巨潮资讯 (Cninfo) via EastMoney",
+                "",
+            ]
+            for _, row in df_notice.iterrows():
+                title = str(row.get("公告标题", ""))
+                ann_type = str(row.get("公告类型", ""))
+                ann_date = str(row.get("公告日期", ""))
+                if title:
+                    lines.append(f"- [{ann_type}] {title} ({ann_date})")
+            parts.append("\n".join(lines))
+    except Exception as e:
+        logger.debug(f"Cninfo notice failed for {ticker}: {e}")
+
+    if parts:
+        return "\n\n".join(parts)
 
     # Fallback: generic stock info news
     try:
@@ -376,6 +406,85 @@ def get_news(
         logger.warning(f"fallback news also failed for {ticker}: {e2}")
 
     return f"# No news found for {code}\n"
+
+
+def get_china_market_news(date_str: str = "") -> str:
+    """Get China A-share market-wide news and policy intelligence.
+
+    Sources (free, akshare-based):
+    - 新闻联播 (CCTV News): official policy signals
+    - 重大事项公告: all A-share major announcements
+    - 风险提示公告: risk alerts across the market
+
+    Returns formatted text with policy news + market announcements.
+    """
+    from datetime import datetime
+    date_str = date_str or datetime.now().strftime("%Y-%m-%d")
+    date_compact = date_str.replace("-", "")
+    parts = []
+
+    # 1. CCTV News — policy signals
+    try:
+        df = ak.news_cctv(date=date_compact)
+        if df is not None and not df.empty:
+            lines = [
+                "# China Policy News — 新闻联播",
+                "# Source: CCTV (official, most authoritative)",
+                "",
+            ]
+            for _, row in df.iterrows():
+                title = str(row.get("title", ""))
+                content = str(row.get("content", ""))[:200]
+                if title:
+                    lines.append(f"## {title}")
+                    lines.append(f"{content}...")
+                    lines.append("")
+            parts.append("\n".join(lines))
+    except Exception as e:
+        logger.debug(f"CCTV news failed: {e}")
+
+    # 2. Major announcements across all A-shares
+    try:
+        df = ak.stock_notice_report(symbol="重大事项", date=date_compact)
+        if df is not None and not df.empty:
+            lines = [
+                "# A-share Major Announcements (重大事项)",
+                f"# Date: {date_str} | Total: {len(df)} announcements",
+                "# Source: EastMoney / Cninfo",
+                "",
+            ]
+            for _, row in df.head(15).iterrows():
+                title = str(row.get("公告标题", ""))
+                code = str(row.get("代码", ""))
+                name = str(row.get("名称", ""))
+                if title:
+                    lines.append(f"- {name}({code}): {title}")
+            parts.append("\n".join(lines))
+    except Exception as e:
+        logger.debug(f"Major announcements failed: {e}")
+
+    # 3. Risk alerts across the market
+    try:
+        df = ak.stock_notice_report(symbol="风险提示", date=date_compact)
+        if df is not None and not df.empty:
+            lines = [
+                "# A-share Risk Alerts (风险提示)",
+                f"# Date: {date_str} | Total: {len(df)} alerts",
+                "",
+            ]
+            for _, row in df.head(10).iterrows():
+                title = str(row.get("公告标题", ""))
+                code = str(row.get("代码", ""))
+                name = str(row.get("名称", ""))
+                if title:
+                    lines.append(f"- {name}({code}): {title}")
+            parts.append("\n".join(lines))
+    except Exception as e:
+        logger.debug(f"Risk alerts failed: {e}")
+
+    if parts:
+        return "\n\n".join(parts)
+    return "China market news temporarily unavailable.\n"
 
 
 def get_global_news() -> str:

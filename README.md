@@ -115,34 +115,77 @@ Aistock_vnpy_Trading 是一个 **三系统信号融合平台**，不是单一的
 
 | 模块 | 功能 |
 |------|------|
-| `normalizer.py` | 三系统信号统一归一化 |
-| `fusion_engine.py` | 加权积分 + 分歧检测 + 缺失容错 |
-| `data_loader.py` | 零侵入读取三个系统输出 |
+| `normalizer.py` | 三系统信号统一归一化（含概率空间映射） |
+| `fusion_engine.py` | 加权积分 + 分歧检测 + 缺失容错 + 贝叶斯融合 |
+| `reliability.py` | 可靠性调制配置、置信度校准、幻觉检测 |
+| `data_loader.py` | 零侵入读取三个系统输出 + 辩论记录解析 |
 | `wecom_notifier.py` | 企业微信 Markdown 推送 |
+| `unified_cache.py` | SQLite 共享 OHLCV 缓存层 |
 | `logger.py` | CSV/JSON 持久化 |
 
-### 融合算法
+### 融合算法 — 7 级语义对齐 (v3.0)
 
+三个系统的评判参考系完全不同，采用 **7 级统一决策空间 (L7)** 进行语义对齐：
+
+| 系统 | 参考系 | 本质 | 映射方式 |
+|------|--------|------|---------|
+| **ly** | 置信度 | "涨的概率？" | logit+tanh 连续映射 (保持概率信息) |
+| **ml** | 操作建议 | "怎么做？" | 类别+评分微调 (持有→中性) |
+| **at** | 研究评级 | "值得投吗？" | 直接 L7 映射 (纯分类) |
+
+**线性模式**（默认）:
 ```
-融合总分 = lynx得分 × 0.35 + MindLynx得分 × 0.35 + TradingAgent得分 × 0.30
+融合得分 = ly×0.35 + ml×0.35 + at×0.30   (得分范围 [-3, +3])
+- 分歧检测: 方向冲突时扣减 0~2.0 分 + 仓位上限1成
+- 缺失容错: 权重重分配 + 降级标记
 ```
 
-**核心特性**:
+**贝叶斯模式**:
+```
+有效权重 = α × c × (1-h)
+P_fused = Σ(w_eff × P_系统) / Σ(w_eff)
+- α: 系统基础可靠度 (ly=0.75, ml=0.55, at=0.40)
+- c: 置信度校准 (各自独立公式)
+- h: 幻觉检测 (ml:因子偏差, at:辩论一致性)
+- 数学否决权: ly 强信号时覆盖融合结果
+```
 
-- **分歧检测**: 系统间信号方向冲突时自动惩罚，降低仓位上限至 1成
-- **置信度调制**: 置信度参与加权，低置信信号自动降权
-- **缺失容错**: 任一系统不可用，权重自动重分配，标记降级
-- **仓位映射**: 融合分 → 强烈看多/弱看多/中性/弱看空/强烈看空
+### 7 级决策映射
 
-### 决策映射
+| L7 | 得分范围 | 信号 | 仓位 | 说明 |
+|----|---------|------|------|------|
+| +3 | [2.0, 3.0] | 🟢 强烈看多 | 2-3成 | 三系统强共识 |
+| +2 | [1.0, 2.0) | 🟢 看多 | 1-2成 | 明确看多 |
+| +1 | [0.33, 1.0) | 🟢 谨慎看多 | 0.5-1成 | 弱信号，需确认 |
+| 0 | (-0.33, 0.33) | ⚪ 中性/持有 | 0成 | **含"持有"语义** |
+| -1 | (-1.0, -0.33] | 🔴 谨慎看空 | 减至0.5成 | 弱警告 |
+| -2 | (-2.0, -1.0] | 🔴 看空 | 大幅减仓 | 明确看空 |
+| -3 | [-3.0, -2.0] | 🔴 强烈看空 | 清仓 | 三系统强共识 |
 
-| 融合分 | 信号 | 仓位 |
-|--------|------|------|
-| > 0.50 | 🟢 强烈看多 | 2-3成 |
-| 0.20 ~ 0.50 | 🟢 弱看多 | 0.5-1成 |
-| -0.10 ~ 0.20 | ⚪ 中性/观望 | 0成 |
-| -0.50 ~ -0.10 | 🔴 弱看空 | 减仓至0.5成以内 |
-| < -0.50 | 🔴 强烈看空 | 清仓 |
+> **关键修正**: ml 的"持有"不再映射为看多信号，而是 L7=0 (中性)。"持有"="继续持有不动"，不是买入信号。
+
+### 各系统映射规则
+
+**ly** — logit+tanh 连续映射（保留 prob_up 概率信息）:
+```python
+score = 3.0 × tanh( ln(prob_up / (100-prob_up)) / 2.0 )
+# prob_up=50 → 0.0, prob_up=70 → 1.2, prob_up=85 → 2.1
+```
+
+**ml** — 类别+评分微调:
+| 建议 | 基础 L7 | 评分微调 | 语义 |
+|------|---------|---------|------|
+| 买入 | +2.2 | ±0.4×(S-50)/50 | 强看多 |
+| 加仓 | +1.3 | ±0.4×(S-50)/50 | 看多 |
+| **持有** | **0.0** | ±0.3×(S-50)/50 | **中性！** |
+| 观望 | -0.1 | ±0.3×(S-50)/50 | 中性偏观望 |
+| 减仓 | -1.7 | ±0.4×(S-50)/50 | 看空 |
+| 卖出 | -2.1 | ±0.4×(S-50)/50 | 强看空 |
+
+**at** — 直接 L7 映射:
+```python
+Buy→+2.3  Overweight→+1.3  Hold→0.0  Underweight→-1.3  Sell→-2.3
+```
 
 ---
 
@@ -156,52 +199,80 @@ cd Aistock_vnpy_Trading
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+# MindLynx 子系统独立环境（可选，如不需 ML 可不装）
+systems/MindLynx-Aistock/.venv/bin/pip install -r systems/MindLynx-Aistock/requirements.txt
 ```
 
-如需运行 TradingAgent，额外安装：
-
-```bash
-pip install -e systems/mind_TradingAgent
-```
+> TA (TradingAgent) 依赖已内置在 fusion `.venv` 中，无需单独安装。
+> ly (lynx_vnpy) 依赖也已在 fusion `.venv` 中。
 
 ### 配置
 
 ```bash
-# 企业微信 Webhook（可选）
+# 企业微信 Webhook（已预置，无需额外配置）
 vim config/settings.yaml
+#   wecom.enabled: true  # 已启用
 
-# TradingAgent API Key（可选）
-cp systems/mind_TradingAgent/.env.example systems/mind_TradingAgent/.env
-# 编辑 .env，填入 DEEPSEEK_API_KEY
+# TradingAgent API Key（已配置）
+cat systems/mind_TradingAgent/.env
+
+# MindLynx API Key（已配置）
+cat systems/MindLynx-Aistock/.env
 ```
 
 ---
 
 ## 使用方式
 
-### 模拟运行
-
-```bash
-python scripts/run_daily.py --mock --dry-run
-```
-
 ### 融合分析
 
 ```bash
-# 读取三个系统已有输出，生成融合信号
-python scripts/run_daily.py
+# 默认模式（linear: 线性加权+分歧检测）
+.venv/bin/python scripts/run_daily.py
 
-# 指定日期
-python scripts/run_daily.py --date 2026-05-29
+# 贝叶斯模式
+.venv/bin/python scripts/run_daily.py --mode bayesian
+
+# 双模式对比
+.venv/bin/python scripts/run_daily.py --mode dual
+
+# 指定日期回测
+.venv/bin/python scripts/run_daily.py --date 2026-05-29
+
+# 仅打印不推送
+.venv/bin/python scripts/run_daily.py --dry-run
 ```
 
-### 触发 TradingAgent（需 LLM API Key）
+### 模拟运行
 
 ```bash
-python scripts/run_daily.py --run-ta
+.venv/bin/python scripts/run_daily.py --mock --dry-run
 ```
 
-### 同步上游更新
+### 触发 TradingAgent（每日 16:00 自动执行）
+
+```bash
+.venv/bin/python scripts/run_daily.py --run-ta
+```
+
+### systemd 自动运行
+
+所有定时任务通过 systemd 管理：
+
+| 定时器 | 时间 | 功能 |
+|--------|------|------|
+| `fusion.timer` | 工作日 15:30 | 日终融合分析 |
+| `TA.timer` | 工作日 16:00 | TradingAgent 深度论证 |
+
+```bash
+# MindLynx daemon（已运行）
+systemctl --user start Aistock_vnpy_Trading-monitor.service
+systemctl --user start Aistock_vnpy_Trading-scheduler.service
+
+# 查看所有服务
+systemctl --user list-units --all | grep aistock
+```
 
 ```bash
 ./scripts/sync_systems.sh

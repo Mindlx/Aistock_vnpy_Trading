@@ -163,7 +163,7 @@ class WeComNotifier:
         if disagreements:
             advice_parts.append("分歧标的注意仓位控制")
         if stale_ta:
-            advice_parts.append("TradingAgent 数据为前日结果")
+            advice_parts.append("TradingAgent 数据为昨日结果")
         if bullish_consensus:
             advice_parts.append(f"重点关注共识标的 {', '.join(r['stock_code'] for r in bullish_consensus[:3])}")
         if advice_parts:

@@ -18,17 +18,19 @@ venv/
 .vscode/
 .claude/
 .omo/
-.gitnexus/
 
-# Runtime Data
-config/logs/
+# Fusion runtime data
 data/fusion_output/
 data/lynx/
 data/mindlynx/
 data/tradingagent/
+data/cache/
+data/realtime/
+data/unified_cache/
 
 # System runtime data (not tracked)
 systems/MindLynx-Aistock/data/
+systems/MindLynx-Aistock/logs/
 
 # mind_TradingAgent runtime (user home)
 .mind_tradingagent/

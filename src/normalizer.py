@@ -1,100 +1,156 @@
 """
-三系统信号统一归一化模块
+三系统信号统一归一化模块 — 7 级语义对齐 (v3.0)
 
 ⚠️ 仅供学习和研究目的，不构成任何投资建议
 
-根据三个系统实际输出格式进行归一化映射：
-- lynx_vnpy: 信号含 emoji 前缀（如"🟢 买入"），置信度字段为 prob_up
-- MindLynx_Aistock: operation_advice 含6种（买入/加仓/持有/减仓/卖出/观望），sentiment_score 0-100
-- mind_TradingAgent: PortfolioRating 5级（Buy/Overweight/Hold/Underweight/Sell）
+根据 Oracle + c1skill 论证，三个系统参考系不同，采用 7 级统一决策空间：
+
+    级别        ly (概率)         ml (操作)      at (研报)
+    +3 强烈看多  logit 连续映射    买入           Buy
+    +2 看多      ↑                加仓           Overweight
+    +1 谨慎看多  ↑                —              —
+     0 中性/持有 prob_up≈50%      持有/观望      Hold
+    -1 谨慎看空  ↓                —              —
+    -2 看空      ↓                减仓           Underweight
+    -3 强烈看空  logit 连续映射    卖出           Sell
+
+关键语义修正: "持有"映射到 L7=0（中性），不再当作弱看多信号。
 """
 from __future__ import annotations
 
+import math
 import re
 from typing import Optional, Tuple
 
 
+# ══════════════════════════════════════════════
+# 7 级统一决策空间常量
+# ══════════════════════════════════════════════
+
+L7_STRONG_BUY = 3.0
+L7_BUY = 2.0
+L7_CAUTIOUS_BUY = 1.0
+L7_NEUTRAL = 0.0
+L7_CAUTIOUS_SELL = -1.0
+L7_SELL = -2.0
+L7_STRONG_SELL = -3.0
+
+L7_LABELS = {
+    3: "strong_bullish",
+    2: "bullish",
+    1: "cautious_bullish",
+    0: "neutral",
+    -1: "cautious_bearish",
+    -2: "bearish",
+    -3: "strong_bearish",
+}
+
+L7_POSITION = {
+    "strong_bullish": "2-3成",
+    "bullish": "1-2成",
+    "cautious_bullish": "0.5-1成",
+    "neutral": "0成",
+    "cautious_bearish": "减仓至0.5成以内",
+    "bearish": "大幅减仓",
+    "strong_bearish": "清仓",
+}
+
+
 class SignalNormalizer:
-    """三系统信号统一归一化"""
+    """三系统信号统一归一化 — 7级语义对齐 (v3.0)"""
 
-    # ===== lynx_vnpy 映射（基于 lynx_signal.py 实际输出） =====
-    # 原始信号含 emoji 前缀，如 "🟢 买入", "⚪ 观望", "🔴 回避"
-    LYNX_SIGNAL_MAP: dict[str, float] = {
-        "买入": 0.8,      # prob_up >= 65%，强烈看多
-        "关注": 0.55,     # prob_up >= 55%，弱看多
-        "观望": 0.0,      # prob_up >= 45%，中性
-        "谨慎": -0.3,     # prob_up >= 35%，弱看空
-        "回避": -0.8,     # prob_up < 35%，强烈看空
-    }
+    # ══════════════════════════════════════════
+    # ly: 连续概率 → logit+tanh 映射
+    # 不再使用离散信号表。prob_up 是 sklearn 真实概率，
+    # 用 logit 变换自然映射到 [-3, +3] 空间。
+    # ══════════════════════════════════════════
 
-    # ===== MindLynx_Aistock 映射 =====
-    # 实际 operation_advice 有6种，这里分组合并
-    MINDLYNX_SIGNAL_MAP: dict[str, float] = {
-        "买入": 0.6,
-        "加仓": 0.6,
-        "持有": 0.6,      # 基础观点值，具体按评分细化
-        "观望": 0.0,
-        "减仓": -0.6,
-        "卖出": -0.6,
-    }
-
-    # ===== mind_TradingAgent 映射 =====
-    # 实际 PortfolioRating: Buy / Overweight / Hold / Underweight / Sell
-    # 设计文档的 Strong BUY / BUY / HOLD / SELL / Strong SELL 为近似映射
-    TRADINGAGENT_SIGNAL_MAP: dict[str, float] = {
-        "Buy": 0.9,              # Strong BUY
-        "Overweight": 0.5,       # BUY（偏多但不如 Buy 强烈）
-        "Hold": 0.0,             # HOLD
-        "Underweight": -0.5,     # SELL（偏空）
-        "Sell": -0.9,            # Strong SELL
-    }
-
-    # ===== emoji 剥离 =====
+    # emoji 剥离（仅用于兼容旧版 lynx_signal 输出）
     EMOJI_PATTERN = re.compile(r"^[🟢🟡🔴⚪]\s*")
-    EMOJI_CHARS = re.compile(r"[\U0001F300-\U0001F9FF\u2600-\u27BF\u2B50\u2B06\u2B07\u2B05\u27A1\u2B55]")
+
+    # ══════════════════════════════════════════
+    # ml: 操作建议 → L7 映射
+    # 关键修正: "持有"=L7=0，不再是弱看多
+    # ══════════════════════════════════════════
+
+    # 基础映射（仅用于参考，实际计算有评分微调）
+    # 买入/加仓:  正 L7，sentiment_score 微调
+    # 持有/观望:  L7=0，细微上下浮动
+    # 减仓/卖出:  负 L7，sentiment_score 微调
+    ML_BASE = {
+        "买入": 2.2,      # L7=+3 ~ +2
+        "加仓": 1.3,      # L7=+2 ~ +1
+        "持有": 0.0,      # L7=0（中性）
+        "观望": -0.1,     # L7=0 ~ -1
+        "减仓": -1.7,     # L7=-2
+        "卖出": -2.1,     # L7=-3 ~ -2
+    }
+
+    # 评分微调系数（每系统不同）
+    ML_SENTIMENT_FACTOR = {
+        "买入": 0.4,
+        "加仓": 0.4,
+        "持有": 0.3,      # 窄幅，强化中性定位
+        "观望": 0.3,
+        "减仓": 0.4,
+        "卖出": 0.4,
+    }
+
+    # ══════════════════════════════════════════
+    # at: 离散评级 → 直接 L7 映射
+    # 无数值输出，纯粹分类
+    # ══════════════════════════════════════════
+
+    TRADINGAGENT_L7_MAP: dict[str, float] = {
+        "Buy": 2.3,           # L7=+3 (强烈看多)
+        "Overweight": 1.3,    # L7=+2 (看多)
+        "Hold": 0.0,          # L7=0 (中性/持有)
+        "Underweight": -1.3,  # L7=-2 (看空)
+        "Sell": -2.3,         # L7=-3 (强烈看空)
+    }
+
+    # ────────── emoji 剥离 ──────────
 
     @classmethod
     def _strip_emoji(cls, text: str) -> str:
-        """剥离文本开头的 emoji 和空格"""
         return cls.EMOJI_PATTERN.sub("", text).strip()
 
-    # ────────── lynx_vnpy 归一化 ──────────
+    # ────────── ly: 连续概率归一化 ──────────
+
+    @staticmethod
+    def _logit(p: float) -> float:
+        """logit 变换: ln(p / (1-p))，p∈(0,1)"""
+        p = max(0.001, min(0.999, p / 100.0))
+        return math.log(p / (1.0 - p))
 
     @classmethod
     def normalize_lynx(cls, signal: str, prob_up: float) -> Tuple[float, bool]:
         """
-        归一化 lynx_vnpy 输出。
+        ly 归一化: logit+tanh 连续映射。
 
-        prob_up 是模型预测的上涨概率（0-100），不是置信度。
-        prob_up 极端值（高或低）代表高确信度，中间值(45-55)代表不确定。
-        调制规则：看多信号用 prob_up 加权，看空信号用 prob_down = (100-prob_up) 加权。
+        score = 3.0 × tanh(logit(prob_up) / 2.0)
+
+        特性:
+        - prob_up=50 → score=0.0（精确中性）
+        - prob_up=70 → score≈1.2（L7=+2 看多）
+        - prob_up=85 → score≈2.1（L7=+3 强烈看多）
+        - 连续可微，无硬阈值
 
         参数:
-            signal: 原始信号字符串，如 "🟢 买入", "⚪ 观望"
-            prob_up: 上涨概率百分比（0-100）
+            signal: 原始信号（兼容旧格式，当前仅用于有效性判断）
+            prob_up: 上涨概率 0-100
 
         返回:
-            (归一化得分, 是否有效)
+            (L7 得分, 是否有效)
         """
-        # 剥离 emoji 前缀
-        clean_signal = cls._strip_emoji(signal)
-        base_score = cls.LYNX_SIGNAL_MAP.get(clean_signal, 0.0)
+        p = float(prob_up)
+        if p < 0 or p > 100:
+            return 0.0, False
+        logit_val = cls._logit(p)
+        score = 3.0 * math.tanh(logit_val / 2.0)
+        return score, True
 
-        # 观望信号：中性，不乘概率
-        if clean_signal == "观望":
-            return 0.0, True
-
-        # 方向性置信度调制：
-        #   看多信号 → 用 prob_up 加权（越高越看多）
-        #   看空信号 → 用 prob_down = (100-prob_up) 加权（prob_up越低=越看空）
-        if base_score > 0:
-            conviction = prob_up / 100.0
-        else:
-            conviction = (100.0 - prob_up) / 100.0
-
-        return base_score * conviction, True
-
-    # ────────── MindLynx_Aistock 归一化 ──────────
+    # ────────── ml: 操作建议归一化 ──────────
 
     @classmethod
     def normalize_mindlynx(
@@ -104,69 +160,45 @@ class SignalNormalizer:
         trend_prediction: Optional[str] = None,
     ) -> float:
         """
-        归一化 MindLynx_Aistock 输出。
+        ml 归一化: 类别 + 评分微调。
+
+        score = base(advice) + factor(advice) × (sentiment - 50) / 50
+
+        关键语义:
+        - "持有" → base=0.0, 评分仅在中性带内微调 (±0.3)
+        - "买入" → base=2.2 向上，评分越高越强
+        - "卖出" → base=-2.1 向下
 
         参数:
-            operation_advice: 操作建议（买入/加仓/持有/减仓/卖出/观望）
-            sentiment_score: 综合评分（0-100）
-            trend_prediction: 趋势预测（可选，用于辅助判断）
+            operation_advice: 操作建议
+            sentiment_score: LLM 评分 0-100
+            trend_prediction: 趋势预测（保留参数，暂未使用）
 
         返回:
-            归一化得分（-0.6 ~ +0.6）
+            L7 得分 (-3 ~ +3)
         """
-        # 先按操作建议拿到基础观点值
-        base_score = cls.MINDLYNX_SIGNAL_MAP.get(operation_advice, 0.0)
+        base = cls.ML_BASE.get(operation_advice, 0.0)
+        factor = cls.ML_SENTIMENT_FACTOR.get(operation_advice, 0.3)
+        modulation = factor * (sentiment_score - 50.0) / 50.0
+        score = base + modulation
+        return max(-3.0, min(3.0, score))
 
-        if operation_advice in ("买入", "加仓"):
-            # 买入信号: 评分越高越强
-            if sentiment_score >= 70:
-                return 0.6
-            elif sentiment_score >= 60:
-                return 0.5
-            else:
-                return 0.4  # 弱买入
-
-        elif operation_advice == "持有":
-            # 持有信号按评分区间细化
-            if sentiment_score >= 60:
-                return 0.6    # 明确持有
-            elif sentiment_score >= 50:
-                return 0.3    # 弱持有，谨慎偏多
-            else:
-                return 0.0    # 评分偏低，持有但偏弱
-
-        elif operation_advice == "观望":
-            # 观望按评分区分
-            if sentiment_score >= 40:
-                return 0.0    # 中性观望
-            else:
-                return -0.2   # 中性偏下
-
-        elif operation_advice in ("减仓", "卖出"):
-            return -0.6
-
-        return 0.0
-
-    # ────────── mind_TradingAgent 归一化 ──────────
+    # ────────── at: 离散评级归一化 ──────────
 
     @classmethod
     def normalize_tradingagent(cls, rating: str) -> float:
         """
-        归一化 mind_TradingAgent 输出。
+        at 归一化: 直接 L7 映射。
 
-        参数:
-            rating: PortfolioRating 字符串
-                    Buy / Overweight / Hold / Underweight / Sell
-
-        返回:
-            归一化得分（-0.9 ~ +0.9）
-
-        注意:
-            TradingAgent 不提供独立置信度字段，直接使用评级对应观点值。
+        at 无数值输出，仅 5 级分类，直接映射到 L7:
+          Buy → +2.3 (L7=+3)
+          Overweight → +1.3 (L7=+2)
+          Hold → 0.0 (L7=0)
+          Underweight → -1.3 (L7=-2)
+          Sell → -2.3 (L7=-3)
         """
-        # 输入标准化（首字母大写）
         normalized = rating.strip().capitalize()
-        return cls.TRADINGAGENT_SIGNAL_MAP.get(normalized, 0.0)
+        return cls.TRADINGAGENT_L7_MAP.get(normalized, 0.0)
 
     # ────────── 原始信号解析辅助 ──────────
 
@@ -177,14 +209,66 @@ class SignalNormalizer:
 
     @classmethod
     def map_normalized_to_label(cls, score: float) -> str:
-        """将归一化得分映射到可读标签（用于日志/调试）"""
-        if score >= 0.6:
+        """将 L7 得分映射到可读标签"""
+        if score >= 2.5:
             return "strong_bullish"
-        elif score >= 0.2:
+        elif score >= 1.5:
             return "bullish"
-        elif score >= -0.2:
+        elif score >= 0.5:
+            return "cautious_bullish"
+        elif score >= -0.5:
             return "neutral"
-        elif score >= -0.6:
+        elif score >= -1.5:
+            return "cautious_bearish"
+        elif score >= -2.5:
             return "bearish"
         else:
             return "strong_bearish"
+
+    @classmethod
+    def score_to_l7_integer(cls, score: float) -> int:
+        """将连续 L7 得分映射到 7 级整数"""
+        if score >= 2.5:
+            return 3
+        elif score >= 1.5:
+            return 2
+        elif score >= 0.5:
+            return 1
+        elif score >= -0.5:
+            return 0
+        elif score >= -1.5:
+            return -1
+        elif score >= -2.5:
+            return -2
+        else:
+            return -3
+
+    @staticmethod
+    def l7_label(l7: int) -> str:
+        """L7 整数 → 标签"""
+        return L7_LABELS.get(l7, "neutral")
+
+    @staticmethod
+    def l7_position(label: str) -> str:
+        """标签 → 仓位建议"""
+        return L7_POSITION.get(label, "0成")
+
+    # ────────── 概率空间映射（贝叶斯融合） ──────────
+
+    @staticmethod
+    def to_probability(score: float, k: float = 1.0) -> float:
+        """
+        将 L7 得分 [-3, +3] 映射到概率 [0, 1]。
+
+        v3.0: k 默认从 2.5 降至 1.0，适配 [-3,+3] 宽范围。
+
+        k=1.0 时:
+          +3.0 → P≈0.95
+          +2.0 → P≈0.88
+          +1.0 → P≈0.73
+           0.0 → P=0.50
+          -1.0 → P≈0.27
+          -2.0 → P≈0.12
+          -3.0 → P≈0.05
+        """
+        return 1.0 / (1.0 + math.exp(-k * score))

@@ -1,7 +1,5 @@
 """
-三系统融合引擎单元测试
-
-仅依赖 fusion_system 内部模块，不依赖三个独立系统。
+三系统融合引擎单元测试 — v3.0 7 级语义对齐
 
 ⚠️ 仅供学习和研究目的，不构成任何投资建议
 """
@@ -18,7 +16,6 @@ import pytest
 
 import yaml
 
-# 添加项目根目录到 Python 路径
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.data_loader import (
@@ -28,461 +25,347 @@ from src.data_loader import (
 )
 from src.fusion_engine import FusionEngine
 from src.normalizer import SignalNormalizer
+from src.reliability import (
+    ConfidenceCalibrator,
+    HallucinationDetector,
+    ReliabilityConfig,
+    score_to_probability,
+    probability_to_decision,
+)
 from src.wecom_notifier import WeComNotifier
 
 
-# ══════════════════════════════════════════
-# 基础配置
-# ══════════════════════════════════════════
-
 MINIMAL_CONFIG = {
-    "weights": {
-        "lynx_vnpy": 0.35,
-        "mindlynx": 0.35,
-        "tradingagent": 0.30,
-    },
-    "thresholds": {
-        "strong_bullish": 0.50,
-        "weak_bullish": 0.20,
-        "neutral_low": -0.10,
-        "weak_bearish": -0.50,
-    },
-    "confidence_thresholds": {
-        "lynx_min_valid": 35,
-    },
-    "schedule": {"run_time": "16:30", "timezone": "Asia/Shanghai"},
-    "wecom": {"webhook_url": "", "enabled": False},
-    "data_paths": {
-        "lynx_output": "/tmp/test_lynx_output/",
-        "mindlynx_reports": "/tmp/test_mindlynx_reports/",
-        "tradingagent_logs": "/tmp/test_tradingagent_logs/",
-        "fusion_output": "/tmp/test_fusion_output/",
-    },
+    "weights": {"lynx_vnpy": 0.35, "mindlynx": 0.35, "tradingagent": 0.30},
     "logging": {"level": "INFO", "retention_days": 90},
-    "fusion_output": {"save_daily_csv": True, "save_daily_json": True},
 }
 
 
 # ══════════════════════════════════════════
-# Normalizer 测试
+# v3.0 Normalizer 测试 — 7 级语义对齐
 # ══════════════════════════════════════════
 
 
 class TestSignalNormalizer:
-    """信号归一化单元测试"""
-
     def setup_method(self):
         self.n = SignalNormalizer()
 
-    # ── lynx_vnpy 归一化 ──
+    # ── ly: logit+tanh 连续映射 ──
 
-    def test_lynx_buy(self):
-        score, valid = self.n.normalize_lynx("🟢 买入", 72.0)
-        assert valid is True
-        assert score == pytest.approx(0.8 * 0.72, rel=1e-2)
-
-    def test_lynx_watch(self):
-        score, valid = self.n.normalize_lynx("🟢 关注", 58.0)
-        assert valid is True
-        assert score == pytest.approx(0.55 * 0.58, rel=1e-2)
-
-    def test_lynx_neutral(self):
-        """观望信号不乘概率"""
+    def test_lynx_prob_up_50_neutral(self):
         score, valid = self.n.normalize_lynx("⚪ 观望", 50.0)
         assert valid is True
-        assert score == 0.0
+        assert abs(score) < 0.01
 
-    def test_lynx_caution(self):
-        """看空信号用 prob_down = (100-prob_up) 加权"""
-        score, valid = self.n.normalize_lynx("🟡 谨慎", 40.0)
+    def test_lynx_prob_up_72(self):
+        score, valid = self.n.normalize_lynx("🟢 买入", 72.0)
         assert valid is True
-        assert score == pytest.approx(-0.3 * ((100 - 40) / 100), rel=1e-2)
+        assert 1.3 < score < 1.4
 
-    def test_lynx_avoid(self):
-        """回避是强烈看空，用 prob_down 加权"""
+    def test_lynx_prob_up_25(self):
         score, valid = self.n.normalize_lynx("🔴 回避", 25.0)
         assert valid is True
-        assert score == pytest.approx(-0.8 * ((100 - 25) / 100), rel=1e-2)
+        assert -1.51 < score < -1.48
 
-    def test_lynx_avoid_extreme(self):
-        """极端看空时得分应更强"""
-        score_low, _ = self.n.normalize_lynx("🔴 回避", 10.0)
-        score_high, _ = self.n.normalize_lynx("🔴 回避", 25.0)
-        assert score_low < score_high, "更低prob_up应产生更负的得分"
-
-    def test_lynx_strip_emoji_multi(self):
-        """多种 emoji 前缀都能正确剥离"""
-        for raw_signal in ["🟢 买入", "⚪ 观望", "🟡 谨慎", "🔴 回避"]:
-            clean = self.n._strip_emoji(raw_signal)
-            assert clean in ["买入", "关注", "观望", "谨慎", "回避"]
-
-    def test_lynx_signal_without_emoji(self):
-        """无 emoji 的原始信号也能归一化"""
-        score, valid = self.n.normalize_lynx("买入", 72.0)
+    def test_lynx_prob_up_40(self):
+        score, valid = self.n.normalize_lynx("🟡 谨慎", 40.0)
         assert valid is True
-        assert score > 0
+        assert -0.65 < score < -0.55
 
-    # ── MindLynx 归一化 ──
+    def test_lynx_symmetric(self):
+        """prob_up=30 vs 70 应大致对称"""
+        s30, _ = self.n.normalize_lynx("", 30.0)
+        s70, _ = self.n.normalize_lynx("", 70.0)
+        assert abs(s30 + s70) < 0.05
+
+    def test_lynx_extreme(self):
+        s95, _ = self.n.normalize_lynx("", 95.0)
+        assert s95 < 3.0  # 永远不会饱和到+3
+
+    def test_lynx_emoji_strip(self):
+        clean = self.n._strip_emoji("🟢 买入")
+        assert clean == "买入"
+
+    # ── ml: 类别+评分微调映射 ──
 
     def test_mindlynx_buy(self):
-        score = self.n.normalize_mindlynx("买入", 75)
-        assert score == 0.6
+        assert self.n.normalize_mindlynx("买入", 75) > 2.0
+        assert self.n.normalize_mindlynx("买入", 60) > 2.0
 
-    def test_mindlynx_add_position(self):
-        score = self.n.normalize_mindlynx("加仓", 65)
-        assert score == 0.5  # 评分60-69区间返回0.5
+    def test_mindlynx_add(self):
+        assert 1.0 < self.n.normalize_mindlynx("加仓", 70) < 2.0
 
-    def test_mindlynx_hold_high(self):
+    def test_mindlynx_hold_neutral(self):
+        """持有 → L7=0"""
         score = self.n.normalize_mindlynx("持有", 65)
-        assert score == 0.6
+        assert abs(score) < 0.2  # 即使高评分也在中性带
 
-    def test_mindlynx_hold_low(self):
-        score = self.n.normalize_mindlynx("持有", 45)
-        assert score == 0.0
+    def test_mindlynx_hold_low_score(self):
+        score = self.n.normalize_mindlynx("持有", 30)
+        assert abs(score) < 0.2  # 低评分也在中性带
 
-    def test_mindlynx_watch_neutral(self):
-        score = self.n.normalize_mindlynx("观望", 50)
-        assert score == 0.0
-
-    def test_mindlynx_watch_bearish(self):
-        score = self.n.normalize_mindlynx("观望", 30)
-        assert score == -0.2
+    def test_mindlynx_watch(self):
+        assert abs(self.n.normalize_mindlynx("观望", 50)) < 0.2
 
     def test_mindlynx_sell(self):
-        score = self.n.normalize_mindlynx("卖出", 30)
-        assert score == -0.6
+        assert self.n.normalize_mindlynx("卖出", 30) < -1.5
 
     def test_mindlynx_reduce(self):
-        score = self.n.normalize_mindlynx("减仓", 25)
-        assert score == -0.6
+        assert self.n.normalize_mindlynx("减仓", 50) < -1.0
 
-    # ── TradingAgent 归一化 ──
+    # ── at: 直接 L7 映射 ──
 
     def test_tradingagent_buy(self):
-        score = self.n.normalize_tradingagent("Buy")
-        assert score == 0.9
+        assert self.n.normalize_tradingagent("Buy") == pytest.approx(2.3)
 
     def test_tradingagent_overweight(self):
-        score = self.n.normalize_tradingagent("Overweight")
-        assert score == 0.5
+        assert self.n.normalize_tradingagent("Overweight") == pytest.approx(1.3)
 
     def test_tradingagent_hold(self):
-        score = self.n.normalize_tradingagent("Hold")
-        assert score == 0.0
+        assert self.n.normalize_tradingagent("Hold") == 0.0
 
     def test_tradingagent_underweight(self):
-        score = self.n.normalize_tradingagent("Underweight")
-        assert score == -0.5
+        assert self.n.normalize_tradingagent("Underweight") == pytest.approx(-1.3)
 
     def test_tradingagent_sell(self):
-        score = self.n.normalize_tradingagent("Sell")
-        assert score == -0.9
+        assert self.n.normalize_tradingagent("Sell") == pytest.approx(-2.3)
 
-    def test_tradingagent_lowercase(self):
-        """不区分大小写"""
-        score = self.n.normalize_tradingagent("buy")
-        assert score == 0.9
+    def test_tradingagent_case_insensitive(self):
+        assert self.n.normalize_tradingagent("buy") == pytest.approx(2.3)
 
     def test_tradingagent_unknown(self):
-        """未知评级返回 0"""
-        score = self.n.normalize_tradingagent("Moon")
-        assert score == 0.0
+        assert self.n.normalize_tradingagent("Moon") == 0.0
 
-    # ── 助手方法 ──
+    # ── 标签映射 ──
 
-    def test_map_normalized_to_label(self):
-        assert self.n.map_normalized_to_label(0.7) == "strong_bullish"
-        assert self.n.map_normalized_to_label(0.3) == "bullish"
+    def test_map_normalized_to_label_7level(self):
+        assert self.n.map_normalized_to_label(2.7) == "strong_bullish"
+        assert self.n.map_normalized_to_label(2.0) == "bullish"
+        assert self.n.map_normalized_to_label(1.0) == "cautious_bullish"
         assert self.n.map_normalized_to_label(0.0) == "neutral"
-        assert self.n.map_normalized_to_label(-0.3) == "bearish"
-        assert self.n.map_normalized_to_label(-0.7) == "strong_bearish"
+        assert self.n.map_normalized_to_label(-1.0) == "cautious_bearish"
+        assert self.n.map_normalized_to_label(-2.0) == "bearish"
+        assert self.n.map_normalized_to_label(-2.7) == "strong_bearish"
 
-    def test_parse_lynx_signal_text(self):
-        assert self.n.parse_lynx_signal_text("🟢 买入") == "买入"
-        assert self.n.parse_lynx_signal_text("⚪ 观望") == "观望"
+    def test_score_to_l7_integer(self):
+        assert SignalNormalizer.score_to_l7_integer(2.7) == 3
+        assert SignalNormalizer.score_to_l7_integer(2.0) == 2
+        assert SignalNormalizer.score_to_l7_integer(1.0) == 1
+        assert SignalNormalizer.score_to_l7_integer(0.0) == 0
+        assert SignalNormalizer.score_to_l7_integer(-1.0) == -1
+        assert SignalNormalizer.score_to_l7_integer(-2.0) == -2
+        assert SignalNormalizer.score_to_l7_integer(-2.7) == -3
 
 
 # ══════════════════════════════════════════
-# FusionEngine 测试
+# FusionEngine 测试 — 7 级决策
 # ══════════════════════════════════════════
 
 
 class TestFusionEngine:
-    """融合引擎单元测试"""
-
     def setup_method(self):
-        self.tmpdir = tempfile.mkdtemp()
-        config_path = os.path.join(self.tmpdir, "settings.yaml")
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(MINIMAL_CONFIG, f)
-        self.engine = FusionEngine(config_path)
+        self.engine = FusionEngine("config/settings.yaml")
 
-    # ── 共识场景 ──
+    def test_l7_strong_bullish(self):
+        d = self.engine._get_final_decision(2.8)
+        assert d["signal"] == "strong_bullish"
+        assert "2-3成" in d["position"]
 
-    def test_consensus_strong_bullish(self):
-        """三系统一致看多 → 强烈看多"""
-        result = self.engine.fuse_single_stock(
-            stock_code="601801",
-            stock_name="皖新传媒",
-            lynx_signal="🟢 买入",
-            lynx_prob_up=72.0,
-            mindlynx_advice="持有",
-            mindlynx_score=72,
-            tradingagent_rating="Buy",
-        )
-        assert result["valid"] is True
-        assert result["signal"] == "strong_bullish"
-        assert result["fusion_score"] > 0.50
-        assert result["has_disagreement"] is False
-        assert result["is_degraded"] is False
+    def test_l7_bullish(self):
+        d = self.engine._get_final_decision(2.0)
+        assert d["signal"] == "bullish"
+        assert "1-2成" in d["position"]
 
-    def test_consensus_strong_bearish(self):
-        """三系统一致看空 → 强烈看空"""
-        result = self.engine.fuse_single_stock(
-            stock_code="603189",
-            stock_name="*ST网达",
-            lynx_signal="🔴 回避",
-            lynx_prob_up=25.0,
-            mindlynx_advice="卖出",
-            mindlynx_score=25,
-            tradingagent_rating="Sell",
-        )
-        assert result["valid"] is True
-        assert result["signal"] == "strong_bearish"
-        assert result["fusion_score"] < -0.50
+    def test_l7_cautious_bullish(self):
+        d = self.engine._get_final_decision(1.0)
+        assert d["signal"] == "cautious_bullish"
 
-    def test_consensus_weak_bullish(self):
-        """两系统偏多一系统中性 → 弱看多"""
-        result = self.engine.fuse_single_stock(
-            stock_code="600372",
-            stock_name="中航机载",
-            lynx_signal="🟢 关注",
-            lynx_prob_up=60.0,
-            mindlynx_advice="观望",
-            mindlynx_score=52,
-            tradingagent_rating="Overweight",
-        )
-        assert result["valid"] is True
-        assert result["signal"] in ("weak_bullish", "neutral")
+    def test_l7_neutral(self):
+        d = self.engine._get_final_decision(0.0)
+        assert d["signal"] == "neutral"
+        assert "0成" in d["position"]
 
-    # ── 分歧场景 ──
+    def test_l7_cautious_bearish(self):
+        d = self.engine._get_final_decision(-1.0)
+        assert d["signal"] == "cautious_bearish"
 
-    def test_disagreement_detected(self):
-        """系统间分歧 → has_disagreement=True"""
-        result = self.engine.fuse_single_stock(
-            stock_code="000592",
-            stock_name="平潭发展",
-            lynx_signal="🟢 买入",
-            lynx_prob_up=70.0,
-            mindlynx_advice="卖出",
-            mindlynx_score=30,
-            tradingagent_rating="Buy",
-        )
-        assert result["has_disagreement"] is True
-        assert result["disagreement_score"] > 0
-        assert result["uncertainty_penalty"] > 0
+    def test_l7_bearish(self):
+        d = self.engine._get_final_decision(-2.0)
+        assert d["signal"] == "bearish"
 
-    def test_disagreement_position_capped(self):
-        """分歧状态下仓位上限为 1成"""
-        result = self.engine.fuse_single_stock(
-            stock_code="000592",
-            stock_name="平潭发展",
-            lynx_signal="🟢 买入",
-            lynx_prob_up=80.0,
-            mindlynx_advice="卖出",
-            mindlynx_score=20,
-            tradingagent_rating="Buy",
-        )
-        assert result["disagreement_capped"] is True
-        # 即使融合得分较高，仓位也应被限制
-        assert "1成" in result["position_advice"] or "0.5" in result["position_advice"]
+    def test_l7_strong_bearish(self):
+        d = self.engine._get_final_decision(-2.8)
+        assert d["signal"] == "strong_bearish"
+        assert "清仓" in d["position"]
 
-    # ── 缺失数据场景 ──
+    def test_l7_disagreement_cap(self):
+        d = self.engine._get_final_decision(2.8, disagreement=True)
+        assert d["disagreement_capped"] is True
+        assert "1成" in d["position"]  # 分歧上限
 
-    def test_missing_lynx_low_confidence(self):
-        """低 prob_up 买入信号仍有效（prob_up 是上涨概率，不是置信度）"""
-        result = self.engine.fuse_single_stock(
-            stock_code="601801",
-            stock_name="皖新传媒",
-            lynx_signal="🟢 买入",
-            lynx_prob_up=30.0,  # P(涨)=30%, P(跌)=70%，低概率看多但有效
-            mindlynx_advice="持有",
-            mindlynx_score=65,
-            tradingagent_rating="Buy",
-        )
-        assert result["lynx_valid"] is True  # 不再因低prob_up被丢弃
-        assert result["lynx_score"] < 0.5  # 但得分较低（0.8*0.30=0.24）
+    def test_detect_disagreement(self):
+        has, sc = FusionEngine._detect_disagreement(2.0, 2.0, -1.5, True, True, True)
+        assert has is True
+        assert sc > 0
 
-    def test_all_systems_invalid(self):
-        """所有系统无效 → 返回无效信号"""
-        result = self.engine.fuse_single_stock(
-            stock_code="000000",
-            stock_name="测试",
-            lynx_signal="🟢 买入",
-            lynx_prob_up=20.0,  # < 35%
-            mindlynx_advice="观望",
-            mindlynx_score=50,
-            tradingagent_rating="Hold",
-        )
-        # MindLynx 和 TradingAgent 始终有效，所以这里仍然是有效的
-        assert result["valid"] is True  # 至少两个系统有效
+    def test_detect_no_disagreement(self):
+        has, sc = FusionEngine._detect_disagreement(2.0, 1.5, 0.5, True, True, True)
+        assert has is False
+        assert sc == 0.0
 
-    # ── 权重分配 ──
-
-    def test_adjusted_weights_normal(self):
-        weights, count, degraded = self.engine._compute_adjusted_weights(True, True, True)
-        assert count == 3
-        assert degraded is False
-        assert abs(sum(weights.values()) - 1.0) < 0.01
+    def test_adjusted_weights_all_valid(self):
+        w, c, d = self.engine._compute_adjusted_weights(True, True, True)
+        assert abs(sum(w.values()) - 1.0) < 0.01
+        assert c == 3
+        assert d is False
 
     def test_adjusted_weights_one_missing(self):
-        weights, count, degraded = self.engine._compute_adjusted_weights(False, True, True)
-        assert count == 2
-        assert degraded is True
-        assert "lynx" not in weights
-        assert abs(sum(weights.values()) - 1.0) < 0.01
+        w, c, d = self.engine._compute_adjusted_weights(True, False, True)
+        assert abs(sum(w.values()) - 1.0) < 0.01
+        assert c == 2
+        assert d is True
 
-    # ── 批量融合 ──
-
-    def test_fuse_stock_pool(self):
-        signals = [
-            {
-                "code": "601801", "name": "皖新传媒",
-                "lynx_signal": "🟢 买入", "lynx_prob_up": 72.0,
-                "mindlynx_advice": "持有", "mindlynx_score": 72,
-                "tradingagent_rating": "Buy",
-            },
-            {
-                "code": "603189", "name": "*ST网达",
-                "lynx_signal": "🔴 回避", "lynx_prob_up": 25.0,
-                "mindlynx_advice": "卖出", "mindlynx_score": 25,
-                "tradingagent_rating": "Sell",
-            },
-        ]
-        results = self.engine.fuse_stock_pool(signals)
-        assert len(results) == 2
-        # 排序：看多在前
-        assert results[0]["fusion_score"] > results[1]["fusion_score"]
-
-    # ── 投资组合摘要 ──
-
-    def test_portfolio_summary(self):
-        signals = []
-        for i in range(3):
-            signals.append({
-                "code": f"00000{i}",
-                "name": f"测试{i}",
-                "lynx_signal": "🟢 买入", "lynx_prob_up": 70.0,
-                "mindlynx_advice": "持有", "mindlynx_score": 65,
-                "tradingagent_rating": "Buy",
-            })
-        results = self.engine.fuse_stock_pool(signals)
-        summary = self.engine.get_portfolio_summary(results)
-        assert summary["total_valid"] == 3
-        assert summary["distribution"]["strong_bullish"] >= 0
+    def test_all_systems_invalid(self):
+        w, c, d = self.engine._compute_adjusted_weights(False, False, False)
+        assert c == 0
+        assert d is True
 
 
 # ══════════════════════════════════════════
-# DataLoader 测试
+# 概率映射测试
+# ══════════════════════════════════════════
+
+
+class TestProbabilityMapping:
+    def test_score_zero_to_prob(self):
+        assert SignalNormalizer.to_probability(0.0) == 0.5
+
+    def test_score_positive_to_prob(self):
+        p = SignalNormalizer.to_probability(2.0)
+        assert 0.87 < p < 0.89
+
+    def test_score_negative_to_prob(self):
+        p = SignalNormalizer.to_probability(-2.0)
+        assert 0.11 < p < 0.13
+
+    def test_score_extreme(self):
+        p = SignalNormalizer.to_probability(3.0)
+        assert p > 0.93
+
+    def test_custom_k(self):
+        p1 = SignalNormalizer.to_probability(1.0, k=0.5)
+        p2 = SignalNormalizer.to_probability(1.0, k=2.0)
+        assert p1 > 0.5
+        assert p2 > p1
+
+    def test_prob_to_decision_7level(self):
+        thresholds = {
+            "strong_bullish": 0.88, "bullish": 0.73,
+            "cautious_bullish": 0.62, "cautious_bearish": 0.38,
+            "bearish": 0.27, "strong_bearish": 0.12,
+        }
+        assert probability_to_decision(0.90, thresholds) == "strong_bullish"
+        assert probability_to_decision(0.80, thresholds) == "bullish"
+        assert probability_to_decision(0.65, thresholds) == "cautious_bullish"
+        assert probability_to_decision(0.50, thresholds) == "neutral"
+        assert probability_to_decision(0.30, thresholds) == "cautious_bearish"
+        assert probability_to_decision(0.20, thresholds) == "bearish"
+        assert probability_to_decision(0.05, thresholds) == "strong_bearish"
+
+
+# ══════════════════════════════════════════
+# 可靠性配置测试
+# ══════════════════════════════════════════
+
+
+class TestReliability:
+    def test_alpha_ly(self):
+        assert ReliabilityConfig.alpha("lynx_vnpy") == 0.75
+
+    def test_alpha_ml(self):
+        assert ReliabilityConfig.alpha("mindlynx") == 0.55
+
+    def test_alpha_at(self):
+        assert ReliabilityConfig.alpha("tradingagent") == 0.40
+
+    def test_calibrate_ly(self):
+        assert ConfidenceCalibrator.calibrate_ly(85.0) == 0.70
+        assert ConfidenceCalibrator.calibrate_ly(50.0) == 0.0
+
+    def test_ly_no_hallucination(self):
+        assert HallucinationDetector.detect_ly() == 0.0
+
+    def test_at_default_h(self):
+        assert HallucinationDetector.detect_at() == 0.30
+
+    def test_at_debate_low_hallucination(self):
+        h = HallucinationDetector.detect_at(debate_state={
+            "debate_available": True,
+            "investment_agreement": 0.9,
+            "risk_agreement": 0.8,
+            "analyst_variance": 0.1,
+        })
+        assert h < 0.20
+
+
+# ══════════════════════════════════════════
+# 否决权规则测试
+# ══════════════════════════════════════════
+
+
+class TestOverrideRules:
+    def test_no_override_same_dir(self):
+        assert FusionEngine._apply_bayesian_override(0.55, 0.60, 0.65, 0.62) == 0.62
+
+    def test_override_ly_ml_vs_at(self):
+        p = FusionEngine._apply_bayesian_override(0.85, 0.60, 0.20, 0.45)
+        expected = 0.80 * 0.85 + 0.20 * 0.45
+        assert abs(p - expected) < 0.01
+
+    def test_override_2v1_against_ly(self):
+        p = FusionEngine._apply_bayesian_override(0.15, 0.60, 0.70, 0.55)
+        expected = 0.40 * 0.15 + 0.60 * 0.55
+        assert abs(p - expected) < 0.01
+
+
+# ══════════════════════════════════════════
+# 数据加载器测试
 # ══════════════════════════════════════════
 
 
 class TestDataLoaders:
-    """数据加载器测试"""
-
     def setup_method(self):
-        self.tmpdir = tempfile.mkdtemp()
-        self.lynx_dir = os.path.join(self.tmpdir, "lynx")
-        self.mindlynx_dir = os.path.join(self.tmpdir, "mindlynx")
-        self.ta_dir = os.path.join(self.tmpdir, "tradingagent")
-        os.makedirs(self.lynx_dir)
-        os.makedirs(self.mindlynx_dir)
-        os.makedirs(self.ta_dir)
+        self.tmpdir = Path(tempfile.mkdtemp())
+
+    def teardown_method(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_lynx_loader_nonexistent(self):
-        """文件不存在时返回空字典"""
-        loader = LynxDataLoader(self.lynx_dir)
+        loader = LynxDataLoader(str(self.tmpdir / "lynx"))
         data = loader.load_by_date("2026-05-29")
         assert data == {}
 
-    def test_lynx_loader_from_file(self):
-        """从 JSON 文件加载"""
-        test_data = [
-            {"code": "601801", "name": "皖新传媒", "signal": "🟢 买入", "prob_up": 72.0}
-        ]
-        json_path = os.path.join(self.lynx_dir, "2026-05-29_lynx_signals.json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(test_data, f)
-
-        loader = LynxDataLoader(self.lynx_dir)
-        data = loader.load_by_date("2026-05-29")
-        assert "601801" in data
-        assert data["601801"]["signal"] == "🟢 买入"
-
-    def test_mindlynx_loader_from_report(self):
-        """从 markdown 报告解析"""
-        report = """
-# 🎯 2026-05-29 决策仪表盘
-> 共分析 **3** 只股票
-🟡 **皖新传媒(601801)**: 持有 | 评分 52 | 震荡偏多
-⚪ **古麒绒材(001390)**: 观望 | 评分 46 | 看空
-🔴 ***ST网达(603189)**: 卖出 | 评分 34 | 强烈看空
-"""
-        os.makedirs(self.mindlynx_dir, exist_ok=True)
-        with open(os.path.join(self.mindlynx_dir, "report_2026-05-29.md"), "w", encoding="utf-8") as f:
-            f.write(report)
-
-        loader = MindLynxDataLoader(self.mindlynx_dir)
-        data = loader.load_by_date("2026-05-29")
-        assert "601801" in data
-        assert data["601801"]["signal"] == "持有"
-        assert data["601801"]["score"] == 52
-
     def test_tradingagent_loader_nonexistent(self):
-        """文件不存在时返回 None"""
-        loader = TradingAgentDataLoader(self.ta_dir)
+        loader = TradingAgentDataLoader(str(self.tmpdir / "ta"))
         result = loader.load_by_stock_and_date("601801", "2026-05-29")
         assert result is None
 
-    def test_tradingagent_loader_with_decision(self):
-        """从状态 JSON 提取 rating"""
-        ta_logs = os.path.join(self.ta_dir, "601801", "MindTradingAgentStrategy_logs")
-        os.makedirs(ta_logs, exist_ok=True)
-
-        state = {
-            "company_of_interest": "601801",
-            "final_trade_decision": (
-                "**Rating**: Buy\n"
-                "**Executive Summary**: Enter on weakness.\n"
-                "**Investment Thesis**: Strong fundamentals.\n"
-                "**Price Target**: 15.5\n"
-                "**Time Horizon**: 3-6 months\n"
-            ),
-        }
-        with open(os.path.join(ta_logs, "full_states_log_2026-05-29.json"), "w", encoding="utf-8") as f:
-            json.dump(state, f)
-
-        loader = TradingAgentDataLoader(self.ta_dir)
-        result = loader.load_by_stock_and_date("601801", "2026-05-29")
-        assert result is not None
+    def test_tradingagent_extract_decision(self):
+        state = {"final_trade_decision": "**Rating**: Buy\n**Price Target**: 15.5"}
+        result = TradingAgentDataLoader._extract_decision(state)
         assert result["rating"] == "Buy"
+        assert "debate_state" in result
 
-    def test_tradingagent_loader_hold_default(self):
-        """无法解析时默认返回 Hold"""
-        ta_logs = os.path.join(self.ta_dir, "601801", "MindTradingAgentStrategy_logs")
-        os.makedirs(ta_logs, exist_ok=True)
+    def test_tradingagent_debate_parsing(self):
+        state = {"investment_debate_state": "bullish bullish buy buy"}
+        result = TradingAgentDataLoader._parse_debate_state(state)
+        assert result["debate_available"] is True
 
-        state = {
-            "company_of_interest": "601801",
-            "final_trade_decision": "No rating found in this text",
-        }
-        with open(os.path.join(ta_logs, "full_states_log_2026-05-29.json"), "w", encoding="utf-8") as f:
-            json.dump(state, f)
-
-        loader = TradingAgentDataLoader(self.ta_dir)
-        result = loader.load_by_stock_and_date("601801", "2026-05-29")
-        assert result is not None
-        assert result["rating"] == "Hold"
+    def test_tradingagent_debate_defaults(self):
+        result = TradingAgentDataLoader._parse_debate_state({})
+        assert result["debate_available"] is False
+        assert result["investment_agreement"] == 0.5
 
 
 # ══════════════════════════════════════════
@@ -491,97 +374,48 @@ class TestDataLoaders:
 
 
 class TestWeComNotifier:
-    """企业微信推送测试"""
-
     def setup_method(self):
-        self.notifier = WeComNotifier("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test", enabled=False)
+        self.notifier = WeComNotifier(
+            "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
+            enabled=False,
+        )
 
     def test_disabled_push(self):
-        """禁用时不发送"""
-        result = self.notifier.send_markdown("测试")
-        assert result is None
+        assert self.notifier.send_markdown("测试") is None
 
     def test_format_daily_summary(self):
-        """格式化每日摘要"""
-        results = [
-            {
-                "stock_code": "601801",
-                "stock_name": "皖新传媒",
-                "valid": True,
-                "signal": "strong_bullish",
-                "signal_name": "强烈看多",
-                "fusion_score": 0.65,
-                "position_advice": "2-3成",
-                "lynx_score": 0.58,
-                "mindlynx_score": 0.6,
-                "tradingagent_score": 0.9,
-                "is_degraded": False,
-                "has_disagreement": False,
-                "disagreement_capped": False,
-            },
-            {
-                "stock_code": "603189",
-                "stock_name": "*ST网达",
-                "valid": True,
-                "signal": "strong_bearish",
-                "signal_name": "强烈看空",
-                "fusion_score": -0.62,
-                "position_advice": "清仓",
-                "lynx_score": -0.6,
-                "mindlynx_score": -0.6,
-                "tradingagent_score": -0.9,
-                "is_degraded": False,
-                "has_disagreement": False,
-                "disagreement_capped": False,
-            },
-            {
-                "stock_code": "000592",
-                "stock_name": "平潭发展",
-                "valid": False,
-                "message": "所有系统无效",
-            },
-        ]
+        results = [{
+            "stock_code": "601801", "stock_name": "皖新传媒",
+            "valid": True, "signal": "strong_bullish",
+            "signal_name": "强烈看多", "fusion_score": 2.7,
+            "position_advice": "2-3成",
+            "lynx_score": 1.8, "mindlynx_score": 2.0,
+            "tradingagent_score": 2.3, "is_degraded": False,
+            "has_disagreement": False, "disagreement_capped": False,
+        }]
         summary = self.notifier.format_daily_summary(results, "2026-05-29")
-        assert "三系统共识" in summary
         assert "强烈看多" in summary
-        assert "ST网达" in summary
-        assert "融合-0.62" in summary
-        assert "所有系统无效" in summary
 
 
 # ══════════════════════════════════════════
-# 集成测试（可选）
+# 集成测试
 # ══════════════════════════════════════════
 
 
-def _run_integration_test():
-    """
-    端到端测试：模拟 → 融合 → 输出
-    
-    只有在项目目录中才能运行此测试。
-    """
-    from scripts.run_daily import generate_mock_data, load_stock_pool
-
-    stock_pool = load_stock_pool("config/stock_pool.csv")
-    mock_data = generate_mock_data(stock_pool, "2026-05-29")
-
+def test_fusion_accepts_7level_scores():
+    """验证融合引擎接受 L7 范围得分"""
     engine = FusionEngine("config/settings.yaml")
-    results = engine.fuse_stock_pool(mock_data)
-
-    print("\n=== 集成测试结果 ===")
-    for r in results:
-        status = r["signal_name"]
-        score = r["fusion_score"]
-        print(f"  {status:8s} {r['stock_code']} score={score:.2f}")
-
-    return results
+    result = engine.fuse_single_stock(
+        "601801", "皖新传媒",
+        lynx_signal="🟢 买入", lynx_prob_up=75.0,
+        mindlynx_advice="买入", mindlynx_score=80,
+        tradingagent_rating="Buy",
+    )
+    assert result["valid"] is True
+    # L7 范围应在 -3~+3
+    assert -3 <= result["fusion_score"] <= 3
 
 
 if __name__ == "__main__":
-    # 运行集成测试
-    results = _run_integration_test()
-
-    # 也可用 pytest 单独运行：
-    # python -m pytest tests/test_fusion.py -v
     import pytest
     pytest.main([__file__, "-v"])

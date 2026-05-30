@@ -564,6 +564,73 @@ def _run_daily_intel(config: Config, slot: str = "midday") -> int:
     collected: list[dict] = []
     days_lookback = 2 if slot == "preopen" else 1
 
+    # ── 0. 市场级情报搜集（非个股，政策/板块/宏观） ──
+    # 使用 akshare 免费源，替代质量不佳的 SearXNG 搜索
+    try:
+        import akshare as ak
+        import pandas as pd
+        today_str = datetime.now().strftime("%Y%m%d")
+
+        # 0a. 新闻联播文字稿（最权威的政策信号源）
+        try:
+            df_cctv = ak.news_cctv(date=today_str)
+            if df_cctv is not None and not df_cctv.empty:
+                for _, row in df_cctv.iterrows():
+                    title = str(row.get("title", ""))
+                    content = str(row.get("content", ""))[:300]
+                    collected.append({
+                        "code": "__market__", "title": title,
+                        "url": "", "snippet": content,
+                        "importance": 8,  # 新闻联播默认高重要
+                        "source": "新闻联播",
+                    })
+                    logger.info("市场情报 [新闻联播]: %s", title[:60])
+        except Exception as e:
+            logger.debug("市场情报: 新闻联播获取失败: %s", e)
+
+        # 0b. 全市场重大事项公告（东方财富公告大全）
+        try:
+            df_notices = ak.stock_notice_report(symbol="重大事项", date=today_str)
+            if df_notices is not None and not df_notices.empty:
+                for _, row in df_notices.head(20).iterrows():  # 最多取20条
+                    title = str(row.get("公告标题", ""))
+                    code = str(row.get("代码", ""))
+                    name = str(row.get("名称", ""))
+                    collected.append({
+                        "code": code, "title": title,
+                        "url": str(row.get("网址", "")),
+                        "snippet": f"{name}({code}) 重大事项公告",
+                        "importance": 7,
+                        "source": "东方财富公告",
+                    })
+                logger.info("市场情报: 重大事项公告 %d 条", min(len(df_notices), 20))
+        except Exception as e:
+            logger.debug("市场情报: 重大事项公告获取失败: %s", e)
+
+        # 0c. 全市场风险提示公告
+        try:
+            df_risk = ak.stock_notice_report(symbol="风险提示", date=today_str)
+            if df_risk is not None and not df_risk.empty:
+                for _, row in df_risk.head(10).iterrows():
+                    title = str(row.get("公告标题", ""))
+                    code = str(row.get("代码", ""))
+                    name = str(row.get("名称", ""))
+                    collected.append({
+                        "code": code, "title": title,
+                        "url": str(row.get("网址", "")),
+                        "snippet": f"{name}({code}) 风险提示",
+                        "importance": 7,
+                        "source": "东方财富公告",
+                    })
+                logger.info("市场情报: 风险提示公告 %d 条", min(len(df_risk), 10))
+        except Exception as e:
+            logger.debug("市场情报: 风险提示公告获取失败: %s", e)
+
+    except ImportError:
+        logger.warning("akshare 未安装，跳过市场情报搜集")
+    except Exception as e:
+        logger.warning("市场情报搜集异常: %s", e)
+
     for code in stock_codes:
         import random as _random, time as _time
         _time.sleep(1.0 + _random.uniform(0, 0.5))

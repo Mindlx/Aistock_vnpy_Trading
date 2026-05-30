@@ -19,10 +19,21 @@ import yaml
 
 from src.logger import FusionLogger
 from src.normalizer import SignalNormalizer
+from src.reliability import (
+    ConfidenceCalibrator,
+    HallucinationDetector,
+    ReliabilityConfig,
+    score_to_probability,
+    probability_to_decision,
+)
 
 
 class FusionEngine:
-    """三系统信号融合引擎"""
+    """三系统信号融合引擎 — 支持线性加权与贝叶斯两种模式"""
+
+    MODE_LINEAR = "linear"
+    MODE_BAYESIAN = "bayesian"
+    MODE_DUAL = "dual"  # 同时输出两种结果
 
     # 仓位上限（分歧情况下硬性限制）
     MAX_POSITION_DISAGREEMENT = "1成"
@@ -32,73 +43,103 @@ class FusionEngine:
             self.config = yaml.safe_load(f)
 
         self.weights = self.config["weights"]
-        self.thresholds = self.config["thresholds"]
-        self.confidence_thresholds = self.config.get("confidence_thresholds", {})
         self.logger = FusionLogger(
             log_dir=self.config.get("logging", {}).get("log_dir", "config/logs"),
             retention_days=self.config.get("logging", {}).get("retention_days", 90),
         )
         self.normalizer = SignalNormalizer()
 
+        # 融合模式: linear / bayesian / dual
+        self.fusion_mode = self.config.get("fusion_mode", "linear")
+
+        # 贝叶斯模式参数（来自可靠性配置）
+        rel_config = self.config.get("reliability", {})
+        self.probability_k = rel_config.get("probability_k", 2.5)
+        override = rel_config.get("override", {})
+        self.ly_veto_threshold = override.get("ly_veto_threshold", 0.30)
+
         # 系统名称列表（用于权重迭代）
         self.systems = ["lynx_vnpy", "mindlynx", "tradingagent"]
 
-    # ──────── 决策映射 ────────
+    # ──────── 决策映射（7 级 L7 空间） ────────
+
+    # L7 阈值（对应 normalizer.py 的 7 级语义对齐）
+    L7_THRESHOLDS = {
+        "strong_bullish": 2.5,     # L7=+3
+        "bullish": 1.5,            # L7=+2
+        "cautious_bullish": 0.5,   # L7=+1
+        "cautious_bearish": -0.5,  # L7=-1
+        "bearish": -1.5,           # L7=-2
+        "strong_bearish": -2.5,    # L7=-3
+    }
+
+    L7_SIGNAL_NAMES = {
+        "strong_bullish": "强烈看多",
+        "bullish": "看多",
+        "cautious_bullish": "谨慎看多",
+        "neutral": "中性/持有",
+        "cautious_bearish": "谨慎看空",
+        "bearish": "看空",
+        "strong_bearish": "强烈看空",
+    }
+
+    L7_POSITIONS = {
+        "strong_bullish": "2-3成",
+        "bullish": "1-2成",
+        "cautious_bullish": "0.5-1成",
+        "neutral": "0成",
+        "cautious_bearish": "减仓至0.5成以内",
+        "bearish": "大幅减仓",
+        "strong_bearish": "清仓",
+    }
+
+    # 分歧状态下仓位上限
+    MAX_POSITION_DISAGREEMENT = "1成"
 
     def _get_final_decision(self, score: float, disagreement: bool = False) -> Dict[str, Any]:
         """
-        根据融合得分判断最终决策。
+        根据 L7 得分判断最终决策（7 级）。
 
-        当检测到分歧时，无论分数如何，仓位上限为 1成。
+        当检测到分歧时，仓位上限为 1成。
         """
-        t = self.thresholds
-
+        t = self.L7_THRESHOLDS
         if score > t["strong_bullish"]:
-            return {
-                "signal": "strong_bullish",
-                "name": "强烈看多",
-                "position": "2-3成",
-                "disagreement_capped": disagreement,
-            }
-        elif score > t["weak_bullish"]:
-            return {
-                "signal": "weak_bullish",
-                "name": "弱看多",
-                "position": "0.5-1成",
-                "disagreement_capped": disagreement,
-            }
-        elif score > t["neutral_low"]:
-            return {
-                "signal": "neutral",
-                "name": "中性/观望",
-                "position": "0成",
-                "disagreement_capped": disagreement,
-            }
-        elif score > t["weak_bearish"]:
-            return {
-                "signal": "weak_bearish",
-                "name": "弱看空",
-                "position": "减仓至0.5成以内",
-                "disagreement_capped": disagreement,
-            }
+            signal = "strong_bullish"
+        elif score > t["bullish"]:
+            signal = "bullish"
+        elif score > t["cautious_bullish"]:
+            signal = "cautious_bullish"
+        elif score > t["cautious_bearish"]:
+            signal = "neutral"
+        elif score > t["bearish"]:
+            signal = "cautious_bearish"
+        elif score > t["strong_bearish"]:
+            signal = "bearish"
         else:
-            return {
-                "signal": "strong_bearish",
-                "name": "强烈看空",
-                "position": "清仓",
-                "disagreement_capped": disagreement,
-            }
+            signal = "strong_bearish"
+
+        name = self.L7_SIGNAL_NAMES.get(signal, "中性/持有")
+        position = self.L7_POSITIONS.get(signal, "0成")
+
+        if disagreement:
+            position = self._cap_position_for_disagreement(position)
+
+        return {
+            "signal": signal,
+            "name": name,
+            "position": position,
+            "disagreement_capped": disagreement,
+        }
 
     @staticmethod
     def _cap_position_for_disagreement(position: str) -> str:
         """分歧状态下限制仓位上限"""
-        # 只保留不超过 1成的仓位
-        if "2-3" in position or "0.5-1" in position:
+        if "2-3" in position or "1-2" in position or "0.5-1" in position:
             return FusionEngine.MAX_POSITION_DISAGREEMENT
         if "0.5成以内" in position or "减仓" in position:
             return "减仓至0.5成以内"
         if "清仓" in position or "0成" in position:
-            return position  # 原本就是减仓/清仓，无需改变
+            return position
         return "0.5成以内"
 
     # ──────── 分歧检测 ────────
@@ -130,8 +171,9 @@ class FusionEngine:
             return False, 0.0
 
         # 判断方向: 正=看多, 负=看空, 0=中性
-        has_bullish = any(s > 0.1 for s in scores)    # 正阈值避免微噪
-        has_bearish = any(s < -0.1 for s in scores)
+        # v3.0: 阈值从 0.1 升至 0.5（适配 [-3,+3] 宽范围）
+        has_bullish = any(s > 0.5 for s in scores)
+        has_bearish = any(s < -0.5 for s in scores)
 
         disagreement = has_bullish and has_bearish
 
@@ -149,14 +191,11 @@ class FusionEngine:
     def _compute_uncertainty_penalty(disagreement_score: float) -> float:
         """
         根据分歧程度计算不确定性惩罚系数。
-        0.0 ≤ penalty ≤ 0.6，分歧越大 = 越大的惩罚（从融合得分中扣减）
+        v3.0: 适配 [-3,+3] 宽范围，最大惩罚升至 2.0
         """
-        # 无分歧 → 不惩罚
-        if disagreement_score <= 0.1:
+        if disagreement_score <= 0.5:  # 宽范围下小幅分歧不惩罚
             return 0.0
-
-        # 线性映射：0.1 std → 0.1 惩罚, 0.8+ std → 0.6 惩罚
-        penalty = min(0.6, max(0.0, (disagreement_score - 0.1) * 0.85))
+        penalty = min(2.0, max(0.0, (disagreement_score - 0.5) * 1.2))
         return penalty
 
     # ──────── 缺失数据处理 ────────
@@ -203,7 +242,212 @@ class FusionEngine:
 
     # ──────── 核心融合方法 ────────
 
+    def _fuse_bayesian(
+        self,
+        stock_code: str,
+        stock_name: str = "",
+        lynx_signal: str = "观望",
+        lynx_prob_up: float = 50.0,
+        mindlynx_advice: str = "观望",
+        mindlynx_score: int = 50,
+        mindlynx_trend: Optional[str] = None,
+        tradingagent_rating: str = "Hold",
+        ta_debate_state: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        贝叶斯融合模式 — 可靠性调制概率融合。
+
+        融合管线:
+          1. 概率空间校准（得分→概率）
+          2. 幻觉检测门控（ml:因子偏差, at:辩论一致性）
+          3. 置信度校准（各系统独立公式）
+          4. 有效权重计算（w = α × c × (1-h)）
+          5. 加权概率融合
+          6. 数学否决权（ly 强信号时覆盖）
+        """
+        # Step 1: 归一化 + 概率空间映射
+        lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
+            lynx_signal, lynx_prob_up
+        )
+        mindlynx_normalized = self.normalizer.normalize_mindlynx(
+            mindlynx_advice, mindlynx_score, mindlynx_trend
+        )
+        tradingagent_normalized = self.normalizer.normalize_tradingagent(
+            tradingagent_rating
+        )
+
+        p_ly = self.normalizer.to_probability(lynx_normalized, self.probability_k)
+        p_ml = self.normalizer.to_probability(mindlynx_normalized, self.probability_k)
+        p_at = self.normalizer.to_probability(tradingagent_normalized, self.probability_k)
+
+        # Step 2: 幻觉检测
+        h_ly = HallucinationDetector.detect_ly()
+        h_ml = HallucinationDetector.detect_ml(
+            sentiment_score=mindlynx_score,
+            operation_advice=mindlynx_advice,
+            trend_prediction=mindlynx_trend,
+        )
+        h_at = HallucinationDetector.detect_at(debate_state=ta_debate_state)
+
+        # Step 3: 置信度校准
+        c_ly = ConfidenceCalibrator.calibrate_ly(lynx_prob_up)
+        c_ml = ConfidenceCalibrator.calibrate_ml(float(mindlynx_score))
+        c_at = ConfidenceCalibrator.calibrate_at(
+            (ta_debate_state or {}).get("investment_agreement", 0.5)
+        )
+
+        # Step 4: 有效权重
+        w_ly = ReliabilityConfig.alpha("lynx_vnpy") * c_ly * (1.0 - h_ly)
+        w_ml = ReliabilityConfig.alpha("mindlynx") * c_ml * (1.0 - h_ml)
+        w_at = ReliabilityConfig.alpha("tradingagent") * c_at * (1.0 - h_at)
+
+        total_w = w_ly + w_ml + w_at
+        if total_w == 0:
+            return {
+                "stock_code": stock_code, "stock_name": stock_name,
+                "valid": False, "message": "所有系统有效权重为零，无法融合",
+                "fusion_mode": "bayesian",
+            }
+
+        # Step 5: 加权概率融合
+        p_fused = (w_ly * p_ly + w_ml * p_ml + w_at * p_at) / total_w
+
+        # Step 6: 数学否决权
+        p_final = self._apply_bayesian_override(p_ly, p_ml, p_at, p_fused)
+
+        # Step 7: 映射到 7 级决策
+        signal_label = probability_to_decision(p_final, {
+            "strong_bullish": 0.88, "bullish": 0.73,
+            "cautious_bullish": 0.62, "cautious_bearish": 0.38,
+            "bearish": 0.27, "strong_bearish": 0.12,
+        })
+        signal_name_map = self.L7_SIGNAL_NAMES
+        position_map = self.L7_POSITIONS
+
+        # 检查分歧（使用概率空间的等价判断）
+        has_disagreement = (p_ly - 0.50) * (p_at - 0.50) < -0.2
+        position = position_map.get(signal_label, "0成")
+        if has_disagreement:
+            position = self._cap_position_for_disagreement(position)
+
+        return {
+            "stock_code": stock_code, "stock_name": stock_name,
+            "valid": True, "fusion_mode": "bayesian",
+            "p_ly": round(p_ly, 3), "p_ml": round(p_ml, 3), "p_at": round(p_at, 3),
+            "w_ly": round(w_ly, 3), "w_ml": round(w_ml, 3), "w_at": round(w_at, 3),
+            "h_ly": h_ly, "h_ml": round(h_ml, 3), "h_at": round(h_at, 3),
+            "c_ly": round(c_ly, 3), "c_ml": round(c_ml, 3), "c_at": round(c_at, 3),
+            "p_fused": round(p_fused, 3), "p_final": round(p_final, 3),
+            "has_disagreement": has_disagreement,
+            "signal": signal_label,
+            "signal_name": signal_name_map.get(signal_label, "中性/观望"),
+            "position_advice": position,
+        }
+
+    @staticmethod
+    def _apply_bayesian_override(
+        p_ly: float, p_ml: float, p_at: float, p_fused: float,
+    ) -> float:
+        """
+        数学否决权: 当 ly 强信号且与融合结果冲突时调整。
+
+        设计原则:
+        - ly+ml (数学+混合) vs at (纯LLM) → 信任数学
+        - ly+at vs ml → 信任 ly，但 at 附议增加可信度
+        - ml+at vs ly → 2v1，不完全采用 ly
+        """
+        ly_conviction = abs(p_ly - 0.50)
+        if ly_conviction <= 0.30:
+            return p_fused  # ly 不够强，不触发
+
+        ly_dir = 1 if p_ly > 0.50 else -1
+        fused_dir = 1 if p_fused > 0.50 else -1
+
+        if ly_dir == fused_dir:
+            return p_fused  # 方向一致，不干预
+
+        # 方向冲突: 检查各系统方向
+        ml_dir = 1 if p_ml > 0.50 else -1
+        at_dir = 1 if p_at > 0.50 else -1
+
+        if ml_dir == at_dir == -ly_dir:
+            return 0.40 * p_ly + 0.60 * p_fused
+        elif ml_dir == ly_dir:
+            return 0.80 * p_ly + 0.20 * p_fused
+        elif at_dir == ly_dir:
+            return 0.70 * p_ly + 0.30 * p_fused
+        else:
+            return p_fused
+
     def fuse_single_stock(
+        self,
+        stock_code: str,
+        stock_name: str = "",
+        lynx_signal: str = "观望",
+        lynx_prob_up: float = 50.0,
+        mindlynx_advice: str = "观望",
+        mindlynx_score: int = 50,
+        mindlynx_trend: Optional[str] = None,
+        tradingagent_rating: str = "Hold",
+        ta_is_stale: bool = False,
+        ta_debate_state: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        对单只股票进行融合分析。
+
+        支持三种模式:
+          linear:   当前线性加权 + 分歧检测（默认）
+          bayesian: 可靠性调制贝叶斯融合
+          dual:     同时输出两种结果
+
+        ta_debate_state: 来自 data_loader._parse_debate_state()，贝叶斯模式使用
+        """
+        # 模式分发
+        if self.fusion_mode == self.MODE_BAYESIAN:
+            return self._fuse_bayesian(
+                stock_code=stock_code, stock_name=stock_name,
+                lynx_signal=lynx_signal, lynx_prob_up=lynx_prob_up,
+                mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
+                mindlynx_trend=mindlynx_trend,
+                tradingagent_rating=tradingagent_rating,
+                ta_debate_state=ta_debate_state,
+            )
+        if self.fusion_mode == self.MODE_DUAL:
+            linear_result = self._fuse_linear(
+                stock_code=stock_code, stock_name=stock_name,
+                lynx_signal=lynx_signal, lynx_prob_up=lynx_prob_up,
+                mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
+                mindlynx_trend=mindlynx_trend,
+                tradingagent_rating=tradingagent_rating,
+                ta_is_stale=ta_is_stale,
+            )
+            bayesian_result = self._fuse_bayesian(
+                stock_code=stock_code, stock_name=stock_name,
+                lynx_signal=lynx_signal, lynx_prob_up=lynx_prob_up,
+                mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
+                mindlynx_trend=mindlynx_trend,
+                tradingagent_rating=tradingagent_rating,
+                ta_debate_state=ta_debate_state,
+            )
+            return {
+                "stock_code": stock_code, "stock_name": stock_name,
+                "fusion_mode": "dual",
+                "linear": linear_result,
+                "bayesian": bayesian_result,
+            }
+
+        return self._fuse_linear(
+            stock_code=stock_code, stock_name=stock_name,
+            lynx_signal=lynx_signal, lynx_prob_up=lynx_prob_up,
+            mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
+            mindlynx_trend=mindlynx_trend,
+            tradingagent_rating=tradingagent_rating,
+            ta_is_stale=ta_is_stale,
+        )
+
+    # ──────── 原始线性融合逻辑（重命名自 fuse_single_stock） ────────
+
+    def _fuse_linear(
         self,
         stock_code: str,
         stock_name: str = "",
@@ -216,27 +460,12 @@ class FusionEngine:
         ta_is_stale: bool = False,
     ) -> Dict[str, Any]:
         """
-        对单只股票进行融合分析。
+        线性加权融合（原始逻辑）。
 
-        Oracle 建议融入:
+        包含 Oracle 建议的 3 项修正:
           ⚡ 分歧检测 + 不确定性惩罚
-          ⚡ 置信度调制（lynx prob_up 已自然调制，mindlynx 用评分细分）
+          ⚡ 置信度调制（lynx prob_up 自然调制，mindlynx 评分细分）
           ⚡ 缺失系统自动重分配权重
-          ⚡ TA 数据过期自动降权
-
-        参数:
-            stock_code: 股票代码
-            stock_name: 股票名称
-            lynx_signal: lynx_vnpy 原始信号（如 "🟢 买入"）
-            lynx_prob_up: lynx_vnpy 上涨概率（0-100）
-            mindlynx_advice: MindLynx 操作建议（如 "持有"）
-            mindlynx_score: MindLynx 评分（0-100）
-            mindlynx_trend: MindLynx 趋势预测（可选）
-            tradingagent_rating: TradingAgent 评级（Buy/Overweight/Hold/Underweight/Sell）
-            ta_is_stale: TA 数据是否为前次结果（延时降权）
-
-        返回:
-            融合决策字典
         """
         # ── Step 1: 归一化各系统 ──
         lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
@@ -258,7 +487,7 @@ class FusionEngine:
         if ta_is_stale:
             ta_stale_penalty = 0.30  # TA 权重打七折
             self.logger.info(
-                f"[{stock_code}] TA 数据为前次结果，权重降低 {ta_stale_penalty*100:.0f}%"
+                f"[{stock_code}] TA 数据为昨日结果，权重降低 {ta_stale_penalty*100:.0f}%"
             )
 
         # ── Step 2: 分歧检测 + 不确定性惩罚 (Oracle 建议 1) ──
@@ -368,7 +597,7 @@ class FusionEngine:
             },
             ...
         ]
-        ta_is_stale: TA 数据是否为前次结果（延时降权）
+            ta_is_stale: TA 数据是否为昨日结果（延时降权）
         """
         results = []
         for item in stock_signals:

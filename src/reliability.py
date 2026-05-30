@@ -1,0 +1,209 @@
+"""
+可靠性调制贝叶斯融合 — 配置、置信度校准与幻觉检测
+
+基于 Oracle 架构设计，为三系统提供动态权重计算：
+  w_eff = base_alpha × confidence × (1 - hallucination)
+
+每个系统根据其数学本质（确定性 vs 随机性）获得不同的 α 值和幻觉检测策略。
+"""
+from __future__ import annotations
+
+import math
+from typing import Any, Dict, Optional
+
+
+class ReliabilityConfig:
+    """
+    系统基础可靠度配置。
+
+    α (base_alpha) 由系统本质决定，非日常调优参数：
+      - ly:  0.75  — sklearn predict_proba，可回测，100% 可重复
+      - ml:  0.55  — ~40% 因子数学 + ~60% LLM，混合误差
+      - at:  0.40  — 纯 LLM 角色扮演，角色不一致 + prompt 敏感
+
+    h (default_h) 是默认幻觉度（无辩论数据时的保守估计）：
+      - ly:  0.00  — 无幻觉概念
+      - ml:  0.15  — 默认中等怀疑
+      - at:  0.30  — 默认高度怀疑
+    """
+
+    BASE_ALPHA = {"lynx_vnpy": 0.75, "mindlynx": 0.55, "tradingagent": 0.40}
+    DEFAULT_H = {"lynx_vnpy": 0.0, "mindlynx": 0.15, "tradingagent": 0.30}
+    PROBABILITY_K = 1.0  # sigmoid 陡度，v3.0 适配 [-3,+3] 宽范围
+
+    LY_VETO_THRESHOLD = 0.30  # |P_ly - 0.50| > 0.30 触发数学否决权
+
+    @classmethod
+    def alpha(cls, system: str) -> float:
+        return cls.BASE_ALPHA.get(system, 0.50)
+
+    @classmethod
+    def default_h(cls, system: str) -> float:
+        return cls.DEFAULT_H.get(system, 0.20)
+
+
+class ConfidenceCalibrator:
+    """各系统置信度校准器"""
+
+    @staticmethod
+    def calibrate_ly(prob_up: float) -> float:
+        """
+        ly 置信度: |prob_up - 50| / 50
+
+        predict_proba() 是校准概率，距离 50% 中性点直接编码置信度。
+        prob_up=85 -> c=0.70, prob_up=50 -> c=0 (最大不确定性)
+        """
+        return min(1.0, abs(prob_up - 50.0) / 50.0)
+
+    @staticmethod
+    def calibrate_ml(sentiment_score: float) -> float:
+        """
+        ml 置信度: |score - 50| / 50 × 0.85
+
+        sentiment_score 是 LLM 生成，不如真实概率校准，乘 0.85 降权。
+        score=80 -> c=0.60×0.85=0.51
+        """
+        raw = abs(sentiment_score - 50.0) / 50.0
+        return min(0.85, raw * 0.85)
+
+    @staticmethod
+    def calibrate_at(debate_consistency: float) -> float:
+        """
+        at 置信度: debate_consistency × 0.50
+
+        纯 LLM 系统基础置信度上限 0.50。辩论一致性高时提升。
+        debate_consistency 由 _parse_debate_state() 计算，范围 0-1。
+        """
+        return min(0.50, debate_consistency * 0.50)
+
+
+class HallucinationDetector:
+    """
+    幻觉检测门控。
+
+    ly: h=0 (无需检测)
+    ml: h = factor_deviation + direction_contradiction
+    at: h = 1 - debate_consistency + role_check
+    """
+
+    # ml 因子偏差参数
+    ML_FACTOR_DEVIATION_THRESHOLD = 20.0   # |score - 因子基线| > 20 触发
+    ML_FACTOR_DEVIATION_MAX = 50.0         # 最大偏差上限
+
+    @classmethod
+    def detect_ly(cls) -> float:
+        """ly 无幻觉风险"""
+        return 0.0
+
+    @classmethod
+    def detect_ml(
+        cls,
+        sentiment_score: float,
+        factor_baseline: Optional[float] = None,
+        operation_advice: Optional[str] = None,
+        trend_prediction: Optional[str] = None,
+    ) -> float:
+        """
+        ml 幻觉检测。
+
+        两个维度：
+          1. factor_deviation: LLM 评分偏离因子基线程度
+          2. direction_contradiction: 操作建议与趋势预测矛盾
+
+        无因子基线时返回默认 h=0.15。
+        """
+        # 维度 1: 因子偏差
+        factor_deviation = 0.0
+        if factor_baseline is not None:
+            deviation = abs(sentiment_score - factor_baseline)
+            if deviation > cls.ML_FACTOR_DEVIATION_THRESHOLD:
+                # 超过阈值后线性映射到 0~1
+                excess = deviation - cls.ML_FACTOR_DEVIATION_THRESHOLD
+                factor_deviation = min(1.0, excess / cls.ML_FACTOR_DEVIATION_MAX)
+
+        # 维度 2: 方向矛盾
+        direction_contradiction = 0.0
+        if operation_advice and trend_prediction:
+            advice_bullish = operation_advice in ("买入", "加仓")
+            advice_bearish = operation_advice in ("减仓", "卖出")
+            trend_bullish = any(w in trend_prediction for w in ["涨", "多", "牛", "up"])
+            trend_bearish = any(w in trend_prediction for w in ["跌", "空", "熊", "down"])
+            if (advice_bullish and trend_bearish) or (advice_bearish and trend_bullish):
+                direction_contradiction = 0.30
+
+        h = factor_deviation + direction_contradiction
+        return min(1.0, max(0.0, h))
+
+    @classmethod
+    def detect_at(
+        cls,
+        debate_state: Optional[Dict[str, Any]] = None,
+    ) -> float:
+        """
+        at 幻觉检测。
+
+        基于辩论状态：
+          h = (1 - investment_agreement) + (1 - risk_agreement) + analyst_variance
+          除以 3 归一化到 [0, 1]
+
+        无辩论数据时返回默认 h=0.30。
+        """
+        if not debate_state or not debate_state.get("debate_available", False):
+            return ReliabilityConfig.default_h("tradingagent")
+
+        inv_agree = debate_state.get("investment_agreement", 0.5)
+        risk_agree = debate_state.get("risk_agreement", 0.5)
+        anal_var = debate_state.get("analyst_variance", 0.5)
+
+        # 辩论不一致度 + 分析师分歧
+        disagreement = (1.0 - inv_agree) + (1.0 - risk_agree) + anal_var
+        h = disagreement / 3.0
+
+        return min(1.0, max(0.0, h))
+
+
+# ══════════════════════════════════════════════
+# 概率空间映射工具
+# ══════════════════════════════════════════════
+
+def score_to_probability(score: float, k: float = 1.0) -> float:
+    """
+    将 L7 得分 [-3, +3] 映射到概率 [0, 1]。
+
+    v3.0: k 默认 1.0（原 2.5 适配 -1~+1 范围，现适配 -3~+3）
+
+    k=1.0 时:
+      score=+2.0 -> P≈0.88, score=+1.0 -> P≈0.73
+      score= 0.0 -> P=0.50
+      score=-1.0 -> P≈0.27, score=-2.0 -> P≈0.12
+    """
+    return 1.0 / (1.0 + math.exp(-k * score))
+
+
+def probability_to_decision(p: float, thresholds: Dict[str, float]) -> str:
+    """
+    将融合概率映射到 7 级决策标签。
+
+    参数:
+        p: 融合概率 [0, 1]
+        thresholds: 阈值配置
+            {strong_bullish: 0.88, bullish: 0.73,
+             cautious_bullish: 0.62,
+             cautious_bearish: 0.38, bearish: 0.27, strong_bearish: 0.12}
+
+    返回: 7 级标签
+    """
+    if p >= thresholds.get("strong_bullish", 0.88):
+        return "strong_bullish"
+    elif p >= thresholds.get("bullish", 0.73):
+        return "bullish"
+    elif p >= thresholds.get("cautious_bullish", 0.62):
+        return "cautious_bullish"
+    elif p >= thresholds.get("cautious_bearish", 0.38):
+        return "neutral"
+    elif p >= thresholds.get("bearish", 0.27):
+        return "cautious_bearish"
+    elif p >= thresholds.get("strong_bearish", 0.12):
+        return "bearish"
+    else:
+        return "strong_bearish"
