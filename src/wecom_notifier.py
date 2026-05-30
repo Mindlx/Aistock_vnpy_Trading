@@ -195,16 +195,10 @@ class WeComNotifier:
             lines.append("")
 
         # ── 底部 ──
-        lines.append("---")
-        notes = []
         if stale_ta:
-            notes.append("⏳ TA为昨日结果（定时器16:00运行）")
+            lines.append("⏳ TA为昨日结果（定时器16:00运行）")
         if degraded:
-            notes.append("⚠ 部分数据缺失，结果仅供参考")
-        if notes:
-            lines.extend(notes)
-            lines.append("")
-        lines.append("> ⚠️ 本报告仅供学习参考，不构成投资建议。市场有风险，投资需谨慎。")
+            lines.append("⚠ 部分数据缺失，结果仅供参考")
 
         return "\n".join(lines)
 
