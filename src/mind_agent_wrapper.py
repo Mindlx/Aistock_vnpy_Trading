@@ -119,11 +119,19 @@ class MindTradingAgentWrapper:
             yf_ticker = get_yfinance_ticker(stock_code)
             resolved_name = stock_name or get_stock_name(stock_code)
         except KeyError:
-            # 未知代码使用默认规则
             from src.mind_stock_config import is_shanghai
             suffix = ".SS" if is_shanghai(stock_code) else ".SZ"
             yf_ticker = f"{stock_code}{suffix}"
             resolved_name = stock_name or stock_code
+
+        # A 股数据前置验证：akshare → efinance → yfinance 降级
+        from src.ashare_data import AshareDataProvider
+        provider = AshareDataProvider()
+        data_check = provider.verify_stock(stock_code)
+        if not data_check.get("available"):
+            logger.warning(f"A股数据 [{stock_code}]: 所有数据源不可用，跳过分析")
+            return self._empty_result(stock_code, resolved_name, "A股数据源全部不可用")
+        logger.info(f"A股数据 [{stock_code}]: 可用源={[k for k,v in data_check.get('sources',{}).items() if v]}")
 
         logger.info(f"TradingAgent: 分析 {resolved_name}({stock_code}) → {yf_ticker} @ {trade_date}")
 

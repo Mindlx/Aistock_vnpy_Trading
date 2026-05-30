@@ -27,6 +27,11 @@ WECOM_WEBHOOK = os.getenv("WECOM_WEBHOOK_URL", "")
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
+# 本地缓存：同一交易时段内避免重复 HTTP 请求
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "cache")
+CACHE_TTL_HOURS = 4
+os.makedirs(CACHE_DIR, exist_ok=True)
+
 # ===== 1. 数据获取（Sina finance API） =====
 _SESSION = requests.Session()
 _SESSION.headers.update({"Referer": "https://finance.sina.com.cn"})
@@ -38,7 +43,16 @@ def _prefix(code: str) -> str:
     return 'sz'
 
 def fetch_daily_bars(code: str, days: int = 120, retries: int = 3) -> pd.DataFrame | None:
-    """从新浪财经获取个股日K线"""
+    """从新浪财经获取个股日K线。自带本地缓存，避免重复请求。"""
+    # ── 检查本地缓存 ──
+    cache_file = os.path.join(CACHE_DIR, f"lynx_{code}_{days}d.parquet")
+    if os.path.exists(cache_file):
+        mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
+        if datetime.now() - mtime < timedelta(hours=CACHE_TTL_HOURS):
+            df = pd.read_parquet(cache_file)
+            df["股票名称"] = code
+            return df
+
     symbol = f"{_prefix(code)}{code}"
     url = ("https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
            "CN_MarketData.getKLineData")
@@ -65,6 +79,7 @@ def fetch_daily_bars(code: str, days: int = 120, retries: int = 3) -> pd.DataFra
             for col in ["开盘", "最高", "最低", "收盘", "成交量"]:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
             df = df.sort_values("日期").reset_index(drop=True)
+            df.to_parquet(cache_file)  # 写入本地缓存
             df["股票名称"] = code  # 占位，信号生成时补充
             return df
         except Exception as e:
