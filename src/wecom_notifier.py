@@ -14,16 +14,7 @@ import requests
 
 
 # L7 信号 → 图标/颜色映射（7 级）
-L7_EMOJI = {
-    "strong_bullish": "🟢",
-    "bullish": "🟢",
-    "cautious_bullish": "🟡",
-    "neutral": "⚪",
-    "cautious_bearish": "🟠",
-    "bearish": "🔴",
-    "strong_bearish": "🔴",
-}
-
+# L7 信号 → 中文标签
 L7_LABEL_CN = {
     "strong_bullish": "强烈看多",
     "bullish": "看多",
@@ -78,8 +69,7 @@ class WeComNotifier:
 
     @staticmethod
     def _stock_line(r) -> str:
-        """单只股票一行式摘要（含股价与支撑压力位，适合微信阅读）"""
-        emoji = L7_EMOJI.get(r.get("signal", "neutral"), "⚪")
+        """单只股票一行（微信自动换行），不重复分组图标"""
         name = r.get('stock_name', '')
         code = r['stock_code']
         price = r.get('price', 0)
@@ -94,9 +84,25 @@ class WeComNotifier:
         sig = r.get('signal_name', '中性')
         pos = r.get('position_advice', '0成')
 
-        # 价格与涨跌
-        pct_str = f"<font color=\"{'warning' if pct > 0 else 'info' if pct < 0 else 'comment'}\">{pct:+.2f}%</font>" if pct else "-"
+        # 股价和涨跌幅（颜色标注）
         price_str = f"¥{price:.2f}" if price else "-"
+        if pct > 0:
+            chg_str = f"<font color=\"warning\">{pct:+.2f}%</font>"
+        elif pct < 0:
+            chg_str = f"<font color=\"info\">{pct:+.2f}%</font>"
+        else:
+            chg_str = f"{pct:+.2f}%" if pct else "-"
+
+        # 三系统得分（颜色标注）
+        def _score_str(v: float, prefix: str) -> str:
+            if v > 0:
+                return f"<font color=\"warning\">{prefix}{v:+.2f}</font>"
+            elif v < 0:
+                return f"<font color=\"info\">{prefix}{v:+.2f}</font>"
+            else:
+                return f"{prefix}{v:+.2f}"
+
+        sys_str = f"{_score_str(ls, 'ly')} {_score_str(ms, 'ml')} {_score_str(ts, 'at')}"
 
         # 量比
         vr_str = f"量比{vr:.2f}" if vr else ""
@@ -118,18 +124,17 @@ class WeComNotifier:
             notes.append("⏳TA")
         if r.get("is_degraded"):
             notes.append("⚠降级")
-        note_str = f" | {' '.join(notes)}" if notes else ""
+        note_str = f"| {' '.join(notes)}" if notes else ""
 
-        parts = [
-            f"{emoji} **{name}({code})** {price_str} {pct_str}",
-            f"| ly{ls:+.2f} ml{ms:+.2f} at{ts:+.2f}",
-            f"| {sig} | 仓位{pos}{note_str}",
-        ]
-        if vr_str or sup_str:
-            extras = [x for x in [vr_str, sup_str] if x]
-            parts.append(f"| {' '.join(extras)}")
+        extras = [x for x in [vr_str, sup_str] if x]
+        extra_str = f"| {' '.join(extras)}" if extras else ""
 
-        return "\n".join(parts)
+        return (
+            f"**{name}({code})** {price_str} {chg_str}"
+            f" | {sys_str}"
+            f" | {sig} | 仓位{pos}"
+            f"{note_str}{extra_str}"
+        )
 
     def format_daily_summary(self, results: List[Dict[str, Any]], date: str) -> str:
         """
