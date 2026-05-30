@@ -14,13 +14,13 @@ import requests
 
 
 # L7 信号 → 图标/颜色映射（7 级）
-# L7 信号 → 图标（国内股市：红色涨/看多，绿色跌/看空）
+# L7 信号 → 图标（国内股市：🔴红涨看多 🟠橙 🟡金 → 🟢绿跌看空）
 L7_EMOJI = {
     "strong_bullish": "🔴",
     "bullish": "🔴",
-    "cautious_bullish": "🟡",
+    "cautious_bullish": "🟠",
     "neutral": "⚪",
-    "cautious_bearish": "🟠",
+    "cautious_bearish": "🟡",
     "bearish": "🟢",
     "strong_bearish": "🟢",
 }
