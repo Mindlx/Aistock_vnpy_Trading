@@ -1,4 +1,11 @@
-"""lynx_vnpy 量化信号系统 — 特征工程 + ML 模型 + 推送"""
+"""lynx_vnpy 量化信号系统 — 特征工程 + ML 模型 + 推送
+
+用法:
+    python lynx_signal.py              # 单次运行
+    python lynx_signal.py --schedule   # 定时模式，每日 15:50 自动执行
+    python lynx_signal.py --schedule --time 15:30
+"""
+import argparse
 import os
 import json
 import warnings
@@ -318,5 +325,47 @@ def run():
     if all_signals:
         push_wecom(all_signals)
 
+def _parse_args() -> argparse.Namespace:
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description="lynx_vnpy 量化信号系统")
+    parser.add_argument("--schedule", action="store_true",
+                        help="定时模式，每日指定时间自动执行")
+    parser.add_argument("--time", type=str, default="15:50",
+                        help="定时执行时间，格式 HH:MM（默认 15:50）")
+    return parser.parse_args()
+
+
+def _schedule_loop(schedule_time: str):
+    """定时调度模式：工作日每天 schedule_time 执行一次 run()"""
+    try:
+        import schedule
+    except ImportError:
+        print("❌ 请安装 schedule 库: pip install schedule")
+        return 1
+
+    schedule.every().monday.at(schedule_time).do(run)
+    schedule.every().tuesday.at(schedule_time).do(run)
+    schedule.every().wednesday.at(schedule_time).do(run)
+    schedule.every().thursday.at(schedule_time).do(run)
+    schedule.every().friday.at(schedule_time).do(run)
+
+    next_run = schedule.next_run()
+    print(f"⏰ lynx 量化信号 — 定时模式已启动")
+    print(f"   执行时间: 交易日 {schedule_time}")
+    print(f"   下次执行: {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"   按 Ctrl+C 退出")
+
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(30)
+    except KeyboardInterrupt:
+        print("\n⏹ 定时模式已退出")
+    return 0
+
+
 if __name__ == "__main__":
-    run()
+    args = _parse_args()
+    if args.schedule:
+        exit(_schedule_loop(args.time))
+    exit(run())

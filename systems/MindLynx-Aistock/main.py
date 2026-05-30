@@ -1461,6 +1461,11 @@ def main() -> int:
             # 日间情报（仅盘前一次，取消午间/晚间避免重复推送）
             def _sched_daily_intel_preopen():
                 try:
+                    # 非交易日跳过
+                    from src.core.trading_calendar import get_open_markets_today
+                    if 'cn' not in get_open_markets_today():
+                        logger.info("日间情报(盘前): 今日非交易日，跳过")
+                        return
                     _cfg = _reload_runtime_config()
                     _run_daily_intel(_cfg, "preopen")
                 except Exception as e:
