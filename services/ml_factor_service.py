@@ -22,14 +22,14 @@ from typing import Any, Dict, Optional
 # ml 子系统路径
 ML_ROOT = Path(__file__).resolve().parent.parent / "systems" / "MindLynx-Aistock"
 DB_PATH = ML_ROOT / "data" / "stock_analysis.db"
-FACTOR_SRC = str(ML_ROOT / "src")
 OUTPUT_PATH = Path("data/realtime/ml_signal.json")
 
 # 确保 data/realtime/ 存在
 OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # 所有代码以融合系统的 .venv 运行，但需要将 ml 源码加入路径
-sys.path.insert(0, FACTOR_SRC)
+# 注意：import 是 from src.core.xxx，所以根路径是 ML_ROOT 本身
+sys.path.insert(0, str(ML_ROOT))
 
 
 class MLFactorService:
@@ -67,16 +67,38 @@ class MLFactorService:
         return self._db_cols
 
     def compute_all(self) -> Dict[str, Any]:
-        """计算所有股票的最新因子得分"""
-        results = {}
+        """计算所有股票的因子得分（含横截面归一化）"""
+        # 第一步：计算所有股票的原始因子
+        raw_results: list = []  # FactorResult 对象列表
+        code_map: dict[str, Any] = {}  # code → FactorResult
+
         for code in self.STOCK_CODES:
             try:
-                score = self._compute_one(code)
-                if score is not None:
-                    results[code] = score
+                rows = self.db.execute(
+                    f"SELECT * FROM stock_daily WHERE code=? ORDER BY date", (code,)
+                ).fetchall()
+                if not rows:
+                    continue
+                daily = [dict(zip(self.db_cols, r)) for r in rows]
+                result = self.engine.compute_for_stock(code, daily)
+                raw_results.append(result)
+                code_map[code] = result
             except Exception as e:
-                # 单只股票失败不影响其他
                 continue
+
+        # 第二步：横截面归一化（所有股票一起算 z-score + composite）
+        if raw_results:
+            self.engine.cross_sectional_normalize(raw_results)
+
+        # 第三步：提取 composite_score
+        results = {}
+        for code, result in code_map.items():
+            results[code] = {
+                "composite_score": float(result.composite_score),
+                "composite_label": result.composite_label,
+                "factors": {k: float(v) for k, v in result.raw_factors.items()},
+            }
+
         return {
             "stocks": results,
             "updated_at": datetime.now().isoformat(),
