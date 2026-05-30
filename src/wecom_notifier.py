@@ -14,7 +14,28 @@ import requests
 
 
 # L7 信号 → 图标/颜色映射（7 级）
-# L7 信号 → 中文标签
+# L7 信号 → 图标
+L7_EMOJI = {
+    "strong_bullish": "🟢",
+    "bullish": "🟢",
+    "cautious_bullish": "🟡",
+    "neutral": "⚪",
+    "cautious_bearish": "🟠",
+    "bearish": "🔴",
+    "strong_bearish": "🔴",
+}
+
+# 分组标题图标（与 L7 图标不重复）
+GROUP_ICONS = {
+    "strong_bullish": "🚀",
+    "bullish": "📈",
+    "cautious_bullish": "👆",
+    "neutral": "➖",
+    "cautious_bearish": "📉",
+    "bearish": "👇",
+    "strong_bearish": "🚨",
+}
+
 L7_LABEL_CN = {
     "strong_bullish": "强烈看多",
     "bullish": "看多",
@@ -69,7 +90,8 @@ class WeComNotifier:
 
     @staticmethod
     def _stock_line(r) -> str:
-        """单只股票一行（微信自动换行），不重复分组图标"""
+        """单只股票一行（微信自动换行）"""
+        emoji = L7_EMOJI.get(r.get("signal", "neutral"), "⚪")
         name = r.get('stock_name', '')
         code = r['stock_code']
         price = r.get('price', 0)
@@ -130,7 +152,7 @@ class WeComNotifier:
         extra_str = f"| {' '.join(extras)}" if extras else ""
 
         return (
-            f"**{name}({code})** {price_str} {chg_str}"
+            f"{emoji} **{name}({code})** {price_str} {chg_str}"
             f" | {sys_str}"
             f" | {sig} | 仓位{pos}"
             f"{note_str}{extra_str}"
@@ -167,13 +189,13 @@ class WeComNotifier:
         consensuses = [r for r in valid if not r.get("has_disagreement")]
 
         signal_groups = [
-            ("🟢 强烈看多", "strong_bullish"),
-            ("🟢 看多", "bullish"),
-            ("🟡 谨慎看多", "cautious_bullish"),
-            ("⚪ 中性/持有", "neutral"),
-            ("🟠 谨慎看空", "cautious_bearish"),
-            ("🔴 看空", "bearish"),
-            ("🔴 强烈看空", "strong_bearish"),
+            ("🚀 强烈看多", "strong_bullish"),
+            ("📈 看多", "bullish"),
+            ("👆 谨慎看多", "cautious_bullish"),
+            ("➖ 中性/持有", "neutral"),
+            ("📉 谨慎看空", "cautious_bearish"),
+            ("👇 看空", "bearish"),
+            ("🚨 强烈看空", "strong_bearish"),
         ]
 
         grouped = {sig: [] for _, sig in signal_groups}
