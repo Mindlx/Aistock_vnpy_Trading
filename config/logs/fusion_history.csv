@@ -418,3 +418,4 @@ timestamp,stock_code,stock_name,lynx_score,lynx_valid,mindlynx_score,tradingagen
 2026-05-30 17:28:35,688202,美迪西,0.102,True,0.120,2.300,0.572,cautious_bullish,0.5-1成
 2026-05-30 17:28:35,601801,皖新传媒,1.992,True,-0.148,-2.300,-1.364,cautious_bearish,减仓至0.5成以内
 2026-05-30 17:28:35,300676,华大基因,-0.750,True,0.066,1.300,-0.368,neutral,0成
+2026-05-30 17:35:50,601801,皖新传媒,1.500,True,2.440,2.300,2.116,bullish,1-2成

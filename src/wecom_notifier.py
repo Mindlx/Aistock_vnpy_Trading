@@ -106,25 +106,12 @@ class WeComNotifier:
         sig = r.get('signal_name', '中性')
         pos = r.get('position_advice', '0成')
 
-        # 股价和涨跌幅（颜色标注）
+        # 股价和涨跌幅
         price_str = f"¥{price:.2f}" if price else "-"
-        if pct > 0:
-            chg_str = f"<font color=\"warning\">{pct:+.2f}%</font>"
-        elif pct < 0:
-            chg_str = f"<font color=\"info\">{pct:+.2f}%</font>"
-        else:
-            chg_str = f"{pct:+.2f}%" if pct else "-"
+        chg_str = f"{pct:+.2f}%" if pct else "-"
 
-        # 三系统得分（颜色标注）
-        def _score_str(v: float, prefix: str) -> str:
-            if v > 0:
-                return f"<font color=\"warning\">{prefix}{v:+.2f}</font>"
-            elif v < 0:
-                return f"<font color=\"info\">{prefix}{v:+.2f}</font>"
-            else:
-                return f"{prefix}{v:+.2f}"
-
-        sys_str = f"{_score_str(ls, 'ly')} {_score_str(ms, 'ml')} {_score_str(ts, 'at')}"
+        # 三系统得分
+        sys_str = f"ly{ls:+.2f} ml{ms:+.2f} at{ts:+.2f}"
 
         # 量比
         vr_str = f"量比{vr:.2f}" if vr else ""
