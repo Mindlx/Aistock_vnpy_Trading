@@ -1,0 +1,7 @@
+{
+  "include": ["src", "scripts", "tests", "config"],
+  "exclude": ["systems", ".gitnexus"],
+  "reportMissingImports": false,
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic"
+}
