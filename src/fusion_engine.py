@@ -611,6 +611,10 @@ class FusionEngine:
                 tradingagent_rating=item.get("tradingagent_rating", "Hold"),
                 ta_is_stale=ta_is_stale,
             )
+            # 补充行情数据（从输入透传到结果）
+            for k in ("price", "pct_chg", "volume_ratio", "ma5", "ma10", "ma20"):
+                if k in item:
+                    result[k] = item[k]
             results.append(result)
 
         # 按融合得分降序排列
