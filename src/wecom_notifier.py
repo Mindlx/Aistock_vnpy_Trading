@@ -19,7 +19,7 @@ L7_EMOJI = {
     "strong_bullish": "🔴",
     "bullish": "🔴",
     "cautious_bullish": "🟠",
-    "neutral": "🌑",
+    "neutral": "⚪",
     "cautious_bearish": "🟡",
     "bearish": "🟢",
     "strong_bearish": "🟢",
