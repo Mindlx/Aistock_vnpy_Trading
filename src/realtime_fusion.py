@@ -169,7 +169,7 @@ class RealtimeFusion:
             signal = c['signal']
             score = c['score']
             emoji = "🟢" if score > 0 else "🔴" if score < 0 else "⚪"
-            lines.append(f"{emoji} **{name}** {signal} (Δ{score:+.2f})")
+            lines.append(f"{emoji} **{name}** {signal} Δ{score:+.2f}")
         lines.append("")
         lines.append("📡 ly昨日 | ml实时 | at盘中")
         self.notifier.send_markdown("\n".join(lines))

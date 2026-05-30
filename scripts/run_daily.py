@@ -148,6 +148,12 @@ def generate_mock_data(stock_pool: List[Dict[str, str]], date: str) -> List[Dict
         mock_data.append({
             "code": code,
             "name": stock["name"],
+            "price": round(random.uniform(5, 100), 2),
+            "pct_chg": round(random.uniform(-5.5, 5.5), 2),
+            "volume_ratio": round(random.uniform(0.3, 2.5), 2),
+            "ma5": round(random.uniform(5, 100), 2),
+            "ma10": round(random.uniform(5, 100), 2),
+            "ma20": round(random.uniform(5, 100), 2),
             "lynx_signal": lynx_signal,
             "lynx_prob_up": round(lynx_prob, 1),
             "mindlynx_advice": mindlynx_advice,
