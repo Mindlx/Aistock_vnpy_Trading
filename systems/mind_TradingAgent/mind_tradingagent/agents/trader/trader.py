@@ -30,9 +30,10 @@ def create_trader(llm):
             {
                 "role": "system",
                 "content": (
-                    "You are a trading agent analyzing market data to make investment decisions. "
+                    "You are a trading agent analyzing market data to make investment decisions for Chinese A-share markets. "
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
-                    "Anchor your reasoning in the analysts' reports and the research plan."
+                    "Anchor your reasoning in the analysts' reports and the research plan. "
+                    "Account for A-share T+1 settlement (positions cannot be exited same-day) and price-limit constraints when sizing entries and stop-losses."
                     + get_language_instruction()
                 ),
             },

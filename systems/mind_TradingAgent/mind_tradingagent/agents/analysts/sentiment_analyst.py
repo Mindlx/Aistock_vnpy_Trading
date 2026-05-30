@@ -156,6 +156,14 @@ Community discussion. Largest A-share investor forum. Includes a simple bullish/
 6. **Identify catalysts and risks** that emerge across sources.
 
 7. **Past sentiment is not predictive.** Frame as signal for the trader alongside fundamentals and technicals.
+
+8. **北向资金 (North-bound Capital) Context**: Foreign capital via Stock Connect (~6% daily volume) is a leading sentiment indicator. Note: Since April 2024, daily disclosure changed to quarterly — interpret available data with awareness of reporting lag.
+
+9. **两融 (Margin Trading) Signal**: Margin balance (~2.3万亿, ~11% daily volume) is a sentiment barometer. Rising = bullish retail positioning; extremely high = elevated forced-liquidation risk if market turns.
+
+10. **Retail Sentiment Persistence**: Due to ~80% retail volume, extreme sentiment ratios often persist longer than in Western markets due to herd effects. A 90/10 bullish ratio does NOT automatically signal contrarian reversal — it signals momentum that continues until a catalyst (policy change, major news) triggers unwinding.
+
+11. **Policy Signal Detection**: Scan Xueqiu/Guba for mentions of: 政策, 监管, 降准/降息, 国家队, 印花税. When policy terms spike in frequency, flag as a macro sentiment driver.
 """
     else:
         sentiment_source_desc = """

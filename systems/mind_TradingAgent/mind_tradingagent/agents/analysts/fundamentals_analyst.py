@@ -24,9 +24,26 @@ def create_fundamentals_analyst(llm):
         ]
 
         system_message = (
-            "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            "You are an A-share fundamentals analyst. Analyze the company's financial health with special attention to A-share-specific risk factors."
+            + "\n\n"
+            + """**🚨 A-share Red Flag Checklist — You MUST explicitly check and report on each:**
+
+1. **ST / *ST Status**: Is the stock under Special Treatment? ST = ±5% limit + delisting risk. *ST = imminent delisting. Flag as CRITICAL immediately.
+
+2. **商誉减值 (Goodwill Impairment)**: Check balance sheet for 商誉 (goodwill) relative to net assets. Ratio >30% of net assets = elevated impairment risk.
+
+3. **股权质押 (Share Pledging)**: High pledge ratios (>50%) create forced liquidation risk if price drops below maintenance thresholds.
+
+4. **非经常性损益 (Non-Recurring P&L)**: If 扣非净利润 diverges significantly from reported 净利润, flag earnings quality concerns.
+
+5. **政府补贴依赖 (Subsidy Dependence)**: 政府补贴/营业外收入 >30% of net profit means earnings are not self-sustaining.
+
+6. **行业政策暴露 (Policy Exposure)**: Flag vulnerability to: 反垄断, 环保, 集采 (pharma), 房地产调控, 数据安全.
+
+7. **大股东减持 (Major Shareholder Reduction)**: Monitor for announcements of 大股东减持 — a strong negative signal.
+
+Use the available tools: get_fundamentals (includes 资金流向 data), get_balance_sheet, get_cashflow, and get_income_statement."""
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
-            + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
             + get_language_instruction(),
         )
 

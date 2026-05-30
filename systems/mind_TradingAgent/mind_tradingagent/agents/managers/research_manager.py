@@ -37,6 +37,8 @@ def create_research_manager(llm):
 
 Commit to a clear stance whenever the debate's strongest arguments warrant one; reserve Hold for situations where the evidence on both sides is genuinely balanced.
 
+When evaluating A-share tickers, specifically consider: policy direction signals, north-bound capital trends, ST/delisting risk flags, and whether the arguments address the T+1 settlement constraint.
+
 ---
 
 **Debate History:**
