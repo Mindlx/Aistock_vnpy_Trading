@@ -20,11 +20,11 @@ class SignalNormalizer:
     # ===== lynx_vnpy 映射（基于 lynx_signal.py 实际输出） =====
     # 原始信号含 emoji 前缀，如 "🟢 买入", "⚪ 观望", "🔴 回避"
     LYNX_SIGNAL_MAP: dict[str, float] = {
-        "买入": 0.8,      # prob_up >= 65%
-        "关注": 0.8,      # prob_up >= 55%
-        "观望": 0.0,      # prob_up >= 45%
-        "谨慎": -0.3,     # prob_up >= 35%
-        "回避": -0.8,     # prob_up < 35%
+        "买入": 0.8,      # prob_up >= 65%，强烈看多
+        "关注": 0.55,     # prob_up >= 55%，弱看多
+        "观望": 0.0,      # prob_up >= 45%，中性
+        "谨慎": -0.3,     # prob_up >= 35%，弱看空
+        "回避": -0.8,     # prob_up < 35%，强烈看空
     }
 
     # ===== MindLynx_Aistock 映射 =====
@@ -65,28 +65,34 @@ class SignalNormalizer:
         """
         归一化 lynx_vnpy 输出。
 
+        prob_up 是模型预测的上涨概率（0-100），不是置信度。
+        prob_up 极端值（高或低）代表高确信度，中间值(45-55)代表不确定。
+        调制规则：看多信号用 prob_up 加权，看空信号用 prob_down = (100-prob_up) 加权。
+
         参数:
             signal: 原始信号字符串，如 "🟢 买入", "⚪ 观望"
-            prob_up: 上涨概率百分比（0-100），对应于 lynx_signal.py 中的 prob_up
+            prob_up: 上涨概率百分比（0-100）
 
         返回:
             (归一化得分, 是否有效)
         """
-        # 置信度阈值检查
-        if prob_up < 35.0:
-            return 0.0, False
-
         # 剥离 emoji 前缀
         clean_signal = cls._strip_emoji(signal)
-
         base_score = cls.LYNX_SIGNAL_MAP.get(clean_signal, 0.0)
 
-        # 观望信号不乘置信度（中性信号无需加权）
+        # 观望信号：中性，不乘概率
         if clean_signal == "观望":
-            return base_score, True
+            return 0.0, True
 
-        # 置信度归一化: prob_up 是 0-100 的百分比
-        return base_score * (prob_up / 100.0), True
+        # 方向性置信度调制：
+        #   看多信号 → 用 prob_up 加权（越高越看多）
+        #   看空信号 → 用 prob_down = (100-prob_up) 加权（prob_up越低=越看空）
+        if base_score > 0:
+            conviction = prob_up / 100.0
+        else:
+            conviction = (100.0 - prob_up) / 100.0
+
+        return base_score * conviction, True
 
     # ────────── MindLynx_Aistock 归一化 ──────────
 

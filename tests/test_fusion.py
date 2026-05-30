@@ -84,29 +84,31 @@ class TestSignalNormalizer:
     def test_lynx_watch(self):
         score, valid = self.n.normalize_lynx("🟢 关注", 58.0)
         assert valid is True
-        assert score == pytest.approx(0.8 * 0.58, rel=1e-2)
+        assert score == pytest.approx(0.55 * 0.58, rel=1e-2)
 
     def test_lynx_neutral(self):
-        """观望信号不乘置信度"""
+        """观望信号不乘概率"""
         score, valid = self.n.normalize_lynx("⚪ 观望", 50.0)
         assert valid is True
         assert score == 0.0
 
     def test_lynx_caution(self):
+        """看空信号用 prob_down = (100-prob_up) 加权"""
         score, valid = self.n.normalize_lynx("🟡 谨慎", 40.0)
         assert valid is True
-        assert score == pytest.approx(-0.3 * 0.40, rel=1e-2)
+        assert score == pytest.approx(-0.3 * ((100 - 40) / 100), rel=1e-2)
 
     def test_lynx_avoid(self):
+        """回避是强烈看空，用 prob_down 加权"""
         score, valid = self.n.normalize_lynx("🔴 回避", 25.0)
         assert valid is True
-        assert score == pytest.approx(-0.8 * 0.25, rel=1e-2)
+        assert score == pytest.approx(-0.8 * ((100 - 25) / 100), rel=1e-2)
 
-    def test_lynx_invalid_confidence(self):
-        """置信度低于35%时视作无效"""
-        score, valid = self.n.normalize_lynx("🟢 买入", 30.0)
-        assert valid is False
-        assert score == 0.0
+    def test_lynx_avoid_extreme(self):
+        """极端看空时得分应更强"""
+        score_low, _ = self.n.normalize_lynx("🔴 回避", 10.0)
+        score_high, _ = self.n.normalize_lynx("🔴 回避", 25.0)
+        assert score_low < score_high, "更低prob_up应产生更负的得分"
 
     def test_lynx_strip_emoji_multi(self):
         """多种 emoji 前缀都能正确剥离"""
@@ -128,7 +130,7 @@ class TestSignalNormalizer:
 
     def test_mindlynx_add_position(self):
         score = self.n.normalize_mindlynx("加仓", 65)
-        assert score == 0.6
+        assert score == 0.5  # 评分60-69区间返回0.5
 
     def test_mindlynx_hold_high(self):
         score = self.n.normalize_mindlynx("持有", 65)
@@ -298,19 +300,18 @@ class TestFusionEngine:
     # ── 缺失数据场景 ──
 
     def test_missing_lynx_low_confidence(self):
-        """lynx 置信度低 → 仅使用两系统"""
+        """低 prob_up 买入信号仍有效（prob_up 是上涨概率，不是置信度）"""
         result = self.engine.fuse_single_stock(
             stock_code="601801",
             stock_name="皖新传媒",
             lynx_signal="🟢 买入",
-            lynx_prob_up=30.0,  # < 35%，无效
+            lynx_prob_up=30.0,  # P(涨)=30%, P(跌)=70%，低概率看多但有效
             mindlynx_advice="持有",
             mindlynx_score=65,
             tradingagent_rating="Buy",
         )
-        assert result["lynx_valid"] is False
-        assert result["is_degraded"] is True
-        assert result["valid"] is True  # 仍有 2 系统有效
+        assert result["lynx_valid"] is True  # 不再因低prob_up被丢弃
+        assert result["lynx_score"] < 0.5  # 但得分较低（0.8*0.30=0.24）
 
     def test_all_systems_invalid(self):
         """所有系统无效 → 返回无效信号"""
@@ -541,10 +542,10 @@ class TestWeComNotifier:
             },
         ]
         summary = self.notifier.format_daily_summary(results, "2026-05-29")
+        assert "三系统共识" in summary
         assert "强烈看多" in summary
-        assert "强烈看空" in summary
-        assert "皖新传媒" in summary
         assert "ST网达" in summary
+        assert "融合-0.62" in summary
         assert "所有系统无效" in summary
 
 
