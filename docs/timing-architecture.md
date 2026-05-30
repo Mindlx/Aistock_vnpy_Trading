@@ -83,9 +83,14 @@
 
 ## 四、实施步骤
 
-- [ ] 1. 确认 MindLynx RTM 守护进程已在 `Aistock_vnpy_Trading-monitor.service` 中正常运行
-- [ ] 2. 修改 crontab：日终融合从 16:30 改为 15:30
-- [ ] 3. 修改 crontab：添加 08:00 晨间融合推送
+### 已完成
+
+- [x] 1. 确认 MindLynx RTM 守护进程已在 `Aistock_vnpy_Trading-monitor.service` 中正常运行
+- [x] 2. 系统从 crontab 迁移至 systemd timer：`Aistock_vnpy_Trading-fusion.timer` 工作日 15:30 触发
+- [x] 3. 全部 systemd 服务使用相对路径 + symlink，完全在项目文件夹内
+
+### 待实施
+
 - [ ] 4. 实现 TA 异步执行：在快速融合后触发 `--run-ta`，结果缓存供次日使用
 - [ ] 5. 修改融合推送格式：以分歧/共识为核心呈现
 - [ ] 6. 添加 `ta_stale` 标志逻辑：TA 未就绪时使用前次结果

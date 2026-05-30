@@ -124,17 +124,57 @@ python scripts/run_daily.py --run-ta
 
 ## 定时任务
 
-### Linux crontab
+所有定时任务统一使用 **systemd timer** 管理，便于分发和管理。
+
+### 启用全部服务
 
 ```bash
-# 每日 16:30 执行融合（周一至周五）
-crontab -e
-30 16 * * 1-5 cd /path/to/Aistock_vnpy_Trading && .venv/bin/python scripts/run_daily.py >> config/logs/cron.log 2>&1
+# 克隆项目后，一键启用所有 systemd 服务
+systemctl --user enable --now Aistock_vnpy_Trading-scheduler.service
+systemctl --user enable --now Aistock_vnpy_Trading-monitor.service  
+systemctl --user enable --now Aistock_vnpy_Trading-fusion.timer
 ```
 
-### GitHub Actions（可选）
+### 服务说明
 
-如需在 GitHub 上定时运行，参考 `.github/workflows/`（需自行创建）。
+| 服务 | 类型 | 触发时间 | 职责 |
+|------|------|---------|------|
+| `Aistock_vnpy_Trading-scheduler` | service | 常驻 | MindLynx 整点分析/大盘复盘/情报搜集 |
+| `Aistock_vnpy_Trading-monitor` | service | 常驻 | 盘中实时监控（ATR止损/量价异动） |
+| `Aistock_vnpy_Trading-fusion` | timer | 工作日 15:30 | 日终三系统融合 + 企业微信推送 |
+
+### 查看状态
+
+```bash
+# 查看服务状态
+systemctl --user status Aistock_vnpy_Trading-scheduler
+systemctl --user status Aistock_vnpy_Trading-monitor
+
+# 查看定时器状态
+systemctl --user list-timers Aistock_vnpy_Trading-fusion.timer
+
+# 查看日志
+journalctl --user -u Aistock_vnpy_Trading-scheduler --no-pager -n 50
+journalctl --user -u Aistock_vnpy_Trading-fusion --no-pager -n 50
+```
+
+### 停止服务
+
+```bash
+systemctl --user stop Aistock_vnpy_Trading-scheduler.service
+systemctl --user stop Aistock_vnpy_Trading-monitor.service
+systemctl --user stop Aistock_vnpy_Trading-fusion.timer
+```
+
+### 服务文件位置
+
+```
+~/.config/systemd/user/
+├── Aistock_vnpy_Trading-scheduler.service
+├── Aistock_vnpy_Trading-monitor.service
+├── Aistock_vnpy_Trading-fusion.service
+└── Aistock_vnpy_Trading-fusion.timer
+```
 
 ---
 
