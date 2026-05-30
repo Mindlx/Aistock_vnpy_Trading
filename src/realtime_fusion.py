@@ -169,7 +169,7 @@ class RealtimeFusion:
             signal = c['signal']
             score = c['score']
             emoji = "🟢" if score > 0 else "🔴" if score < 0 else "⚪"
-            lines.append(f"{emoji} **{name}({c['code']})** {signal} (Δ{score:+.2f})")
+            lines.append(f"{emoji} **{name}** {signal} (Δ{score:+.2f})")
         lines.append("")
         lines.append("📡 ly昨日 | ml实时 | at盘中")
         self.notifier.send_markdown("\n".join(lines))
@@ -209,7 +209,7 @@ def main():
         if changes:
             for c in changes:
                 name = service._stock_names.get(c['code'], c['code'])
-                print(f"{name}({c['code']}): {c['signal']} (score={c['score']:+.2f})")
+                print(f"{name}: {c['signal']} (score={c['score']:+.2f})")
         else:
             print("无变化")
 
