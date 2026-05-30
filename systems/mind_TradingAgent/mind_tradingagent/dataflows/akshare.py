@@ -330,22 +330,52 @@ def get_news(
     start_date: str,
     end_date: str,
 ) -> str:
-    """Get news for an A-share stock."""
+    """Get news for an A-share stock.
+
+    Primary source: EastMoney (东方财富) — rich A-share news coverage.
+    Fallback: stock_info_news (generic).
+    """
     code = _bare_code(ticker)
+    try:
+        # Primary: EastMoney news (rich, A-share specific)
+        df = ak.stock_news_em(symbol=code)
+        if df is not None and not df.empty:
+            lines = [
+                f"# News for {code} ({ticker})",
+                f"# Source: 东方财富 (EastMoney)",
+                f"# Period: {start_date} to {end_date}",
+                "",
+            ]
+            for _, row in df.iterrows():
+                title = str(row.get("新闻标题", ""))
+                source = str(row.get("文章来源", ""))
+                time = str(row.get("发布时间", ""))
+                content = str(row.get("新闻内容", ""))[:120]
+                if title:
+                    lines.append(f"### {title}")
+                    lines.append(f"来源: {source} | 时间: {time}")
+                    if content:
+                        lines.append(f"{content}...")
+                    lines.append("")
+            return "\n".join(lines)
+    except Exception as e:
+        logger.warning(f"EastMoney news failed for {ticker}: {e}")
+
+    # Fallback: generic stock info news
     try:
         df = ak.stock_info_news(symbol=code)
         if df is not None and not df.empty:
-            lines = [f"# News for {code} ({ticker})", f"# Period: {start_date} to {end_date}", ""]
+            lines = [f"# News for {code} ({ticker}) (fallback)", f"# Period: {start_date} to {end_date}", ""]
             for _, row in df.head(20).iterrows():
                 title = row.get("新闻标题", row.get("title", ""))
                 date = row.get("发布时间", row.get("date", ""))
                 if title:
                     lines.append(f"- [{date}] {title}")
-            return "\n".join(lines)
-        return f"# No news found for {code}\n"
-    except Exception as e:
-        logger.warning(f"akshare get_news({ticker}) failed: {e}")
-        return f"# News not available for {ticker}: {e}\n"
+            return "\n".join(lines) if len(lines) > 2 else f"# No news found for {code}\n"
+    except Exception as e2:
+        logger.warning(f"fallback news also failed for {ticker}: {e2}")
+
+    return f"# No news found for {code}\n"
 
 
 def get_global_news() -> str:
