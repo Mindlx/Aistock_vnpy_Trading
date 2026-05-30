@@ -34,3 +34,14 @@ systems/MindLynx-Aistock/data/
 # Temporary
 *.log
 *.tmp
+
+# Cleaned up - not tracked
+systems/lynx_vnpy/lynx_vnpy/
+systems/MindLynx-Aistock/tests/
+systems/MindLynx-Aistock/scripts/
+systems/MindLynx-Aistock/api/
+systems/MindLynx-Aistock/bot/
+systems/MindLynx-Aistock/apps/
+systems/MindLynx-Aistock/openspec/
+systems/mind_TradingAgent/tests/
+systems/mind_TradingAgent/assets/
