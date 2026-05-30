@@ -754,10 +754,51 @@ class UnifiedDataLoader:
             # 至少有一个系统有真实数据才加入
             has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating)
 
+            # 获取最新股价和涨跌幅（从 lynx 的 Sina API 数据）
+            price = 0.0
+            pct_chg = 0.0
+            volume_ratio = 0.0
+            ma5 = ma10 = ma20 = 0.0
+            try:
+                if self.lynx._ensure_imported():
+                    df_price = self.lynx._lynx_module.fetch_daily_bars(code)
+                    if df_price is not None and len(df_price) >= 2:
+                        last = df_price.iloc[-1]
+                        prev = df_price.iloc[-2]
+                        price = float(last.get("收盘", 0))
+                        prev_close = float(prev.get("收盘", 0))
+                        if prev_close > 0:
+                            pct_chg = round((price - prev_close) / prev_close * 100, 2)
+                        # 尝试从 stock_daily DB 获取更多指标
+                        try:
+                            import sqlite3
+                            db_path = "systems/MindLynx-Aistock/data/stock_analysis.db"
+                            db = sqlite3.connect(db_path)
+                            row = db.execute(
+                                f"SELECT volume_ratio, ma5, ma10, ma20 FROM stock_daily "
+                                f"WHERE code=? ORDER BY date DESC LIMIT 1", (code,)
+                            ).fetchone()
+                            if row:
+                                volume_ratio = round(row[0], 2) if row[0] else 0.0
+                                ma5 = round(row[1], 2) if row[1] else 0.0
+                                ma10 = round(row[2], 2) if row[2] else 0.0
+                                ma20 = round(row[3], 2) if row[3] else 0.0
+                            db.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
             if has_data:
                 stock_signals.append({
                     "code": code,
                     "name": stock["name"],
+                    "price": price,
+                    "pct_chg": pct_chg,
+                    "volume_ratio": volume_ratio,
+                    "ma5": ma5,
+                    "ma10": ma10,
+                    "ma20": ma20,
                     "lynx_signal": lynx_signal_raw if lynx_signal_raw else "观望",
                     "lynx_prob_up": float(lynx_prob_up) if lynx_prob_up else 50.0,
                     "mindlynx_advice": mindlynx_advice if mindlynx_advice else "观望",

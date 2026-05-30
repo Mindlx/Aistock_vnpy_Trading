@@ -78,15 +78,35 @@ class WeComNotifier:
 
     @staticmethod
     def _stock_line(r) -> str:
-        """单只股票一行式摘要（适合微信阅读）"""
+        """单只股票一行式摘要（含股价与支撑压力位，适合微信阅读）"""
         emoji = L7_EMOJI.get(r.get("signal", "neutral"), "⚪")
         name = r.get('stock_name', '')
         code = r['stock_code']
+        price = r.get('price', 0)
+        pct = r.get('pct_chg', 0)
+        vr = r.get('volume_ratio', 0)
+        ma5 = r.get('ma5', 0)
+        ma10 = r.get('ma10', 0)
+        ma20 = r.get('ma20', 0)
         ls = r.get("lynx_score", 0)
         ms = r.get("mindlynx_score", 0)
         ts = r.get("tradingagent_score", 0)
         sig = r.get('signal_name', '中性')
         pos = r.get('position_advice', '0成')
+
+        # 价格与涨跌
+        pct_str = f"<font color=\"{'warning' if pct > 0 else 'info' if pct < 0 else 'comment'}\">{pct:+.2f}%</font>" if pct else "-"
+        price_str = f"¥{price:.2f}" if price else "-"
+
+        # 量比
+        vr_str = f"量比{vr:.2f}" if vr else ""
+
+        # 支撑/压力
+        sup_str = ""
+        if ma10 and ma20:
+            support = min(ma10, ma20)
+            resist = max(ma10, ma20)
+            sup_str = f"支撑{support:.2f} 压力{resist:.2f}"
 
         # 备注
         notes = []
@@ -100,11 +120,16 @@ class WeComNotifier:
             notes.append("⚠降级")
         note_str = f" | {' '.join(notes)}" if notes else ""
 
-        return (
-            f"{emoji} **{name}({code})** "
-            f"| ly{ls:+.2f} ml{ms:+.2f} at{ts:+.2f}"
-            f" | {sig} | 仓位{pos}{note_str}"
-        )
+        parts = [
+            f"{emoji} **{name}({code})** {price_str} {pct_str}",
+            f"| ly{ls:+.2f} ml{ms:+.2f} at{ts:+.2f}",
+            f"| {sig} | 仓位{pos}{note_str}",
+        ]
+        if vr_str or sup_str:
+            extras = [x for x in [vr_str, sup_str] if x]
+            parts.append(f"| {' '.join(extras)}")
+
+        return "\n".join(parts)
 
     def format_daily_summary(self, results: List[Dict[str, Any]], date: str) -> str:
         """
