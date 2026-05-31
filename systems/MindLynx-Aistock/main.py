@@ -1490,9 +1490,13 @@ def main() -> int:
             additional_daily_tasks = []
             additional_weekly_tasks = []
 
-            # 大盘复盘 11:45/15:45
+            # 大盘复盘 11:45/15:45（仅交易日运行）
             def _sched_market_review():
                 try:
+                    # 周末跳过
+                    if datetime.now().isoweekday() >= 6:
+                        logger.info("大盘复盘: 今日周末，跳过")
+                        return
                     from src.core.market_review import run_market_review
                     from src.core.market_review_runtime import build_market_review_runtime
                     _cfg = _reload_runtime_config()
