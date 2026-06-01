@@ -145,8 +145,8 @@ class WeComNotifier:
         stale_ta = [r for r in valid if r.get("ta_is_stale")]
 
         lines = [
-            f"## 📊 三系统融合决策 | {date}",
-            f"> 有效{len(valid)}只"
+            f"## 📊 三系统融合决策 | {date}"
+            f" | 有效{len(valid)}"
             f"{' | 分歧' + str(len(disagree)) if disagree else ''}"
             f"{' | 降级' + str(len(degraded)) if degraded else ''}"
             f"{' | TA⏳' + str(len(stale_ta)) if stale_ta else ''}",
