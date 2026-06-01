@@ -3,8 +3,8 @@
 ## 环境要求
 
 - Python >= 3.13
-- OS: Linux (建议 Ubuntu 22.04+)
-- systemd (用户级 service 管理)
+- OS: Linux（建议 Ubuntu 22.04+）
+- systemd（用户级 service 管理）
 
 ## 一键安装
 
@@ -44,25 +44,42 @@ cat systems/MindLynx-Aistock/.env
 
 ## systemd 服务管理
 
+所有 service/timer 文件统一管理在 `config/systemd/`，部署到 `~/.config/systemd/user/` 运行。
+
+### 部署命令
+
+```bash
+bash scripts/deploy-systemd.sh
+```
+
 ### 服务总览
 
-| Service | 类型 | 运行内容 | 状态 |
-|---------|------|---------|------|
-| `Aistock_vnpy_Trading-monitor.service` | `simple` | MindLynx 盘中实时监控 | `active (running)` |
-| `Aistock_vnpy_Trading-scheduler.service` | `simple` | MindLynx 定时分析调度 | `active (running)` |
-| `Aistock_vnpy_Trading-fusion.service` | `oneshot` | 融合引擎日终分析 (15:30) | `inactive (timer)` |
-| `Aistock_vnpy_Trading-TA.service` | `oneshot` | TradingAgent 深度论证 (16:00) | `inactive (timer)` |
+| Service | 类型 | 运行内容 | 触发方式 |
+|---------|------|---------|---------|
+| `Aistock_vnpy_Trading-monitor.service` | `simple` | MindLynx 盘中实时监控 | 手动启动，daemon |
+| `Aistock_vnpy_Trading-scheduler.service` | `simple` | MindLynx 定时分析调度 | 手动启动，daemon |
+| `Aistock_vnpy_Trading-ml-factor.service` | `simple` | 因子层实时计算（每5分钟） | 手动启动，daemon |
+| `Aistock_vnpy_Trading-realtime-fusion.service` | `simple` | 准实时融合（文件交换驱动） | 手动启动，daemon |
+| `Aistock_vnpy_Trading-lynx-signal.service` | `oneshot` | lynx 量化信号推送 | timer → 工作日 15:15 |
+| `Aistock_vnpy_Trading-fusion.service` | `oneshot` | 融合引擎日终分析（含TA） | timer → 工作日 19:00 |
+| `Aistock_vnpy_Trading-TA.service` | `oneshot` | TradingAgent 深度论证 | timer → 工作日 09:00/13:00 |
 
 ### 启用全部服务
 
 ```bash
-# MindLynx daemon（需手动启动一次，之后自动重启）
+# 1. 同步配置
+bash scripts/deploy-systemd.sh
+
+# 2. 启动 daemon（一次启动，之后自动重启）
 systemctl --user start Aistock_vnpy_Trading-monitor.service
 systemctl --user start Aistock_vnpy_Trading-scheduler.service
+systemctl --user start Aistock_vnpy_Trading-ml-factor.service
+systemctl --user start Aistock_vnpy_Trading-realtime-fusion.service
 
-# 定时器（已启用，周一至周五自动触发）
+# 3. 启用定时器（周一至周五自动触发）
 systemctl --user enable --now Aistock_vnpy_Trading-fusion.timer
 systemctl --user enable --now Aistock_vnpy_Trading-TA.timer
+systemctl --user enable --now Aistock_vnpy_Trading-lynx-signal.timer
 ```
 
 ### 查看状态
@@ -72,16 +89,54 @@ systemctl --user enable --now Aistock_vnpy_Trading-TA.timer
 systemctl --user list-units --all | grep aistock
 
 # 定时器下次触发时间
-systemctl --user list-timers | grep aistock
+systemctl --user list-timers --no-pager | grep aistock
 
 # 查看日志
 journalctl --user -u Aistock_vnpy_Trading-fusion.service --since today
-journalctl --user -u Aistock_vnpy_Trading-monitor.service -f
+tail -f config/logs/fusion-cron.log        # 融合日志
+tail -f config/logs/ta-cron.log            # TA 日志
+tail -f config/logs/lynx-signal.log        # ly 推送日志
+tail -f config/logs/realtime-fusion.log    # 实时融合日志
 ```
 
-### 服务文件路径
+### 日志文件路径
 
-所有 service/timer 文件位于 `~/.config/systemd/user/`，以 `Aistock_vnpy_Trading-` 为前缀。
+| 日志 | 路径 |
+|------|------|
+| 融合引擎 | `config/logs/fusion-cron.log` |
+| TradingAgent | `config/logs/ta-cron.log` |
+| ly 量化信号 | `config/logs/lynx-signal.log` |
+| 盘中实时融合 | `config/logs/realtime-fusion.log` |
+| ML 因子服务 | `config/logs/ml-factor.log` |
+
+## 交易日自动运行流程
+
+```
+09:00  TA.timer    → TA 分析 + 融合推送（盘中参考）
+13:00  TA.timer    → TA 分析 + 融合推送（午盘更新）
+15:15  lynx-signal → ly RF 量化信号推送 + 写 ly_signal.json
+15:00~ scheduler   → ML 整点分析（含因子计算）
+       realtime    → 实时融合 300s 扫描 exchange area（有变化才推）
+19:00  fusion      → TA（含收盘全量数据）+ 融合 → 终版推送 ★
+```
+
+融合系统关键依赖：
+
+```
+ly: 昨日收盘后即可生成（RF 模型不需要当天数据）
+ml: 15:00 收盘后生成完整报告
+at: TA 19:00 内部自跑（使用当日 ly+ml 数据）
+```
+
+## 配置管理
+
+修改 systemd 配置后：
+
+```bash
+vim config/systemd/Aistock_vnpy_Trading-*.service   # 改配置
+bash scripts/deploy-systemd.sh                       # 同步到 systemd
+systemctl --user restart xxx.service                 # 生效
+```
 
 ## 运行方式
 
@@ -113,33 +168,18 @@ journalctl --user -u Aistock_vnpy_Trading-monitor.service -f
 | `bayesian` | 可靠性调制贝叶斯融合 | `fusion_mode: bayesian` |
 | `dual` | 同时输出两种结果供对比 | `fusion_mode: dual` 或 `--mode dual` |
 
-## 交易日自动运行流程
-
-```
-09:30 开盘
-  ├─ MindLynx monitor daemon → 盘中实时盯盘推送
-15:00 收盘
-15:30 → fusion.timer → 融合引擎
-       ├─ ly: 实时预测 (RandomForest)
-       ├─ ml: 今日报告 (scheduler 已生成)
-       ├─ at: 昨日数据 (stale)
-       └─ 结果 → 企业微信推送 + JSON/CSV 存档
-16:00 → TA.timer → TradingAgent 深度分析
-       └─ 生成今日日志 → 供次日融合使用
-```
-
 ## 输出文件
 
 ```
-data/fusion_output/fusion_{date}.json     # 完整融合结果（含各系统得分）
-data/fusion_output/fusion_{date}.csv      # 简洁版 CSV
-config/logs/fusion-cron.log               # 融合引擎日志
-config/logs/ta-cron.log                   # TradingAgent 日志
+data/fusion_output/fusion_{date}.json          # 完整融合结果（含各系统得分）
+data/fusion_output/fusion_{date}.csv           # 简洁版 CSV
+data/realtime/ly_signal.json                   # ly 信号（准实时文件交换）
+data/realtime/ml_signal.json                   # ML 因子得分（准实时文件交换）
+data/realtime/at_signal.json                   # TA 评级（准实时文件交换）
 ```
 
 ## 测试
 
 ```bash
 .venv/bin/python -m pytest tests/test_fusion.py -v
-# 88/89 passed (1 pre-existing env-dependent failure)
 ```
