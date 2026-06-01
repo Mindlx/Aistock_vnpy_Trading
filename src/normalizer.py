@@ -1,18 +1,21 @@
 """
-三系统信号统一归一化模块 — 7 级语义对齐 (v3.0)
+三系统信号统一归一化模块 — 7 级语义对齐 (v3.1)
 
 ⚠️ 仅供学习和研究目的，不构成任何投资建议
 
-根据 Oracle + c1skill 论证，三个系统参考系不同，采用 7 级统一决策空间：
+根据 Oracle + c1skill 论证，三系统映射已校准到统一锚点。
 
     级别        ly (概率)         ml (操作)      at (研报)
-    +3 强烈看多  logit 连续映射    买入           Buy
-    +2 看多      ↑                加仓           Overweight
-    +1 谨慎看多  ↑                —              —
+    +3 强烈看多  prob_up≥75%      买入           Buy
+    +2 看多      prob_up≥65%      加仓           Overweight
+    +1 谨慎看多  prob_up≥55%      —              —
      0 中性/持有 prob_up≈50%      持有/观望      Hold
-    -1 谨慎看空  ↓                —              —
-    -2 看空      ↓                减仓           Underweight
-    -3 强烈看空  logit 连续映射    卖出           Sell
+    -1 谨慎看空  prob_up≥35%      减仓           Underweight
+    -2 看空      prob_up≥25%      卖出           —
+    -3 强烈看空  prob_up<25%      —              Sell
+
+映射方式: 分段线性（flat 中性区 45~55%→0.00，锚点间线性插值）
+vs v3.0: 从 logit+tanh 改为分段线性，ml/at 值对齐设计目标
 
 关键语义修正: "持有"映射到 L7=0（中性），不再当作弱看多信号。
 """
@@ -123,22 +126,22 @@ class SignalNormalizer:
     # 持有/观望:  L7=0，细微上下浮动
     # 减仓/卖出:  负 L7，sentiment_score 微调
     ML_BASE = {
-        "买入": 2.2,      # L7=+3 ~ +2
-        "加仓": 1.3,      # L7=+2 ~ +1
+        "买入": 3.0,      # L7=+3 (S1 强烈看多)
+        "加仓": 2.06,     # L7=+2 (S2 看多)
         "持有": 0.0,      # L7=0（中性）
         "观望": -0.1,     # L7=0 ~ -1
-        "减仓": -1.7,     # L7=-2
-        "卖出": -2.1,     # L7=-3 ~ -2
+        "减仓": -1.13,    # L7=-1 (S5 谨慎看空)
+        "卖出": -2.06,    # L7=-2 (S6 看空)
     }
 
     # 评分微调系数（每系统不同）
     ML_SENTIMENT_FACTOR = {
-        "买入": 0.4,
-        "加仓": 0.4,
+        "买入": 0.55,     # base=3.0 × 0.18
+        "加仓": 0.37,     # base=2.06 × 0.18
         "持有": 0.3,      # 窄幅，强化中性定位
         "观望": 0.3,
-        "减仓": 0.4,
-        "卖出": 0.4,
+        "减仓": 0.20,     # base=1.13 × 0.18
+        "卖出": 0.37,     # base=2.06 × 0.18
     }
 
     # ══════════════════════════════════════════
@@ -147,11 +150,11 @@ class SignalNormalizer:
     # ══════════════════════════════════════════
 
     TRADINGAGENT_L7_MAP: dict[str, float] = {
-        "Buy": 2.3,           # L7=+3 (强烈看多)
-        "Overweight": 1.3,    # L7=+2 (看多)
+        "Buy": 3.0,           # L7=+3 (S1 强烈看多)
+        "Overweight": 2.06,   # L7=+2 (S2 看多)
         "Hold": 0.0,          # L7=0 (中性/持有)
-        "Underweight": -1.3,  # L7=-2 (看空)
-        "Sell": -2.3,         # L7=-3 (强烈看空)
+        "Underweight": -1.13, # L7=-1 (S5 谨慎看空)
+        "Sell": -3.0,         # L7=-3 (S7 强烈看空)
     }
 
     # ────────── emoji 剥离 ──────────
@@ -171,29 +174,48 @@ class SignalNormalizer:
     @classmethod
     def normalize_lynx(cls, signal: str, prob_up: float) -> Tuple[float, bool]:
         """
-        ly 归一化: logit+tanh 连续映射。
+        ly 归一化: 分段线性映射（v3.1，替代原 logit+tanh）。
 
-        score = 3.0 × tanh(logit(prob_up) / 2.0)
+        锚点（设计目标 ×3.75 缩放至 [-3, +3]）:
+          prob_up  0% → L7 -3.00 (钳位)
+          prob_up 25% → L7 -2.06 (S6 看空)
+          prob_up 35% → L7 -1.13 (S5 谨慎看空)
+          prob_up 45% → L7  0.00 (S4 中性边界)
+          prob_up 55% → L7  0.00 (S4 中性边界, flat zone)
+          prob_up 65% → L7 +2.06 (S2 看多)
+          prob_up 75% → L7 +3.00 (S1 强烈看多, 其后钳位)
 
-        特性:
-        - prob_up=50 → score=0.0（精确中性）
-        - prob_up=70 → score≈1.2（L7=+2 看多）
-        - prob_up=85 → score≈2.1（L7=+3 强烈看多）
-        - 连续可微，无硬阈值
-
+        flat zone 45~55%: prob_up 在 50% 附近的信号无方向性倾向。
         参数:
             signal: 原始信号（兼容旧格式，当前仅用于有效性判断）
             prob_up: 上涨概率 0-100
-
         返回:
             (L7 得分, 是否有效)
         """
         p = float(prob_up)
         if p < 0 or p > 100:
             return 0.0, False
-        logit_val = cls._logit(p)
-        score = 3.0 * math.tanh(logit_val / 2.0)
-        return score, True
+
+        # prob_up → L7 锚点表
+        anchors = [
+            (0, -3.00),    # 钳位下限
+            (25, -2.06),   # S6
+            (35, -1.13),   # S5
+            (45, 0.00),    # S4 中性边界
+            (55, 0.00),    # S4 中性边界 (flat zone)
+            (65, 2.06),    # S2
+            (75, 3.00),    # S1
+            (100, 3.00),   # 钳位上限
+        ]
+        for i in range(len(anchors) - 1):
+            x1, y1 = anchors[i]
+            x2, y2 = anchors[i + 1]
+            if x1 <= p <= x2:
+                if x2 == x1:
+                    return y1, True
+                score = y1 + (y2 - y1) * (p - x1) / (x2 - x1)
+                return score, True
+        return 0.0, False
 
     # ────────── ml: 操作建议归一化 ──────────
 

@@ -60,7 +60,7 @@ class FusionEngine:
 
         # 贝叶斯模式参数（来自可靠性配置）
         rel_config = self.config.get("reliability", {})
-        self.probability_k = rel_config.get("probability_k", 2.5)
+        self.probability_k = rel_config.get("probability_k", 1.0)
         override = rel_config.get("override", {})
         self.ly_veto_threshold = override.get("ly_veto_threshold", 0.30)
 

@@ -60,12 +60,14 @@ class TestSignalNormalizer:
     def test_lynx_prob_up_72(self):
         score, valid = self.n.normalize_lynx("🟢 买入", 72.0)
         assert valid is True
-        assert 1.3 < score < 1.4
+        # prob_up=72: 在65%(2.06)和75%(3.00)之间线性插值
+        assert 2.65 < score < 2.75
 
     def test_lynx_prob_up_25(self):
         score, valid = self.n.normalize_lynx("🔴 回避", 25.0)
         assert valid is True
-        assert -1.51 < score < -1.48
+        # prob_up=25: 锚点 -2.06
+        assert -2.10 < score < -2.00
 
     def test_lynx_prob_up_40(self):
         score, valid = self.n.normalize_lynx("🟡 谨慎", 40.0)
@@ -73,14 +75,16 @@ class TestSignalNormalizer:
         assert -0.65 < score < -0.55
 
     def test_lynx_symmetric(self):
-        """prob_up=30 vs 70 应大致对称"""
+        """prob_up=30 vs 70: 分段线性两侧斜率不同，不再严格对称"""
         s30, _ = self.n.normalize_lynx("", 30.0)
         s70, _ = self.n.normalize_lynx("", 70.0)
-        assert abs(s30 + s70) < 0.05
+        # 30%在25~35段(斜率0.093/%), 70%在65~75段(斜率0.094/%)
+        # 距中性区距离不同，不对称是预期的
+        assert s30 < 0 and s70 > 0
 
     def test_lynx_extreme(self):
         s95, _ = self.n.normalize_lynx("", 95.0)
-        assert s95 < 3.0  # 永远不会饱和到+3
+        assert s95 == 3.0  # >75% 钳位到最大值
 
     def test_lynx_emoji_strip(self):
         clean = self.n._strip_emoji("🟢 买入")
@@ -89,11 +93,12 @@ class TestSignalNormalizer:
     # ── ml: 类别+评分微调映射 ──
 
     def test_mindlynx_buy(self):
-        assert self.n.normalize_mindlynx("买入", 75) > 2.0
+        assert self.n.normalize_mindlynx("买入", 75) > 2.5
         assert self.n.normalize_mindlynx("买入", 60) > 2.0
 
     def test_mindlynx_add(self):
-        assert 1.0 < self.n.normalize_mindlynx("加仓", 70) < 2.0
+        score = self.n.normalize_mindlynx("加仓", 70)
+        assert 2.0 < score < 2.5  # base=2.06, modulation≈0.148 → ~2.21
 
     def test_mindlynx_hold_neutral(self):
         """持有 → L7=0"""
@@ -116,22 +121,22 @@ class TestSignalNormalizer:
     # ── at: 直接 L7 映射 ──
 
     def test_tradingagent_buy(self):
-        assert self.n.normalize_tradingagent("Buy") == pytest.approx(2.3)
+        assert self.n.normalize_tradingagent("Buy") == pytest.approx(3.0)
 
     def test_tradingagent_overweight(self):
-        assert self.n.normalize_tradingagent("Overweight") == pytest.approx(1.3)
+        assert self.n.normalize_tradingagent("Overweight") == pytest.approx(2.06)
 
     def test_tradingagent_hold(self):
         assert self.n.normalize_tradingagent("Hold") == 0.0
 
     def test_tradingagent_underweight(self):
-        assert self.n.normalize_tradingagent("Underweight") == pytest.approx(-1.3)
+        assert self.n.normalize_tradingagent("Underweight") == pytest.approx(-1.13)
 
     def test_tradingagent_sell(self):
-        assert self.n.normalize_tradingagent("Sell") == pytest.approx(-2.3)
+        assert self.n.normalize_tradingagent("Sell") == pytest.approx(-3.0)
 
     def test_tradingagent_case_insensitive(self):
-        assert self.n.normalize_tradingagent("buy") == pytest.approx(2.3)
+        assert self.n.normalize_tradingagent("buy") == pytest.approx(3.0)
 
     def test_tradingagent_unknown(self):
         assert self.n.normalize_tradingagent("Moon") == 0.0
