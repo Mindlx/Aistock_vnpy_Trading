@@ -258,10 +258,13 @@ def predict_signal(df: pd.DataFrame, stock_code: str,
     else:
         strength = "强"
 
-    # 获取最新价
+    # 获取最新价和涨跌幅
     last = df.iloc[-1]
     close = float(last['收盘'])
     chg = float(last.get('涨跌幅', 0))
+    if chg == 0 and len(df) >= 2:
+        prev_close = float(df['收盘'].iloc[-2])
+        chg = (close - prev_close) / prev_close * 100
 
     # 关键指标摘要
     latest = df.iloc[-1]
@@ -312,23 +315,26 @@ def push_wecom(signals: list[dict]):
     now = datetime.now()
     lines = [f"🧬 **lynx 量化信号**\n   **{now.strftime('%Y-%m-%d %H:%M:%S')}**\n"]
     for s in signals:
-        lines.append(
-            f"{s['signal']} {s['name']}({s['code']}) "
-            f"L7{s['l7_score']:+0.2f} | ¥{s['price']:.2f} {s['change_pct']:+.2f}% "
-            f"| 置信 {s['prob_up']}%"
-        )
-        details = []
+        _sig = s['signal']
+        _emoji = _sig.split()[0] if ' ' in _sig else '⚪'
+        _label = _sig[len(_emoji):].strip()
+        parts = [
+            f"{_emoji} {s['name']} ¥{s['price']:.2f} {s['change_pct']:+.2f}%",
+            f"L7{s['l7_score']:+0.2f}",
+            f"置信{s['prob_up']}%",
+        ]
         if s.get('rsi') is not None:
-            details.append(f"RSI {s['rsi']}")
+            parts.append(f"RSI{s['rsi']}")
         if s.get('macd_hist') is not None:
             arrow = "↗" if s['macd_hist'] > 0 else "↘"
-            details.append(f"MACD柱 {arrow}{abs(s['macd_hist']):.4f}")
+            parts.append(f"MACD{arrow}")
         if s.get('atr_ratio') is not None:
-            details.append(f"ATR {s['atr_ratio']}%")
-        if details:
-            lines.append(f"  {' · '.join(details)}")
+            parts.append(f"ATR{s['atr_ratio']}%")
+        parts.append(_label)
+        lines.append("|".join(parts))
 
-    lines.append("\n> 数据源: efinance · 模型: RandomForest")
+    lines.append("\n> 数据源: efinance")
+    lines.append("> 模型: RandomForest")
     text = "\n".join(lines)
 
     try:

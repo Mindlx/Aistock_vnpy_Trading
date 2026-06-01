@@ -117,12 +117,11 @@ class WeComNotifier:
         stale_ta = [r for r in valid if r.get("ta_is_stale")]
 
         now = self._tz_cn_now()
-        ta_total = sum(1 for r in results if r.get("success") or r.get("_fallback_data"))
         lines = [
-            f"## 📊{now.strftime('%H:%M')}融合决策"
-            f"|{now.strftime('%m-%d')}"
+            f"## 📊融合决策"
+            f"|{now.strftime('%m-%d %H:%M')}"
             f"|有效{len(valid)}"
-            f"|TA{ta_total}",
+            f"|TA{len(results)}",
             "",
         ]
 
