@@ -155,7 +155,7 @@ def _build_briefing_text(
         vol = q.get("volume_ratio", s.last_brief_volume_ratio)
         name = s.name or s.code
 
-        change_str = f"{change_pct:+.1f}%" if change_pct != 0 else " 0.0%"
+        change_str = f"{change_pct:+.1f}%" if change_pct != 0 else "0.0%"
 
         # MA方向
         ma_parts = []
@@ -208,7 +208,7 @@ def _build_briefing_text(
         else:
             color_icon = "🟡"  # 均线上方盘整/短线争夺/回踩企稳/震荡观望
 
-        fields = [f"{color_icon} {name}({s.code})", f"¥{price:.2f} {change_str}"]
+        fields = [f"{color_icon}{name}({s.code})", f"¥{price:.2f}{change_str}"]
         if s.score > 0:
             fields.append(f"评分{s.score}")
         # 窗口区间（最近15分钟价格区间）
@@ -233,7 +233,7 @@ def _build_briefing_text(
         if outlook:
             assessment += outlook
         fields.append(f"走势{assessment}")
-        lines.append(" | ".join(fields))
+        lines.append("|".join(fields))
 
     return "\n".join(lines)
 

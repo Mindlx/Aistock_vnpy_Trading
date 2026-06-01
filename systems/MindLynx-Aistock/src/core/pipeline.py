@@ -1341,7 +1341,18 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     kb_text = initial_context.get("knowledge_prompt", "")
                     regime_text = getattr(self, "_regime_prompt", "")
                     if factor_text:
-                        quant_extra["factor_summary"] = factor_text[:200]
+                        _cs = ''
+                        _fl = []
+                        for _line in factor_text.split('\n'):
+                            if _line.startswith('**综合得分**'):
+                                _cs = _line.replace('**综合得分**', '综合').replace(':', '').strip()
+                            elif _line.startswith('|') and '\u03c3' in _line:
+                                _cells = [c.strip() for c in _line.split('|')]
+                                if len(_cells) >= 3:
+                                    _fl.append(f'{_cells[1]}{_cells[2]}')
+                        _parts = ([_cs] if _cs else []) + _fl
+                        _compact = " | ".join(_parts[:6]) if _parts else factor_text[:200]
+                        quant_extra["factor_summary"] = f"量化因子得分：{_compact}"
                     if kb_text:
                         quant_extra["knowledge_summary"] = kb_text[:150]
                     if regime_text:
