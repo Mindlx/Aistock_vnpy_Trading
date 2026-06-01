@@ -1156,7 +1156,35 @@ class DataFetcherManager:
         return os.path.join(cache_dir, f"{stock_code}_{days}d.pkl")
 
     def _read_daily_cache(self, stock_code: str, days: int) -> pd.DataFrame | None:
-        """从文件缓存读取日线数据。2 小时内有效，超时返回 None。"""
+        """从文件缓存读取日线数据。2 小时内有效，超时返回 None。
+
+        优先检查统一缓存（unified_cache），miss 后降级到本地 pickle 缓存。
+        额外检查：若缓存数据最后日期早于今日，视为过期（交易日需最新数据）。
+        """
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        def _cache_has_today(df: pd.DataFrame) -> bool:
+            """检查缓存 DataFrame 是否包含今日或更新数据"""
+            if df is None or df.empty:
+                return False
+            for col in ("日期", "date", "Date", "day"):
+                if col in df.columns:
+                    return str(df[col].iloc[-1]) >= today_str
+            return False
+
+        # 统一缓存优先（跨系统共享，支持列名反向映射）
+        try:
+            from src.unified_cache import UnifiedCache
+            uc = UnifiedCache()
+            df = uc.get_daily_ohlcv(stock_code, days=days, ttl_seconds=7200,
+                                    reverse_map=True, reverse_map_source="sina")
+            if df is not None and not df.empty and _cache_has_today(df):
+                logger.debug(f"[缓存] 统一缓存命中 {stock_code} ({len(df)} rows)")
+                return df
+        except Exception:
+            pass
+
+        # 本地 pickle 缓存降级
         import pickle
 
         path = self._daily_cache_path(stock_code, days)
@@ -1168,14 +1196,23 @@ class DataFetcherManager:
                 return None
             with open(path, "rb") as f:
                 df = pickle.load(f)
-            if df is not None and not df.empty:
+            if df is not None and not df.empty and _cache_has_today(df):
                 return df
         except Exception:
             pass
         return None
 
     def _write_daily_cache(self, stock_code: str, days: int, df: pd.DataFrame) -> None:
-        """将日线数据写入文件缓存。"""
+        """将日线数据写入文件缓存及统一缓存。"""
+        # 写入统一缓存（跨系统共享）
+        try:
+            from src.unified_cache import UnifiedCache
+            uc = UnifiedCache()
+            uc.put_daily_ohlcv(stock_code, df, source="sina")
+        except Exception:
+            pass
+
+        # 本地 pickle 缓存
         import pickle
 
         try:

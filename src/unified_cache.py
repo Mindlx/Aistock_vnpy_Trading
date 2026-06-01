@@ -66,9 +66,13 @@ class UnifiedCache:
 
     def __init__(
         self,
-        db_path: str = "data/unified_cache/ohlcv_cache.db",
+        db_path: str = "",
         default_ttl: int = 86400,
     ):
+        if not db_path:
+            # 相对于项目根目录的默认路径
+            _root = Path(__file__).resolve().parent.parent
+            db_path = str(_root / "data" / "unified_cache" / "ohlcv_cache.db")
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._default_ttl = default_ttl
