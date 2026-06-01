@@ -119,4 +119,9 @@ class AshareDataProvider:
         except Exception:
             result["sources"]["yfinance"] = False
 
+        # 快速降级判定：主数据源（akshare/efinance）全部不可用，但有 yfinance
+        primary_down = not result["sources"].get("akshare") and not result["sources"].get("efinance")
+        has_yfinance = result["sources"].get("yfinance", False)
+        result["fast_degrade"] = primary_down and has_yfinance
+
         return result

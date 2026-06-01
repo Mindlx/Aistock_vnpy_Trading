@@ -75,6 +75,16 @@ class MindTradingAgentWrapper:
             return True
 
         try:
+            # 加载 .env 文件，让 DEFAULT_CONFIG 正确读取环境变量覆盖
+            from dotenv import load_dotenv
+            env_path = self.ta_root / ".env"
+            if env_path.exists():
+                load_dotenv(env_path, override=False)
+                logger.info(f"已加载 env: {env_path}")
+        except ImportError:
+            pass
+
+        try:
             from mind_tradingagent.graph.trading_graph import TradingAgentsGraph
             from mind_tradingagent.default_config import DEFAULT_CONFIG
 
@@ -135,6 +145,23 @@ class MindTradingAgentWrapper:
 
         logger.info(f"TradingAgent: 分析 {resolved_name}({stock_code}) → {yf_ticker} @ {trade_date}")
 
+        # ── 快速降级：主数据源不可用时直接走技术评分，跳过 LLM ──
+        if data_check.get("fast_degrade", False):
+            logger.info(f"TradingAgent [{stock_code}]: 主数据源不可用，启用快速降级")
+            fb = self._fallback_akshare(stock_code, trade_date, resolved_name, error="快速降级")
+            if fb.get("_fallback_data"):
+                return {
+                    "code": stock_code,
+                    "name": resolved_name,
+                    "yf_ticker": yf_ticker,
+                    "rating": fb["rating"],
+                    "final_decision": f"技术信号: {fb['rating']} (快速降级)",
+                    "trade_date": trade_date,
+                    "success": True,
+                    "error": None,
+                    "is_degraded": True,
+                }
+
         try:
             # 调用 TradingAgent（可能耗时数分钟，含 LLM 推理）
             final_state, signal = self._ta.propagate(yf_ticker, trade_date)
@@ -171,35 +198,132 @@ class MindTradingAgentWrapper:
         result = self._empty_result(stock_code, stock_name, error)
 
         try:
-            import akshare as ak
+            import yfinance as yf
 
-            # 获取日K数据
-            df = ak.stock_zh_a_hist(
-                symbol=stock_code,
-                period="daily",
-                start_date=trade_date,
-                adjust="qfq",
-            )
-            if df is not None and not df.empty:
-                latest = df.iloc[-1]
+            # 用 is_shanghai 判断后缀
+            from src.mind_stock_config import is_shanghai
+            suffix = ".SS" if is_shanghai(stock_code) else ".SZ"
+            yf_ticker = f"{stock_code}{suffix}"
+            ticker = yf.Ticker(yf_ticker)
+            hist = ticker.history(period="3mo")
+            if hist is not None and not hist.empty:
+                latest = hist.iloc[-1]
+                # 计算涨跌幅（基于前一天的收盘价）
+                if len(hist) >= 2:
+                    prev_close = hist.iloc[-2]["Close"]
+                    change_pct = ((float(latest["Close"]) - float(prev_close)) / float(prev_close)) * 100
+                else:
+                    change_pct = 0.0
                 result["_fallback_data"] = {
-                    "close": float(latest.get("收盘", 0)),
-                    "change_pct": float(latest.get("涨跌幅", 0)),
-                    "volume": float(latest.get("成交量", 0)),
-                    "high": float(latest.get("最高", 0)),
-                    "low": float(latest.get("最低", 0)),
+                    "close": float(latest["Close"]),
+                    "change_pct": change_pct,
+                    "volume": float(latest.get("Volume", 0)),
+                    "high": float(latest["High"]),
+                    "low": float(latest["Low"]),
                 }
-                result["rating"] = "Hold"  # 无法用 LLM 推理时默认持有
-                logger.info(f"akshare [{stock_code}]: 基础行情获取成功")
+                # 技术指标综合评分
+                result["rating"] = self._technical_rating(hist)
+                logger.info(f"yfinance [{stock_code}]: 技术信号={result['rating']}")
             else:
-                logger.warning(f"akshare [{stock_code}]: 无数据")
+                logger.warning(f"yfinance [{stock_code}]: 无数据")
 
         except ImportError:
-            logger.warning("akshare 未安装，无法获取 A 股行情")
+            logger.warning("yfinance 未安装，无法获取 A 股行情")
         except Exception as e:
-            logger.warning(f"akshare [{stock_code}]: 获取失败 {e}")
+            logger.warning(f"yfinance [{stock_code}]: 获取失败 {e}")
 
         return result
+
+    def _technical_rating(self, hist) -> str:
+        """Compute Buy/Overweight/Hold/Underweight/Sell from yfinance OHLCV.
+        Uses MA alignment, RSI, MACD, volume confirmation — no LLM needed."""
+        import numpy as np
+        import pandas as pd
+
+        closes = hist["Close"].values
+        highs = hist["High"].values
+        lows = hist["Low"].values
+        volumes = hist["Volume"].values
+        n = len(closes)
+        if n < 20:
+            return "Hold"
+
+        latest_close = float(closes[-1])
+        prev_close = float(closes[-2]) if n >= 2 else latest_close
+
+        # MA
+        ma5 = np.mean(closes[-5:]) if n >= 5 else latest_close
+        ma10 = np.mean(closes[-10:]) if n >= 10 else latest_close
+        ma20 = np.mean(closes[-20:]) if n >= 20 else latest_close
+
+        # RSI(14)
+        deltas = np.diff(closes)
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        avg_gain = np.mean(gains[-14:]) if n >= 15 else 0
+        avg_loss = np.mean(losses[-14:]) if n >= 15 else 1e-6
+        rs = avg_gain / max(avg_loss, 1e-10)
+        rsi = 100 - (100 / (1 + rs))
+
+        # MACD
+        ema12 = pd.Series(closes).ewm(span=12).mean().values
+        ema26 = pd.Series(closes).ewm(span=26).mean().values
+        macd = ema12 - ema26
+        macd_hist = macd[-1] - np.mean(macd[-9:]) if n >= 9 else macd[-1]
+
+        # Volume ratio (current vs MA5 volume)
+        vol_ma5 = np.mean(volumes[-5:]) if n >= 5 else volumes[-1]
+        vol_ratio = volumes[-1] / max(vol_ma5, 1)
+
+        # Score logic
+        score = 0
+
+        # MA alignment: price vs MA
+        if latest_close > ma10:
+            score += 1
+        elif latest_close < ma10:
+            score -= 1
+
+        # MA cross
+        if ma5 > ma10:
+            score += 1  # short-term uptrend
+        elif ma5 < ma10:
+            score -= 1
+
+        if ma10 > ma20:
+            score += 1  # medium-term uptrend
+        elif ma10 < ma20:
+            score -= 1
+
+        # RSI momentum
+        if rsi > 60:
+            score += 1
+        elif rsi < 40:
+            score -= 1
+
+        # MACD momentum
+        if macd_hist > 0:
+            score += 1
+        elif macd_hist < 0:
+            score -= 1
+
+        # Volume confirmation
+        if vol_ratio > 1.2 and latest_close > prev_close:
+            score += 1  # bullish volume
+        elif vol_ratio > 1.2 and latest_close < prev_close:
+            score -= 1  # bearish volume
+
+        # Map to 5-level TA rating
+        if score >= 4:
+            return "Buy"
+        elif score >= 2:
+            return "Overweight"
+        elif score <= -4:
+            return "Sell"
+        elif score <= -2:
+            return "Underweight"
+        else:
+            return "Hold"
 
     def run_batch(
         self, stock_codes: List[str], trade_date: str,
