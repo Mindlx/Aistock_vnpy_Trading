@@ -18,7 +18,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from src.logger import FusionLogger
-from src.normalizer import SignalNormalizer
+from src.normalizer import (
+    SignalNormalizer,
+    L7_THRESHOLDS,
+    L7_SIGNAL_NAMES,
+    L7_POSITION,
+    MAX_POSITION_DISAGREEMENT,
+)
 from src.reliability import (
     ConfidenceCalibrator,
     HallucinationDetector,
@@ -61,40 +67,7 @@ class FusionEngine:
         # 系统名称列表（用于权重迭代）
         self.systems = ["lynx_vnpy", "mindlynx", "tradingagent"]
 
-    # ──────── 决策映射（7 级 L7 空间） ────────
-
-    # L7 阈值（对应 normalizer.py 的 7 级语义对齐）
-    L7_THRESHOLDS = {
-        "strong_bullish": 2.5,     # L7=+3
-        "bullish": 1.5,            # L7=+2
-        "cautious_bullish": 0.5,   # L7=+1
-        "cautious_bearish": -0.5,  # L7=-1
-        "bearish": -1.5,           # L7=-2
-        "strong_bearish": -2.5,    # L7=-3
-    }
-
-    L7_SIGNAL_NAMES = {
-        "strong_bullish": "强烈看多",
-        "bullish": "看多",
-        "cautious_bullish": "谨慎看多",
-        "neutral": "中性/持有",
-        "cautious_bearish": "谨慎看空",
-        "bearish": "看空",
-        "strong_bearish": "强烈看空",
-    }
-
-    L7_POSITIONS = {
-        "strong_bullish": "2-3成",
-        "bullish": "1-2成",
-        "cautious_bullish": "0.5-1成",
-        "neutral": "0成",
-        "cautious_bearish": "减仓至0.5成以内",
-        "bearish": "大幅减仓",
-        "strong_bearish": "清仓",
-    }
-
-    # 分歧状态下仓位上限
-    MAX_POSITION_DISAGREEMENT = "1成"
+    # ──────── 决策映射（7 级 L7 空间，从 normalizer 导入） ────────
 
     def _get_final_decision(self, score: float, disagreement: bool = False) -> Dict[str, Any]:
         """
@@ -102,7 +75,7 @@ class FusionEngine:
 
         当检测到分歧时，仓位上限为 1成。
         """
-        t = self.L7_THRESHOLDS
+        t = L7_THRESHOLDS
         if score > t["strong_bullish"]:
             signal = "strong_bullish"
         elif score > t["bullish"]:
@@ -118,11 +91,11 @@ class FusionEngine:
         else:
             signal = "strong_bearish"
 
-        name = self.L7_SIGNAL_NAMES.get(signal, "中性/持有")
-        position = self.L7_POSITIONS.get(signal, "0成")
+        name = L7_SIGNAL_NAMES.get(signal, "中性/持有")
+        position = L7_POSITION.get(signal, "0成")
 
         if disagreement:
-            position = self._cap_position_for_disagreement(position)
+            position = SignalNormalizer.cap_position_for_disagreement(position)
 
         return {
             "signal": signal,
@@ -130,17 +103,6 @@ class FusionEngine:
             "position": position,
             "disagreement_capped": disagreement,
         }
-
-    @staticmethod
-    def _cap_position_for_disagreement(position: str) -> str:
-        """分歧状态下限制仓位上限"""
-        if "2-3" in position or "1-2" in position or "0.5-1" in position:
-            return FusionEngine.MAX_POSITION_DISAGREEMENT
-        if "0.5成以内" in position or "减仓" in position:
-            return "减仓至0.5成以内"
-        if "清仓" in position or "0成" in position:
-            return position
-        return "0.5成以内"
 
     # ──────── 分歧检测 ────────
 
@@ -321,14 +283,14 @@ class FusionEngine:
             "cautious_bullish": 0.62, "cautious_bearish": 0.38,
             "bearish": 0.27, "strong_bearish": 0.12,
         })
-        signal_name_map = self.L7_SIGNAL_NAMES
-        position_map = self.L7_POSITIONS
+        signal_name_map = L7_SIGNAL_NAMES
+        position_map = L7_POSITION
 
         # 检查分歧（使用概率空间的等价判断）
         has_disagreement = (p_ly - 0.50) * (p_at - 0.50) < -0.2
         position = position_map.get(signal_label, "0成")
         if has_disagreement:
-            position = self._cap_position_for_disagreement(position)
+            position = SignalNormalizer.cap_position_for_disagreement(position)
 
         return {
             "stock_code": stock_code, "stock_name": stock_name,

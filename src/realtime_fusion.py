@@ -25,6 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.wecom_notifier import WeComNotifier
+from src.normalizer import SignalNormalizer, L7_SIGNAL_NAMES
 
 REALTIME_DIR = Path("data/realtime")
 
@@ -55,6 +56,23 @@ class RealtimeFusion:
         self._last_scores: Dict[str, float] = {}
         self._notifier: Optional[WeComNotifier] = None
         self._stock_names: Dict[str, str] = self._load_stock_names()
+        self._load_weights()
+
+    def _load_weights(self):
+        """从 settings.yaml 读取权重，兼容默认值"""
+        try:
+            import yaml
+            cfg_path = Path("config/settings.yaml")
+            if cfg_path.exists():
+                cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+                w = cfg.get("weights", {})
+                self.WEIGHTS = {
+                    "lynx": w.get("lynx_vnpy", 0.30),
+                    "ml_factor": w.get("mindlynx", 0.40),
+                    "tradingagent": w.get("tradingagent", 0.30),
+                }
+        except Exception:
+            pass  # 保持默认权重
 
     @staticmethod
     def _load_stock_names() -> Dict[str, str]:
@@ -142,21 +160,9 @@ class RealtimeFusion:
 
     @staticmethod
     def _to_label(score: float) -> str:
-        """L7 得分 → 标签"""
-        if score >= 2.5:
-            return "强烈看多"
-        elif score >= 1.5:
-            return "看多"
-        elif score >= 0.5:
-            return "谨慎看多"
-        elif score >= -0.5:
-            return "中性/持有"
-        elif score >= -1.5:
-            return "谨慎看空"
-        elif score >= -2.5:
-            return "看空"
-        else:
-            return "强烈看空"
+        """L7 得分 → 中文标签（委托 normalizer）"""
+        label = SignalNormalizer.map_normalized_to_label(score)
+        return L7_SIGNAL_NAMES.get(label, "中性/持有")
 
     def push_changes(self, changes: List[Dict[str, Any]]):
         """推送信号变化到企业微信"""
@@ -169,7 +175,7 @@ class RealtimeFusion:
             signal = c['signal']
             score = c['score']
             emoji = "🟢" if score > 0 else "🔴" if score < 0 else "⚪"
-            lines.append(f"{emoji} **{name}** {signal} Δ{score:+.2f}")
+            lines.append(f"{emoji}**{name}** {signal}Δ{score:+.2f}")
         lines.append("")
         lines.append("📡 ly昨日 | ml实时 | at盘中")
         self.notifier.send_markdown("\n".join(lines))

@@ -762,6 +762,7 @@ class UnifiedDataLoader:
             pct_chg = 0.0
             volume_ratio = 0.0
             ma5 = ma10 = ma20 = 0.0
+            price_fetched = False
             try:
                 prefix = 'sh' if code.startswith(('6', '5', '9')) else 'sz'
                 url = f'https://hq.sinajs.cn/list={prefix}{code}'
@@ -774,23 +775,40 @@ class UnifiedDataLoader:
                         price = float(parts[3]) if parts[3] else 0.0
                         if prev_close > 0:
                             pct_chg = round((price - prev_close) / prev_close * 100, 2)
-                # 从 stock_daily DB 获取更丰富的技术指标（量比、均线）
+                            price_fetched = True
+            except Exception:
+                pass
+
+            # 降级：实时行情失败时，从 lynx 日K线获取（收盘后安全，有内容校验）
+            if not price_fetched and self.lynx._ensure_imported():
                 try:
-                    import sqlite3
-                    db_path = "systems/MindLynx-Aistock/data/stock_analysis.db"
-                    db = sqlite3.connect(db_path)
-                    row = db.execute(
-                        f"SELECT volume_ratio, ma5, ma10, ma20 FROM stock_daily "
-                        f"WHERE code=? ORDER BY date DESC LIMIT 1", (code,)
-                    ).fetchone()
-                    if row:
-                        volume_ratio = round(row[0], 2) if row[0] else 0.0
-                        ma5 = round(row[1], 2) if row[1] else 0.0
-                        ma10 = round(row[2], 2) if row[2] else 0.0
-                        ma20 = round(row[3], 2) if row[3] else 0.0
-                    db.close()
+                    df_price = self.lynx._lynx_module.fetch_daily_bars(code)
+                    if df_price is not None and len(df_price) >= 2:
+                        last = df_price.iloc[-1]
+                        prev = df_price.iloc[-2]
+                        price = float(last.get("收盘", 0))
+                        prev_close = float(prev.get("收盘", 0))
+                        if prev_close > 0:
+                            pct_chg = round((price - prev_close) / prev_close * 100, 2)
+                            price_fetched = True
                 except Exception:
                     pass
+
+            # 从 stock_daily DB 获取更丰富的技术指标（量比、均线）
+            try:
+                import sqlite3
+                db_path = "systems/MindLynx-Aistock/data/stock_analysis.db"
+                db = sqlite3.connect(db_path)
+                row = db.execute(
+                    f"SELECT volume_ratio, ma5, ma10, ma20 FROM stock_daily "
+                    f"WHERE code=? ORDER BY date DESC LIMIT 1", (code,)
+                ).fetchone()
+                if row:
+                    volume_ratio = round(row[0], 2) if row[0] else 0.0
+                    ma5 = round(row[1], 2) if row[1] else 0.0
+                    ma10 = round(row[2], 2) if row[2] else 0.0
+                    ma20 = round(row[3], 2) if row[3] else 0.0
+                db.close()
             except Exception:
                 pass
 

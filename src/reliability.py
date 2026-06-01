@@ -8,8 +8,9 @@
 """
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, Optional
+
+from src.normalizer import SignalNormalizer
 
 
 class ReliabilityConfig:
@@ -167,17 +168,8 @@ class HallucinationDetector:
 # ══════════════════════════════════════════════
 
 def score_to_probability(score: float, k: float = 1.0) -> float:
-    """
-    将 L7 得分 [-3, +3] 映射到概率 [0, 1]。
-
-    v3.0: k 默认 1.0（原 2.5 适配 -1~+1 范围，现适配 -3~+3）
-
-    k=1.0 时:
-      score=+2.0 -> P≈0.88, score=+1.0 -> P≈0.73
-      score= 0.0 -> P=0.50
-      score=-1.0 -> P≈0.27, score=-2.0 -> P≈0.12
-    """
-    return 1.0 / (1.0 + math.exp(-k * score))
+    """将 L7 得分映射到概率 [0,1]，委托 normalizer 实现。"""
+    return SignalNormalizer.to_probability(score, k)
 
 
 def probability_to_decision(p: float, thresholds: Dict[str, float]) -> str:

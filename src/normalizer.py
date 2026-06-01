@@ -35,6 +35,16 @@ L7_CAUTIOUS_SELL = -1.0
 L7_SELL = -2.0
 L7_STRONG_SELL = -3.0
 
+# 连续得分→标签阈值（single source of truth for all modules）
+L7_THRESHOLDS = {
+    "strong_bullish": 2.5,
+    "bullish": 1.5,
+    "cautious_bullish": 0.5,
+    "cautious_bearish": -0.5,
+    "bearish": -1.5,
+    "strong_bearish": -2.5,
+}
+
 L7_LABELS = {
     3: "strong_bullish",
     2: "bullish",
@@ -43,6 +53,18 @@ L7_LABELS = {
     -1: "cautious_bearish",
     -2: "bearish",
     -3: "strong_bearish",
+}
+
+# ↓ 以下三个字典以 L7_LABELS 的值为 key，各模块 import 使用 ↓
+
+L7_SIGNAL_NAMES = {
+    "strong_bullish": "强烈看多",
+    "bullish": "看多",
+    "cautious_bullish": "谨慎看多",
+    "neutral": "中性/持有",
+    "cautious_bearish": "谨慎看空",
+    "bearish": "看空",
+    "strong_bearish": "强烈看空",
 }
 
 L7_POSITION = {
@@ -54,6 +76,29 @@ L7_POSITION = {
     "bearish": "大幅减仓",
     "strong_bearish": "清仓",
 }
+
+L7_EMOJI = {
+    "strong_bullish": "🔴",
+    "bullish": "🔴",
+    "cautious_bullish": "🟠",
+    "neutral": "⚪",
+    "cautious_bearish": "🟡",
+    "bearish": "🟢",
+    "strong_bearish": "🟢",
+}
+
+GROUP_ICONS = {
+    "strong_bullish": "🚀",
+    "bullish": "📈",
+    "cautious_bullish": "📈",
+    "neutral": "🗂",
+    "cautious_bearish": "📉",
+    "bearish": "📉",
+    "strong_bearish": "🚨",
+}
+
+# 分歧状态下仓位上限
+MAX_POSITION_DISAGREEMENT = "1成"
 
 
 class SignalNormalizer:
@@ -252,6 +297,19 @@ class SignalNormalizer:
     def l7_position(label: str) -> str:
         """标签 → 仓位建议"""
         return L7_POSITION.get(label, "0成")
+
+    # ────────── 分歧仓位上限 ──────────
+
+    @staticmethod
+    def cap_position_for_disagreement(position: str) -> str:
+        """分歧状态下限制仓位上限"""
+        if "2-3" in position or "1-2" in position or "0.5-1" in position:
+            return MAX_POSITION_DISAGREEMENT
+        if "0.5成以内" in position or "减仓" in position:
+            return "减仓至0.5成以内"
+        if "清仓" in position or "0成" in position:
+            return position
+        return "0.5成以内"
 
     # ────────── 概率空间映射（贝叶斯融合） ──────────
 

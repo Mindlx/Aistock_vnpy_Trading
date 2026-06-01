@@ -12,39 +12,11 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from src.normalizer import L7_EMOJI, GROUP_ICONS, L7_SIGNAL_NAMES
 
-# L7 信号 → 图标/颜色映射（7 级）
+
+# L7 信号 → 图标/颜色映射（7 级，从 normalizer 导入）
 # L7 信号 → 图标（国内股市：🔴红涨看多 🟠橙 🟡金 → 🟢绿跌看空）
-L7_EMOJI = {
-    "strong_bullish": "🔴",
-    "bullish": "🔴",
-    "cautious_bullish": "🟠",
-    "neutral": "⚪",
-    "cautious_bearish": "🟡",
-    "bearish": "🟢",
-    "strong_bearish": "🟢",
-}
-
-# 分组标题图标（与 L7 图标不重复）
-GROUP_ICONS = {
-    "strong_bullish": "🚀",
-    "bullish": "📈",
-    "cautious_bullish": "📈",
-    "neutral": "🗂",
-    "cautious_bearish": "📉",
-    "bearish": "📉",
-    "strong_bearish": "🚨",
-}
-
-L7_LABEL_CN = {
-    "strong_bullish": "强烈看多",
-    "bullish": "看多",
-    "cautious_bullish": "谨慎看多",
-    "neutral": "中性/持有",
-    "cautious_bearish": "谨慎看空",
-    "bearish": "看空",
-    "strong_bearish": "强烈看空",
-}
 
 
 class WeComNotifier:
@@ -144,12 +116,13 @@ class WeComNotifier:
         degraded = [r for r in valid if r.get("is_degraded")]
         stale_ta = [r for r in valid if r.get("ta_is_stale")]
 
+        now = self._tz_cn_now()
+        ta_total = sum(1 for r in results if r.get("success") or r.get("_fallback_data"))
         lines = [
-            f"## 📊 三系统融合决策 | {date}"
-            f" | 有效{len(valid)}"
-            f"{' | 分歧' + str(len(disagree)) if disagree else ''}"
-            f"{' | 降级' + str(len(degraded)) if degraded else ''}"
-            f"{' | TA⏳' + str(len(stale_ta)) if stale_ta else ''}",
+            f"## 📊{now.strftime('%H:%M')}融合决策"
+            f"|{now.strftime('%m-%d')}"
+            f"|有效{len(valid)}"
+            f"|TA{ta_total}",
             "",
         ]
 
