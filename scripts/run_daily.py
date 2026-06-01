@@ -342,6 +342,13 @@ def main():
             print(f"  ✅ TradingAgent: {success}/{len(ta_results)} 只分析完成")
             # 写入准实时信号文件
             write_at_signal(ta_results, today)
+            # TA 已跑完，后续融合直接用结果，不需要回填 stale 数据
+            for s in stock_signals:
+                for r in ta_results:
+                    if s.get("code") == r.get("code") and r.get("rating"):
+                        s["tradingagent_rating"] = r["rating"]
+                        s["ta_is_stale"] = False
+                        s["ta_debate_state"] = r.get("final_decision", "")
         except ImportError as e:
             print(f"  ⚠️  TradingAgent 导入失败: {e}")
             print(f"     确保已 clone mind_TradingAgent 并安装依赖")
