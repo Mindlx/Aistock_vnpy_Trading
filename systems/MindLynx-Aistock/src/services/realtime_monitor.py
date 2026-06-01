@@ -520,31 +520,8 @@ class RealtimeMonitorService:
         if tip:
             extras.append(tip)
 
-        # 仓位标签 → 操作建议
-            uptrend = price > state.ma5 > state.ma10 > 0
-            mild = state.ma5 > price > state.ma10 > 0
-            downtrend = state.ma10 > state.ma5 > price
-
-            if state.position_label == "重仓":
-                action = "持有" if uptrend else ("持有观察" if mild else "减仓")
-            elif state.position_label == "中仓":
-                action = "持有" if uptrend else ("观望" if not downtrend else "减仓")
-            elif state.position_label == "轻仓":
-                action = "加仓" if uptrend else "观望"
-            else:
-                action = state.position_label
-            extras.append(action)
-        elif state.position_label:
-            extras.append(state.position_label)
-
         if extras:
             suffix = " | ".join(extras)
-            # 最后两项去掉 | 和空格，直接连写让信息更紧凑
-            # 例如"主力介入 | 持有"→"主力介入持有"
-            if len(extras) >= 4:
-                last_sep = suffix.rfind(" | ")
-                if last_sep > 0:
-                    suffix = suffix[:last_sep] + suffix[last_sep + 3:]
             text += " | " + suffix
         return text
 
