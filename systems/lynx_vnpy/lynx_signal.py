@@ -23,13 +23,21 @@ warnings.filterwarnings("ignore")
 # ===== 配置 =====
 STOCK_CODES = ['001390', '300652', '600372', '605368', '000592',
                '603189', '603557', '688202', '601801', '300676']
+
+# 股票名称映射
+STOCK_NAMES = {
+    '001390': '古麒绒材', '300652': '雷迪克', '600372': '中航机载',
+    '605368': '蓝天燃气', '000592': '平潭发展', '603189': '*ST网达',
+    '603557': '*ST起步', '688202': '美迪西', '601801': '皖新传媒',
+    '300676': '华大基因',
+}
 WECOM_WEBHOOK = os.getenv("WECOM_WEBHOOK_URL", "")
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # 本地缓存：同一交易时段内避免重复 HTTP 请求
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "cache")
-CACHE_TTL_HOURS = 4
+CACHE_TTL_MINUTES = 50
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # ===== 1. 数据获取（Sina finance API） =====
@@ -48,10 +56,18 @@ def fetch_daily_bars(code: str, days: int = 120, retries: int = 3) -> pd.DataFra
     cache_file = os.path.join(CACHE_DIR, f"lynx_{code}_{days}d.parquet")
     if os.path.exists(cache_file):
         mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
-        if datetime.now() - mtime < timedelta(hours=CACHE_TTL_HOURS):
+        now = datetime.now()
+        if now - mtime < timedelta(minutes=CACHE_TTL_MINUTES):
             df = pd.read_parquet(cache_file)
             df["股票名称"] = code
-            return df
+            # 收盘后（≥15:00）额外校验：缓存必须包含当天K线
+            if now.hour < 15:
+                return df  # 盘中：TTL有效即可
+            latest_date = str(df['日期'].max())
+            today_str = now.strftime('%Y-%m-%d')
+            if latest_date >= today_str:
+                return df  # 收盘后且已有今天数据：用缓存
+            # 否则：收盘了但缓存没有今天K线 → 跳过缓存，重新拉取
 
     symbol = f"{_prefix(code)}{code}"
     url = ("https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
@@ -228,21 +244,18 @@ def predict_signal(df: pd.DataFrame, stock_code: str,
     X = scaler.transform(row.values)
     prob_up = model.predict_proba(X)[0][1]  # 上涨概率
 
-    # 信号强度
+    # 7级语义对齐: prob_up → L7 连续得分
+    score = _l7_score(prob_up)
+    label = _l7_label(score)
+    emoji = _l7_emoji(score)
+    signal = f"{emoji} {label}"
+
+    # 信号强度（保留用于排序）
     if prob_up >= 0.65:
-        signal = "🟢 买入"
         strength = "强"
-    elif prob_up >= 0.55:
-        signal = "🟢 关注"
-        strength = "中"
-    elif prob_up >= 0.45:
-        signal = "⚪ 观望"
-        strength = "弱"
     elif prob_up >= 0.35:
-        signal = "🟡 谨慎"
         strength = "中"
     else:
-        signal = "🔴 回避"
         strength = "强"
 
     # 获取最新价
@@ -256,11 +269,38 @@ def predict_signal(df: pd.DataFrame, stock_code: str,
         "code": stock_code, "name": name,
         "price": close, "change_pct": chg,
         "signal": signal, "strength": strength,
+        "l7_score": score,
         "prob_up": round(prob_up * 100, 1),
         "rsi": round(float(latest.get('rsi14', 0)), 1) if not pd.isna(latest.get('rsi14', np.nan)) else None,
         "macd_hist": round(float(latest.get('macd_hist', 0)), 4) if not pd.isna(latest.get('macd_hist', np.nan)) else None,
         "atr_ratio": round(float(latest.get('atr_ratio', 0)) * 100, 2) if not pd.isna(latest.get('atr_ratio', np.nan)) else None,
     }
+
+def _l7_score(prob_up: float) -> float:
+    """Map prob_up (0-1) to L7 score (-3~+3) via logit+tanh.
+    Same formula as src/normalizer.py normalize_lynx()."""
+    import math
+    p = max(0.001, min(0.999, prob_up))
+    logit = math.log(p / (1 - p))
+    return round(3.0 * math.tanh(logit / 2.0), 2)
+
+def _l7_label(score: float) -> str:
+    """L7 score → 7-level label."""
+    if score >= 2.0:   return "强烈看多"
+    if score >= 1.0:   return "看多"
+    if score >= 0.33:  return "谨慎看多"
+    if score >= -0.33: return "中性/持有"
+    if score >= -1.0:  return "谨慎看空"
+    if score >= -2.0:  return "看空"
+    return "强烈看空"
+
+def _l7_emoji(score: float) -> str:
+    """L7 score → color emoji matching fusion system convention."""
+    if score >= 1.0:   return "🔴"   # 看多=红
+    if score >= 0.33:  return "🟠"   # 谨慎看多=橙
+    if score >= -0.33: return "⚪"   # 中性=白
+    if score >= -1.0:  return "🟡"   # 谨慎看空=金
+    return "🟢"                      # 看空=绿
 
 # ===== 5. 推送 =====
 def push_wecom(signals: list[dict]):
@@ -274,7 +314,7 @@ def push_wecom(signals: list[dict]):
     for s in signals:
         lines.append(
             f"{s['signal']} {s['name']}({s['code']}) "
-            f"¥{s['price']:.2f} {s['change_pct']:+.2f}% "
+            f"L7{s['l7_score']:+0.2f} | ¥{s['price']:.2f} {s['change_pct']:+.2f}% "
             f"| 置信 {s['prob_up']}%"
         )
         details = []
@@ -316,7 +356,7 @@ def run():
             time.sleep(2)
             continue
 
-        name = df.iloc[-1].get('股票名称', code)
+        name = STOCK_NAMES.get(code, code)
         df_feat = compute_features(df)
 
         sig = predict_signal(df_feat, code, name)
@@ -326,9 +366,8 @@ def run():
         else:
             print("⚠️  信号不足")
 
-    # 排序：买入优先
-    order = {"🟢 买入": 0, "🟢 关注": 1, "⚪ 观望": 2, "🟡 谨慎": 3, "🔴 回避": 4}
-    all_signals.sort(key=lambda s: order.get(s['signal'], 9))
+    # 排序：L7 得分降序
+    all_signals.sort(key=lambda s: s.get('l7_score', 0), reverse=True)
 
     print(f"\n{'='*55}")
     print(f"📊 共 {len(all_signals)} 只生成信号")

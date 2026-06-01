@@ -24,6 +24,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
+
 from src.unified_cache import UnifiedCache, get_cache
 
 logger = logging.getLogger(__name__)
@@ -339,8 +341,9 @@ class MindLynxDataLoader:
         # 添加对 *ST 等特殊股票名的处理 — 连续 ** 可能被截断
         # 宽松匹配: 支持 **NAME(CODE)**: 和 **NAME(CODE)** : 两种格式
         # 以及 *ST 等含星号前缀的股票名
+        # 报告格式已扩展为包含股价数据: ¥5.83 +2.6% | SIGNAL | 评分 SCORE
         pattern = re.compile(
-            r"^[🟢🟡🔴⚪]\s+\*{0,2}(.+?)\((\w+)\)\*{0,2}\s*:\s*(\S+)\s*\|\s*评分\s*(\d+)",
+            r"^[🟢🟡🔴⚪🟠]\s+\*{0,2}(.+?)\((\w+)\)\*{0,2}\s*:\s*(?:[^|]*\|\s*)?(\S+)\s*\|\s*评分\s*(\d+)",
             re.MULTILINE,
         )
 
@@ -754,38 +757,40 @@ class UnifiedDataLoader:
             # 至少有一个系统有真实数据才加入
             has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating)
 
-            # 获取最新股价和涨跌幅（从 lynx 的 Sina API 数据）
+            # 获取最新股价和涨跌幅（直接调 Sina 实时行情 API，不依赖缓存）
             price = 0.0
             pct_chg = 0.0
             volume_ratio = 0.0
             ma5 = ma10 = ma20 = 0.0
             try:
-                if self.lynx._ensure_imported():
-                    df_price = self.lynx._lynx_module.fetch_daily_bars(code)
-                    if df_price is not None and len(df_price) >= 2:
-                        last = df_price.iloc[-1]
-                        prev = df_price.iloc[-2]
-                        price = float(last.get("收盘", 0))
-                        prev_close = float(prev.get("收盘", 0))
+                prefix = 'sh' if code.startswith(('6', '5', '9')) else 'sz'
+                url = f'https://hq.sinajs.cn/list={prefix}{code}'
+                resp = requests.get(url, headers={'Referer': 'https://finance.sina.com.cn'}, timeout=10)
+                if resp.status_code == 200:
+                    parts = resp.text.split(',')
+                    if len(parts) >= 4:
+                        # 返回格式: 股票名,今开,昨收,当前价,最高,最低,...
+                        prev_close = float(parts[2]) if parts[2] else 0.0
+                        price = float(parts[3]) if parts[3] else 0.0
                         if prev_close > 0:
                             pct_chg = round((price - prev_close) / prev_close * 100, 2)
-                        # 尝试从 stock_daily DB 获取更多指标
-                        try:
-                            import sqlite3
-                            db_path = "systems/MindLynx-Aistock/data/stock_analysis.db"
-                            db = sqlite3.connect(db_path)
-                            row = db.execute(
-                                f"SELECT volume_ratio, ma5, ma10, ma20 FROM stock_daily "
-                                f"WHERE code=? ORDER BY date DESC LIMIT 1", (code,)
-                            ).fetchone()
-                            if row:
-                                volume_ratio = round(row[0], 2) if row[0] else 0.0
-                                ma5 = round(row[1], 2) if row[1] else 0.0
-                                ma10 = round(row[2], 2) if row[2] else 0.0
-                                ma20 = round(row[3], 2) if row[3] else 0.0
-                            db.close()
-                        except Exception:
-                            pass
+                # 从 stock_daily DB 获取更丰富的技术指标（量比、均线）
+                try:
+                    import sqlite3
+                    db_path = "systems/MindLynx-Aistock/data/stock_analysis.db"
+                    db = sqlite3.connect(db_path)
+                    row = db.execute(
+                        f"SELECT volume_ratio, ma5, ma10, ma20 FROM stock_daily "
+                        f"WHERE code=? ORDER BY date DESC LIMIT 1", (code,)
+                    ).fetchone()
+                    if row:
+                        volume_ratio = round(row[0], 2) if row[0] else 0.0
+                        ma5 = round(row[1], 2) if row[1] else 0.0
+                        ma10 = round(row[2], 2) if row[2] else 0.0
+                        ma20 = round(row[3], 2) if row[3] else 0.0
+                    db.close()
+                except Exception:
+                    pass
             except Exception:
                 pass
 
