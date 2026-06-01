@@ -201,7 +201,7 @@ def _supply_ta_stale_data(
 ) -> None:
     """补充 TA 数据：当日日志不存在时，尝试用昨日数据（标记为 stale）"""
     date_obj = datetime.strptime(date, "%Y-%m-%d")
-    for offset in range(1, 3):
+    for offset in range(1, 10):  # 最多回退9天（覆盖周末+长假）
         prev_date = (date_obj - timedelta(days=offset)).strftime("%Y-%m-%d")
         need_ta = [s for s in stock_signals
                    if not s.get("tradingagent_rating") or s["tradingagent_rating"] in ("", "Hold")]
