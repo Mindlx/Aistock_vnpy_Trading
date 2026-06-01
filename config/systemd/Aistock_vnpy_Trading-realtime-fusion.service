@@ -1,0 +1,17 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 准实时融合服务（文件交换驱动，5分钟扫描）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target Aistock_vnpy_Trading-ml-factor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python src/realtime_fusion.py --daemon --interval 300
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/realtime-fusion.log
+StandardError=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/realtime-fusion.log
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 深度论证定时器（工作日 09:00/13:00）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=Mon..Fri 09:00:00
+OnCalendar=Mon..Fri 13:00:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

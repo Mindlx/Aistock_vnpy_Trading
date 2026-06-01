@@ -1,0 +1,17 @@
+[Unit]
+Description=Aistock_vnpy_Trading — ml 因子层实时服务（纯数学计算，无 LLM）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python services/ml_factor_service.py --daemon --interval 300
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/ml-factor.log
+StandardError=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/ml-factor.log
+
+[Install]
+WantedBy=default.target

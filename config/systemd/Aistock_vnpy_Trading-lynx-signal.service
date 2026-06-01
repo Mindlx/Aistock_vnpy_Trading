@@ -1,0 +1,17 @@
+[Unit]
+Description=Aistock_vnpy_Trading — lynx 量化信号推送
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+Environment="WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=2eb957ab-bc5b-4f99-8db9-b0fcb20ad44f"
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python systems/lynx_vnpy/lynx_signal.py
+ExecStartPost=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/write_ly_signal.py
+StandardOutput=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/lynx-signal.log
+StandardError=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/lynx-signal.log
+
+[Install]
+WantedBy=default.target

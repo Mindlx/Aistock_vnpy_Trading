@@ -1,0 +1,10 @@
+[Unit]
+Description=Aistock_vnpy_Trading — lynx 量化信号定时推送（工作日 15:15）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=Mon..Fri 15:15:00
+Persistent=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=Aistock_vnpy_Trading — MindLynx 盘中实时监控（融合系统子系统）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading/systems/MindLynx-Aistock
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/systems/MindLynx-Aistock/.venv/bin/python main.py --realtime-monitor-daemon
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=60
+KillMode=process
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 融合引擎日终分析
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/run_daily.py --run-ta
+StandardOutput=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/fusion-cron.log
+StandardError=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/fusion-cron.log
+TimeoutStopSec=7200
