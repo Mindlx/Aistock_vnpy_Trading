@@ -1,5 +1,10 @@
 from typing import Annotated
 
+import logging
+import requests
+
+logger = logging.getLogger(__name__)
+
 # Import from vendor-specific modules
 from .y_finance import (
     get_YFin_data_online,
@@ -173,7 +178,11 @@ def route_to_vendor(method: str, *args, **kwargs):
 
         try:
             return impl_func(*args, **kwargs)
-        except AlphaVantageRateLimitError:
-            continue  # Only rate limits trigger fallback
+        except (AlphaVantageRateLimitError, ConnectionError, TimeoutError,
+                requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            continue  # Rate limits and network errors trigger fallback
+        except Exception as e:
+            logger.debug(f"[{method}] {vendor} failed: {e}")
+            continue
 
     raise RuntimeError(f"No available vendor for '{method}'")
