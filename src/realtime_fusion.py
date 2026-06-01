@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -25,7 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.wecom_notifier import WeComNotifier
-from src.normalizer import SignalNormalizer, L7_SIGNAL_NAMES
+from src.normalizer import SignalNormalizer, L7_SIGNAL_NAMES, MAX_POSITION_DISAGREEMENT, L7_POSITION
 
 REALTIME_DIR = Path("data/realtime")
 
@@ -114,14 +115,21 @@ class RealtimeFusion:
         ml_stocks = ml.get("stocks", {})
         at_stocks = at.get("stocks", {})
 
+        # 判断各系统是否有效（是否有数据）
+        ly_available = bool(ly_stocks)
+        ml_available = bool(ml_stocks)
+        at_available = bool(at_stocks)
+        valid_count = sum([ly_available, ml_available, at_available])
+        is_degraded = valid_count < 3
+
         # 所有出现过的股票代码
         all_codes = set(ly_stocks) | set(ml_stocks) | set(at_stocks)
 
         changes = []
         for code in sorted(all_codes):
-            ly_score = ly_stocks.get(code, {}).get("score", 0)
-            ml_score = ml_stocks.get(code, {}).get("composite_score", 0)
-            at_score = at_stocks.get(code, {}).get("score", 0)
+            ly_score = ly_stocks.get(code, {}).get("score", 0) if ly_available else 0
+            ml_score = ml_stocks.get(code, {}).get("l7_score", 0) if ml_available else 0
+            at_score = at_stocks.get(code, {}).get("score", 0) if at_available else 0
 
             score = (
                 ly_score * self.WEIGHTS["lynx"]
@@ -130,17 +138,33 @@ class RealtimeFusion:
             )
             score = round(max(-3.0, min(3.0, score)), 3)
 
-            if self._should_push(code, score):
-                signal = self._to_label(score)
+            # 分歧检测 + 不确定性惩罚
+            has_disagreement, disagreement_score = self._detect_disagreement(
+                ly_score, ml_score, at_score
+            )
+            penalty = self._uncertainty_penalty(disagreement_score)
+            score_penalized = round(max(-3.0, score - penalty), 3)
+
+            # 仓位建议
+            label = SignalNormalizer.map_normalized_to_label(score_penalized)
+            signal_name = L7_SIGNAL_NAMES.get(label, "中性/持有")
+            position = L7_POSITION.get(label, "0成")
+            if has_disagreement:
+                position = SignalNormalizer.cap_position_for_disagreement(position)
+
+            if self._should_push(code, score_penalized):
                 changes.append({
                     "code": code,
-                    "score": score,
-                    "signal": signal,
+                    "score": score_penalized,
+                    "signal": signal_name,
+                    "position": position,
                     "ly": ly_score,
                     "ml": ml_score,
                     "at": at_score,
+                    "has_disagreement": has_disagreement,
+                    "is_degraded": is_degraded,
                 })
-                self._last_scores[code] = score
+                self._last_scores[code] = score_penalized
 
         return changes
 
@@ -158,6 +182,28 @@ class RealtimeFusion:
         else:
             return delta > THRESHOLD_DIRECTIONAL
 
+    def _detect_disagreement(self, ly_score, ml_score, at_score):
+        """检测三个系统间的方向分歧"""
+        scores = [s for s in [ly_score, ml_score, at_score] if s is not None]
+        if len(scores) < 2:
+            return False, 0.0
+        has_bullish = any(s > 0.5 for s in scores)
+        has_bearish = any(s < -0.5 for s in scores)
+        disagreement = has_bullish and has_bearish
+        disagreement_score = 0.0
+        if disagreement and len(scores) > 1:
+            mean = sum(scores) / len(scores)
+            variance = sum((s - mean) ** 2 for s in scores) / len(scores)
+            disagreement_score = math.sqrt(variance)
+        return disagreement, disagreement_score
+
+    @staticmethod
+    def _uncertainty_penalty(disagreement_score: float) -> float:
+        """分歧分数 → 不确定性惩罚"""
+        if disagreement_score <= 0.5:
+            return 0.0
+        return min(2.0, max(0.0, (disagreement_score - 0.5) * 1.2))
+
     @staticmethod
     def _to_label(score: float) -> str:
         """L7 得分 → 中文标签（委托 normalizer）"""
@@ -174,10 +220,14 @@ class RealtimeFusion:
             name = self._stock_names.get(c['code'], c['code'])
             signal = c['signal']
             score = c['score']
+            position = c.get('position', '')
             emoji = "🟢" if score > 0 else "🔴" if score < 0 else "⚪"
-            lines.append(f"{emoji}**{name}** {signal}Δ{score:+.2f}")
+            line = f"{emoji}**{name}** {signal} ({score:+.2f})"
+            if position:
+                line += f" 仓位{position}"
+            lines.append(line)
         lines.append("")
-        lines.append("📡 ly昨日 | ml实时 | at盘中")
+        lines.append("📡 ly昨日 | factor实时 | at盘中")
         self.notifier.send_markdown("\n".join(lines))
 
     def run_once(self) -> List[Dict[str, Any]]:

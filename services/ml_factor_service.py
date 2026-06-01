@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -35,6 +36,15 @@ sys.path.insert(0, str(ML_ROOT))
 class MLFactorService:
     """ml 因子层服务 — 纯数学计算，无 LLM"""
 
+    @staticmethod
+    def _to_l7_score(composite_score: float) -> float:
+        """将因子引擎 raw composite_score 映射到 L7 [-3, +3] 空间。
+
+        因子 composite_score 经 z-score 横截面归一化，范围约 ±2。
+        用 tanh 软饱和映射至 L7 空间，±2→±2.88（接近 ±3），±0.5→±1.17。
+        """
+        return round(3.0 * math.tanh(composite_score * 1.5), 3)
+
     STOCK_CODES = [
         "001390", "300652", "600372", "605368",
         "000592", "603189", "603557", "688202", "601801", "300676",
@@ -44,6 +54,7 @@ class MLFactorService:
         self._engine = None
         self._db_conn = None
         self._db_cols: Optional[list] = None
+        self._last_hash: Optional[int] = None
 
     @property
     def engine(self):
@@ -90,11 +101,13 @@ class MLFactorService:
         if raw_results:
             self.engine.cross_sectional_normalize(raw_results)
 
-        # 第三步：提取 composite_score
+        # 第三步：提取 composite_score + L7 映射
         results = {}
         for code, result in code_map.items():
+            raw_score = float(result.composite_score)
             results[code] = {
-                "composite_score": float(result.composite_score),
+                "composite_score": raw_score,
+                "l7_score": self._to_l7_score(raw_score),
                 "composite_label": result.composite_label,
                 "factors": {k: float(v) for k, v in result.raw_factors.items()},
             }
@@ -106,7 +119,7 @@ class MLFactorService:
         }
 
     def _compute_one(self, code: str) -> Optional[Dict[str, Any]]:
-        """计算单只股票的因子 composite_score"""
+        """计算单只股票的因子 composite_score 和 L7 映射"""
         rows = self.db.execute(
             f"SELECT * FROM stock_daily WHERE code=? ORDER BY date", (code,)
         ).fetchall()
@@ -114,15 +127,28 @@ class MLFactorService:
             return None
         daily = [dict(zip(self.db_cols, r)) for r in rows]
         result = self.engine.compute_for_stock(code, daily)
+        raw_score = float(result.composite_score)
         return {
-            "composite_score": float(result.composite_score),
+            "composite_score": raw_score,
+            "l7_score": self._to_l7_score(raw_score),
             "composite_label": result.composite_label,
             "factors": {k: float(v) for k, v in result.raw_factors.items()},
         }
 
-    def run_once(self) -> Dict[str, Any]:
-        """执行一次计算并原子写入文件"""
+    def run_once(self) -> Optional[Dict[str, Any]]:
+        """执行一次计算，无变化时跳过写入。返回 None 表示跳过。"""
         data = self.compute_all()
+
+        # 内容校验：仅对关键值（l7_score）做 hash，无变化则跳过写入
+        scores = {
+            code: info.get("l7_score", 0)
+            for code, info in data.get("stocks", {}).items()
+        }
+        current_hash = hash(tuple(sorted(scores.items())))
+        if self._last_hash == current_hash:
+            return None  # 数据无变化，跳过写文件
+
+        self._last_hash = current_hash
         tmp = str(OUTPUT_PATH) + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -135,8 +161,11 @@ class MLFactorService:
         while True:
             try:
                 data = self.run_once()
-                count = len(data.get("stocks", {}))
-                print(f"[ml-factor] {datetime.now().isoformat()} {count} stocks computed")
+                if data is not None:
+                    count = len(data.get("stocks", {}))
+                    print(f"[ml-factor] {datetime.now().isoformat()} {count} stocks computed")
+                else:
+                    print(f"[ml-factor] {datetime.now().isoformat()} no change, skipped")
             except Exception as e:
                 print(f"[ml-factor] error: {e}")
             time.sleep(interval)
