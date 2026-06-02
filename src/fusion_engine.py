@@ -334,15 +334,19 @@ class FusionEngine:
         if ly_conviction <= 0.30:
             return p_fused  # ly 不够强，不触发
 
-        ly_dir = 1 if p_ly > 0.50 else -1
-        fused_dir = 1 if p_fused > 0.50 else -1
+        def _direction(p: float) -> int:
+            """概率 → 方向: 1=看多, -1=看空, 0=中性"""
+            return 1 if p > 0.55 else (-1 if p < 0.45 else 0)
 
-        if ly_dir == fused_dir:
-            return p_fused  # 方向一致，不干预
+        ly_dir = _direction(p_ly)
+        fused_dir = _direction(p_fused)
+
+        if ly_dir == 0 or ly_dir == fused_dir:
+            return p_fused  # ly中性或方向一致，不干预
 
         # 方向冲突: 检查各系统方向
-        ml_dir = 1 if p_ml > 0.50 else -1
-        at_dir = 1 if p_at > 0.50 else -1
+        ml_dir = _direction(p_ml)
+        at_dir = _direction(p_at)
 
         if ml_dir == at_dir == -ly_dir:
             return 0.40 * p_ly + 0.60 * p_fused
