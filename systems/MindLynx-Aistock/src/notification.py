@@ -911,6 +911,18 @@ class NotificationService(
         return ideal_dev < max_deviation and stop_dev < max_deviation
 
     @staticmethod
+    def _rescue_price(target: float, current_price: float, max_deviation: float = 0.3) -> float:
+        """价位修正：当 LLM 生成的目标价偏离现价过远时，按现价推算合理值。"""
+        if not current_price or not target:
+            return current_price
+        dev = abs(target - current_price) / current_price
+        if dev <= max_deviation:
+            return target  # 合理，直接使用
+        # 偏离过大，用现价加减 15% 作为合理估计
+        direction = 1 if target > current_price else -1
+        return round(current_price * (1 + direction * 0.15), 2)
+
+    @staticmethod
     def _clean_sniper_value(value: Any) -> str:
         """Normalize sniper point values and remove redundant label prefixes."""
         if value is None:
@@ -1079,22 +1091,27 @@ class NotificationService(
                 current_price = result.current_price
 
                 action_parts = []
-                sniper_ok = self._sniper_is_reasonable(ideal, stop, current_price) if (ideal and stop and current_price) else False
-                if score >= 60 and sniper_ok:
+                if score >= 60 and ideal:
+                    i = self._rescue_price(ideal, current_price)
+                    s = self._rescue_price(stop, current_price) if stop else 0
+                    p = self._rescue_price(profit, current_price) if profit else 0
                     action_parts.append(
-                        f"📈 建议¥{ideal}附近建仓, 止损¥{stop}, 目标¥{profit}"
+                        f"📈 建议¥{i}附近建仓, 止损¥{s}, 目标¥{p}"
                         if profit
                         else f"📈 建议¥{ideal}附近建仓"
                     )
                 elif score >= 60:
                     action_parts.append("📈 偏多，等待回踩确认后建仓")
-                elif score <= 40 and sniper_ok:
-                    action_parts.append(f"📉 持仓者建议¥{stop}止损，空仓观望")
+                elif score <= 40 and stop:
+                    s = self._rescue_price(stop, current_price)
+                    action_parts.append(f"📉 持仓者建议¥{s}止损，空仓观望")
                 elif score <= 40:
                     action_parts.append("📉 偏空，不建议操作")
                 elif 40 < score < 60:
-                    if sniper_ok:
-                        action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
+                    if ideal and stop and current_price:
+                        i = self._rescue_price(ideal, current_price)
+                        s = self._rescue_price(stop, current_price)
+                        action_parts.append(f"⏸️ 建议¥{i}附近轻仓试探，破¥{s}离场")
                     else:
                         action_parts.append("⏸️ 中性，观望为主")
                 if action_parts:
@@ -1511,22 +1528,27 @@ class NotificationService(
                 score = result.sentiment_score
                 current_price = getattr(result, "current_price", 0)
 
-                sniper_ok = self._sniper_is_reasonable(ideal, stop, current_price) if (ideal and stop and current_price) else False
-                if score >= 60 and sniper_ok:
+                if score >= 60 and ideal:
+                    i = self._rescue_price(ideal, current_price)
+                    s = self._rescue_price(stop, current_price) if stop else 0
+                    p = self._rescue_price(profit, current_price) if profit else 0
                     action_parts.append(
-                        f"📈 建议¥{ideal}附近建仓，止损¥{stop}，目标¥{profit}"
+                        f"📈 建议¥{i}附近建仓，止损¥{s}，目标¥{p}"
                         if profit
                         else f"📈 建议¥{ideal}附近建仓"
                     )
                 elif score >= 60:
                     action_parts.append("📈 偏多，等待回踩确认后建仓")
-                elif score <= 40 and sniper_ok:
-                    action_parts.append(f"📉 持仓者建议¥{stop}止损，空仓观望")
+                elif score <= 40 and stop:
+                    s = self._rescue_price(stop, current_price)
+                    action_parts.append(f"📉 持仓者建议¥{s}止损，空仓观望")
                 elif score <= 40:
                     action_parts.append("📉 偏空，不建议操作")
                 elif 40 < score < 60:
-                    if sniper_ok:
-                        action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
+                    if ideal and stop and current_price:
+                        i = self._rescue_price(ideal, current_price)
+                        s = self._rescue_price(stop, current_price)
+                        action_parts.append(f"⏸️ 建议¥{i}附近轻仓试探，破¥{s}离场")
                     else:
                         action_parts.append("⏸️ 中性，观望为主")
                 if action_parts:
