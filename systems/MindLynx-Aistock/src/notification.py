@@ -1386,22 +1386,22 @@ class NotificationService(
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
 
         lines = [
-            f"📊 {labels['report_title']} | {datetime.now().strftime('%H:%M')}",
-            f"共{len(results)}只 | 🟢买{buy_count} 🟡持{hold_count} 🔴卖{sell_count}",
+            f"📊 {labels['report_title']} ｜ {datetime.now().strftime('%H:%M')}",
+            f"共{len(results)}只 ｜ 🟢买{buy_count} 🟡持{hold_count} 🔴卖{sell_count}",
             "",
         ]
 
         # Issue #262: summary_only 时仅输出摘要列表
         if self._report_summary_only:
-            lines.append(f"**📊 {labels['summary_heading']}**")
+            lines.append(f"📊 {labels['summary_heading']}")
             lines.append("")
             for r in sorted_results:
                 _, signal_emoji, _ = self._get_signal_level(r)
                 stock_name = self._get_display_name(r, report_language)
                 lines.append(
                     f"{signal_emoji} {stock_name}({r.code}): "
-                    f"{localize_operation_advice(r.operation_advice, report_language)} | "
-                    f"{labels['score_label']} {r.sentiment_score} | "
+                    f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
+                    f"{labels['score_label']} {r.sentiment_score} ｜ "
                     f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 )
         else:
@@ -1450,13 +1450,13 @@ class NotificationService(
                 risks = intel.get("risk_alerts", []) if intel else []
                 if risks:
                     risk_texts = [str(r)[:40] for r in risks[:2]]
-                    line_risk.append(" | ".join(risk_texts))
+                    line_risk.append(" ｜ ".join(risk_texts))
                 catalysts = intel.get("positive_catalysts", []) if intel else []
                 if catalysts:
                     cat_texts = [str(c)[:35] for c in catalysts[:2]]
-                    line_risk.append("催化：" + " | ".join(cat_texts))
+                    line_risk.append("催化：" + " ｜ ".join(cat_texts))
                 if line_risk:
-                    lines.append("🚨 风险警报：" + " | ".join(line_risk))
+                    lines.append("🚨 风险警报：" + " ｜ ".join(line_risk))
 
                 # 🎯预期价位 + 持仓建议
                 line_target = []
@@ -1472,7 +1472,7 @@ class NotificationService(
                 if profit_str:
                     sniper_parts.append(f"目标位{profit_str}")
                 if sniper_parts:
-                    line_target.append(" | ".join(sniper_parts))
+                    line_target.append(" ｜ ".join(sniper_parts))
                 pos_advice = core.get("position_advice", {}) if core else {}
                 pos_parts = []
                 if pos_advice:
@@ -1483,9 +1483,9 @@ class NotificationService(
                     if has_pos:
                         pos_parts.append(f"持仓者{has_pos}")
                 if pos_parts:
-                    line_target.append(" | ".join(pos_parts))
+                    line_target.append(" ｜ ".join(pos_parts))
                 if line_target:
-                    lines.append("🎯预期价位：" + " | ".join(line_target))
+                    lines.append("🎯预期价位：" + " ｜ ".join(line_target))
 
                 # 📋操盘建议
                 sniper2 = battle.get("sniper_points", {}) if battle else {}
@@ -1524,13 +1524,13 @@ class NotificationService(
                 if checklist:
                     failed = [str(c)[:30] for c in checklist if str(c).startswith("❌") or str(c).startswith("⚠️")]
                     if failed:
-                        lines.append("⚠️未通过项：" + " | ".join(failed[:2]))
+                        lines.append("⚠️未通过项：" + " ｜ ".join(failed[:2]))
 
                 # 空行分隔
                 lines.append("")
 
         # 底部
-        lines.append(f"⏱ {labels['report_time_label']}: {datetime.now().strftime('%H:%M')} | 源：因子+LLM分析系统")
+        lines.append(f"⏱ {labels['report_time_label']}: {datetime.now().strftime('%H:%M')} ｜ 源：因子+LLM分析系统")
         models = self._collect_models_used(results)
         if models:
             lines.append(f"🤖 {labels['analysis_model_label']}: {', '.join(models)}")
