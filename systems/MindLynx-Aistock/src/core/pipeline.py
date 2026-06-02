@@ -1341,18 +1341,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     kb_text = initial_context.get("knowledge_prompt", "")
                     regime_text = getattr(self, "_regime_prompt", "")
                     if factor_text:
-                        _cs = ''
-                        _fl = []
-                        for _line in factor_text.split('\n'):
-                            if _line.startswith('**综合得分**'):
-                                _cs = _line.replace('**综合得分**', '综合').replace(':', '').strip()
-                            elif _line.startswith('|') and '\u03c3' in _line:
-                                _cells = [c.strip() for c in _line.split('|')]
-                                if len(_cells) >= 3:
-                                    _fl.append(f'{_cells[1]}{_cells[2]}')
-                        _parts = ([_cs] if _cs else []) + _fl
-                        _compact = " | ".join(_parts[:6]) if _parts else factor_text[:200]
-                        quant_extra["factor_summary"] = f"量化因子得分：{_compact}"
+                        quant_extra["factor_summary"] = factor_text[:200]
                     if kb_text:
                         quant_extra["knowledge_summary"] = kb_text[:150]
                     if regime_text:
@@ -1828,6 +1817,38 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     report_language,
                 )
 
+            # --- ideal_buy fallback ---
+            raw_ideal = sniper_points.get("ideal_buy")
+            if self._is_agent_field_missing(raw_ideal, scalar=True):
+                # LLM缺失 → 直接fallback
+                fb = self._ideal_buy_fallback_from_rating(
+                    sentiment_score=result.sentiment_score,
+                    current_price=result.current_price,
+                    recent_lows=getattr(trend_result, "recent_lows", {}) if trend_result else {},
+                    prev_close=getattr(trend_result, "prev_close", 0) if trend_result else 0,
+                    support_levels=getattr(trend_result, "support_levels", None) if trend_result else None,
+                    report_language=report_language,
+                )
+                if fb is not None:
+                    sniper_points["ideal_buy"] = fb
+            else:
+                # LLM生成了，校验偏差是否过大
+                parsed = self._safe_parse_number(raw_ideal)
+                if parsed is not None and result.current_price:
+                    deviation = abs(parsed - result.current_price) / result.current_price
+                    # 双重检查：偏差超5%或用绝对值超20% → 用fallback替换
+                    if deviation > 0.05 or abs(parsed - result.current_price) > result.current_price * 0.20:
+                        fb = self._ideal_buy_fallback_from_rating(
+                            sentiment_score=result.sentiment_score,
+                            current_price=result.current_price,
+                            recent_lows=getattr(trend_result, "recent_lows", {}) if trend_result else {},
+                            prev_close=getattr(trend_result, "prev_close", 0) if trend_result else 0,
+                            support_levels=getattr(trend_result, "support_levels", None) if trend_result else None,
+                            report_language=report_language,
+                        )
+                        if fb is not None:
+                            sniper_points["ideal_buy"] = fb
+
     @staticmethod
     def _stop_loss_fallback_from_trend(
         trend_result: TrendAnalysisResult | None,
@@ -1837,6 +1858,69 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
         if levels:
             return levels[0]
         return "To be completed" if report_language == "en" else "待补充"
+
+    @staticmethod
+    def _safe_parse_number(val: Any) -> float | None:
+        """安全提取数字值（兼容float/int/string）"""
+        if val is None:
+            return None
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).strip()
+        import re
+        m = re.search(r"(\d+\.?\d*)", s)
+        return float(m.group(1)) if m else None
+
+    @staticmethod
+    def _ideal_buy_fallback_from_rating(
+        sentiment_score: int,
+        current_price: float | None,
+        recent_lows: dict[int, float],
+        prev_close: float,
+        support_levels: list[float] | None,
+        report_language: str,
+    ) -> float | None:
+        """
+        根据系统评分和近期最低价推导 ideal_buy（替代LLM生成）
+
+        逻辑：
+        - 评级→(窗口, 缓冲系数): 评级越强→窗口越短→缓冲越小→越接近现价
+        - 价格锚 = max(跌停价, N日最低)
+        - ideal_buy = 价格锚 × 缓冲系数
+        - 安全约束：看多评级时ideal_buy不高于当前价
+        """
+        if sentiment_score < 40:
+            return None  # 看空不出价
+
+        # 评级→参数映射
+        if sentiment_score >= 70:
+            window, buffer = 3, 1.01
+        elif sentiment_score >= 60:
+            window, buffer = 5, 1.02
+        elif sentiment_score >= 50:
+            window, buffer = 9, 1.03
+        else:  # 40-49 观望
+            window, buffer = 20, 1.02
+
+        # 价格锚 = max(跌停价, N日最低)
+        limit_down = round(prev_close * 0.9, 2)
+        low_n = recent_lows.get(window)
+        if low_n is None and support_levels:
+            low_n = support_levels[0]  # fallback: 最强支撑
+        if low_n is None:
+            return None
+
+        anchor = max(limit_down, low_n)
+        ideal_buy = round(anchor * buffer, 2)
+
+        # 安全约束：看多(≥50)时ideal_buy不能高于当前价
+        if sentiment_score >= 50 and current_price and ideal_buy > current_price:
+            ideal_buy = current_price
+        # 观望(40-49)时ideal_buy不能高于当前价×1.02
+        elif sentiment_score >= 40 and current_price and ideal_buy > current_price * 1.02:
+            ideal_buy = round(current_price * 1.02, 2)
+
+        return ideal_buy
 
     @staticmethod
     def _apply_trend_fallback(

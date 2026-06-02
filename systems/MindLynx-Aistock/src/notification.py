@@ -902,27 +902,6 @@ class NotificationService(
         return name.replace("*", r"\*") if name else name
 
     @staticmethod
-    def _sniper_is_reasonable(ideal: float, stop: float, current_price: float, max_deviation: float = 0.5) -> bool:
-        """检查狙击点位相对于当前价是否合理。偏离超过 max_deviation 视为异常。"""
-        if not current_price or not ideal:
-            return False
-        ideal_dev = abs(ideal - current_price) / current_price
-        stop_dev = abs(stop - current_price) / current_price
-        return ideal_dev < max_deviation and stop_dev < max_deviation
-
-    @staticmethod
-    def _rescue_price(target: float, current_price: float, max_deviation: float = 0.3) -> float:
-        """价位修正：当 LLM 生成的目标价偏离现价过远时，按现价推算合理值。"""
-        if not current_price or not target:
-            return current_price
-        dev = abs(target - current_price) / current_price
-        if dev <= max_deviation:
-            return target  # 合理，直接使用
-        # 偏离过大，用现价加减 15% 作为合理估计
-        direction = 1 if target > current_price else -1
-        return round(current_price * (1 + direction * 0.15), 2)
-
-    @staticmethod
     def _clean_sniper_value(value: Any) -> str:
         """Normalize sniper point values and remove redundant label prefixes."""
         if value is None:
@@ -1088,30 +1067,36 @@ class NotificationService(
                 stop = _parse_price(sniper.get("stop_loss", ""))
                 profit = _parse_price(sniper.get("take_profit", ""))
                 score = result.sentiment_score
-                current_price = result.current_price
+
+                # 最终安全校验：ideal_buy偏差超过15%时截断（不显示）
+                if ideal is not None and result.current_price:
+                    dev = abs(ideal - result.current_price) / result.current_price
+                    if dev > 0.15:
+                        logger = logging.getLogger(__name__)
+                        logger.warning(
+                            "ideal_buy异常(偏差%.1f%%): %s ideal=%.2f current=%.2f → 截断",
+                            dev * 100, result.code, ideal, result.current_price,
+                        )
+                        ideal = None  # 超限不显示
+                        stop = None if stop and abs(stop - result.current_price) / result.current_price > 0.15 else stop
+                        profit = None if profit and abs(profit - result.current_price) / result.current_price > 0.15 else profit
 
                 action_parts = []
                 if score >= 60 and ideal:
-                    i = self._rescue_price(ideal, current_price)
-                    s = self._rescue_price(stop, current_price) if stop else 0
-                    p = self._rescue_price(profit, current_price) if profit else 0
                     action_parts.append(
-                        f"📈 建议¥{i}附近建仓, 止损¥{s}, 目标¥{p}"
-                        if profit
+                        f"📈 建议¥{ideal}附近建仓, 止损¥{stop}, 目标¥{profit}"
+                        if stop and profit
                         else f"📈 建议¥{ideal}附近建仓"
                     )
                 elif score >= 60:
                     action_parts.append("📈 偏多，等待回踩确认后建仓")
                 elif score <= 40 and stop:
-                    s = self._rescue_price(stop, current_price)
-                    action_parts.append(f"📉 持仓者建议¥{s}止损，空仓观望")
+                    action_parts.append(f"📉 持仓者建议¥{stop}止损，空仓观望")
                 elif score <= 40:
                     action_parts.append("📉 偏空，不建议操作")
                 elif 40 < score < 60:
-                    if ideal and stop and current_price:
-                        i = self._rescue_price(ideal, current_price)
-                        s = self._rescue_price(stop, current_price)
-                        action_parts.append(f"⏸️ 建议¥{i}附近轻仓试探，破¥{s}离场")
+                    if ideal and stop:
+                        action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
                     else:
                         action_parts.append("⏸️ 中性，观望为主")
                 if action_parts:
@@ -1401,7 +1386,8 @@ class NotificationService(
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
 
         lines = [
-            f"{len(results)}只 | 🟢买{buy_count} 🟡持{hold_count} 🔴卖{sell_count}",
+            f"📊 {labels['report_title']} | {datetime.now().strftime('%H:%M')}",
+            f"共{len(results)}只 | 🟢买{buy_count} 🟡持{hold_count} 🔴卖{sell_count}",
             "",
         ]
 
@@ -1426,154 +1412,128 @@ class NotificationService(
                 battle = dashboard.get("battle_plan", {}) if dashboard else {}
                 intel = dashboard.get("intelligence", {}) if dashboard else {}
 
-                # 股票名称
                 stock_name = self._get_display_name(result, report_language)
 
-                # 标题行：信号等级 + 股票名称
-                lines.append(f"### {signal_emoji} **{signal_text}** | {stock_name}({result.code})")
-                lines.append("")
+                # 标题行：信号 + 股票 + 价格（不含决策文本）
+                price_str = ""
+                if result.current_price:
+                    chg = result.change_pct
+                    if chg is not None:
+                        sign = "+" if chg > 0 else ""
+                        price_str = f" ¥{result.current_price} {sign}{chg:.2f}%"
+                    else:
+                        price_str = f" ¥{result.current_price}"
+                lines.append(f"{signal_emoji} {stock_name}({result.code}){price_str}")
 
-                # 核心决策（一句话）
+                # 📌核心判断：一句话 + 因子数据 + 信号
                 one_sentence = core.get("one_sentence", result.analysis_summary) if core else result.analysis_summary
-                if one_sentence:
-                    lines.append(f"📌 **{one_sentence[:80]}**")
-                    lines.append("")
-
-                # 量化快照（紧凑移动端格式）
+                if not one_sentence:
+                    one_sentence = ""
                 quant = (dashboard or {}).get("quant_summary", {})
-                if quant:
-                    parts = []
-                    fs = quant.get("factor_summary", "")[:80]
-                    if fs:
-                        parts.append(fs)
-                    ks = quant.get("knowledge_summary", "")[:60]
-                    if ks:
-                        parts.append(ks)
-                    rs = quant.get("regime_summary", "")[:40]
-                    if rs:
-                        parts.append(rs)
-                    if parts:
-                        lines.append(f"> {' · '.join(parts)}")
-                        lines.append("")
+                factor_text = quant.get("factor_summary", "")[:80] if quant else ""
+                core_parts = [one_sentence[:80].rstrip("。")]
+                if factor_text:
+                    core_parts.append(factor_text)
+                core_parts.append(signal_text)
+                lines.append("📌核心判断：" + "｜".join(core_parts))
 
-                # 重要信息区（舆情+基本面）
-                info_lines = []
-
-                # 业绩预期
+                # 📋业绩预期
                 if intel.get("earnings_outlook"):
-                    outlook = str(intel["earnings_outlook"])[:60]
-                    info_lines.append(f"📊 {labels['earnings_outlook_label']}: {outlook}")
-                if intel.get("sentiment_summary"):
-                    sentiment = str(intel["sentiment_summary"])[:50]
-                    info_lines.append(f"💭 {labels['sentiment_summary_label']}: {sentiment}")
-                if info_lines:
-                    lines.extend(info_lines)
-                    lines.append("")
+                    lines.append("📋业绩预期：" + str(intel["earnings_outlook"])[:60])
 
-                # 风险警报（最重要，醒目显示）
+                # 🆕舆情情绪
+                if intel.get("sentiment_summary"):
+                    lines.append("🆕舆情情绪：" + str(intel["sentiment_summary"])[:50])
+
+                # 🚨风险警报 + 催化
+                line_risk = []
                 risks = intel.get("risk_alerts", []) if intel else []
                 if risks:
-                    lines.append(f"🚨 **{labels['risk_alerts_label']}**:")
-                    for risk in risks[:2]:  # 最多显示2条
-                        risk_str = str(risk)
-                        risk_text = risk_str[:50] + "..." if len(risk_str) > 50 else risk_str
-                        lines.append(f"   • {risk_text}")
-                    lines.append("")
-
-                # 利好催化
+                    risk_texts = [str(r)[:40] for r in risks[:2]]
+                    line_risk.append(" | ".join(risk_texts))
                 catalysts = intel.get("positive_catalysts", []) if intel else []
                 if catalysts:
-                    lines.append(f"✨ **{labels['positive_catalysts_label']}**:")
-                    for cat in catalysts[:2]:  # 最多显示2条
-                        cat_str = str(cat)
-                        cat_text = cat_str[:50] + "..." if len(cat_str) > 50 else cat_str
-                        lines.append(f"   • {cat_text}")
-                    lines.append("")
+                    cat_texts = [str(c)[:35] for c in catalysts[:2]]
+                    line_risk.append("催化：" + " | ".join(cat_texts))
+                if line_risk:
+                    lines.append("🚨 风险警报：" + " | ".join(line_risk))
 
-                # 狙击点位
+                # 🎯预期价位 + 持仓建议
+                line_target = []
                 sniper = battle.get("sniper_points", {}) if battle else {}
-                if sniper:
-                    ideal_buy = str(sniper.get("ideal_buy", ""))
-                    stop_loss = str(sniper.get("stop_loss", ""))
-                    take_profit = str(sniper.get("take_profit", ""))
-                    points = []
-                    if ideal_buy:
-                        points.append(f"🎯{labels['ideal_buy_label']}:{ideal_buy[:15]}")
-                    if stop_loss:
-                        points.append(f"🛑{labels['stop_loss_label']}:{stop_loss[:15]}")
-                    if take_profit:
-                        points.append(f"🎊{labels['take_profit_label']}:{take_profit[:15]}")
-                    if points:
-                        lines.append(" | ".join(points))
-                        lines.append("")
-
-                # 持仓建议
+                sniper_parts = []
+                ideal_str = str(sniper.get("ideal_buy", ""))[:12] if sniper.get("ideal_buy") else ""
+                stop_str = str(sniper.get("stop_loss", ""))[:12] if sniper.get("stop_loss") else ""
+                profit_str = str(sniper.get("take_profit", ""))[:12] if sniper.get("take_profit") else ""
+                if ideal_str:
+                    sniper_parts.append(f"理想买入点{ideal_str}")
+                if stop_str:
+                    sniper_parts.append(f"止损位{stop_str}")
+                if profit_str:
+                    sniper_parts.append(f"目标位{profit_str}")
+                if sniper_parts:
+                    line_target.append(" | ".join(sniper_parts))
                 pos_advice = core.get("position_advice", {}) if core else {}
+                pos_parts = []
                 if pos_advice:
-                    no_pos = str(pos_advice.get("no_position", ""))
-                    has_pos = str(pos_advice.get("has_position", ""))
+                    no_pos = str(pos_advice.get("no_position", ""))[:40]
+                    has_pos = str(pos_advice.get("has_position", ""))[:40]
                     if no_pos:
-                        lines.append(f"🆕 {labels['no_position_label']}: {no_pos[:50]}")
+                        pos_parts.append(f"空仓者{no_pos}")
                     if has_pos:
-                        lines.append(f"💼 {labels['has_position_label']}: {has_pos[:50]}")
-                    lines.append("")
+                        pos_parts.append(f"持仓者{has_pos}")
+                if pos_parts:
+                    line_target.append(" | ".join(pos_parts))
+                if line_target:
+                    lines.append("🎯预期价位：" + " | ".join(line_target))
 
-                # 操作建议（自然语言，面向非专业用户）
-                action_parts = []
-                sniper = battle.get("sniper_points", {}) if battle else {}
-                ideal = _parse_price(sniper.get("ideal_buy", ""))
-                stop = _parse_price(sniper.get("stop_loss", ""))
-                profit = _parse_price(sniper.get("take_profit", ""))
-                advice = result.operation_advice or ""
+                # 📋操盘建议
+                sniper2 = battle.get("sniper_points", {}) if battle else {}
+                ideal = _parse_price(sniper2.get("ideal_buy", ""))
+                stop = _parse_price(sniper2.get("stop_loss", ""))
+                profit = _parse_price(sniper2.get("take_profit", ""))
                 score = result.sentiment_score
-                current_price = getattr(result, "current_price", 0)
-
+                if ideal is not None and result.current_price:
+                    dev = abs(ideal - result.current_price) / result.current_price
+                    if dev > 0.15:
+                        logger = logging.getLogger(__name__)
+                        logger.warning(
+                            "ideal_buy异常(偏差%.1f%%) [format2]: %s ideal=%.2f current=%.2f → 截断",
+                            dev * 100, result.code, ideal, result.current_price,
+                        )
+                        ideal = None
+                action_text = ""
                 if score >= 60 and ideal:
-                    i = self._rescue_price(ideal, current_price)
-                    s = self._rescue_price(stop, current_price) if stop else 0
-                    p = self._rescue_price(profit, current_price) if profit else 0
-                    action_parts.append(
-                        f"📈 建议¥{i}附近建仓，止损¥{s}，目标¥{p}"
-                        if profit
-                        else f"📈 建议¥{ideal}附近建仓"
-                    )
+                    action_text = f"建仓{ideal}" + (f"，止损{stop}，目标{profit}" if stop and profit else "")
                 elif score >= 60:
-                    action_parts.append("📈 偏多，等待回踩确认后建仓")
+                    action_text = "偏多，等待回踩确认"
                 elif score <= 40 and stop:
-                    s = self._rescue_price(stop, current_price)
-                    action_parts.append(f"📉 持仓者建议¥{s}止损，空仓观望")
+                    action_text = f"持仓止损{stop}，空仓观望"
                 elif score <= 40:
-                    action_parts.append("📉 偏空，不建议操作")
+                    action_text = "偏空，不操作"
                 elif 40 < score < 60:
-                    if ideal and stop and current_price:
-                        i = self._rescue_price(ideal, current_price)
-                        s = self._rescue_price(stop, current_price)
-                        action_parts.append(f"⏸️ 建议¥{i}附近轻仓试探，破¥{s}离场")
+                    if ideal and stop:
+                        action_text = f"轻仓试探{ideal}，破{stop}离场"
                     else:
-                        action_parts.append("⏸️ 中性，观望为主")
-                if action_parts:
-                    lines.append(f"📋 {action_parts[0]}")
-                    lines.append("")
+                        action_text = "中性观望"
+                if action_text:
+                    lines.append("📋操盘建议：" + action_text)
 
-                # 检查清单简化版
+                # ⚠️未通过项
                 checklist = battle.get("action_checklist", []) if battle else []
                 if checklist:
-                    # 只显示不通过的项目
-                    failed_checks = [str(c) for c in checklist if str(c).startswith("❌") or str(c).startswith("⚠️")]
-                    if failed_checks:
-                        lines.append(f"**{labels['failed_checks_heading']}**:")
-                        for check in failed_checks[:3]:
-                            lines.append(f"   {check[:40]}")
-                        lines.append("")
+                    failed = [str(c)[:30] for c in checklist if str(c).startswith("❌") or str(c).startswith("⚠️")]
+                    if failed:
+                        lines.append("⚠️未通过项：" + " | ".join(failed[:2]))
 
-                lines.append("---")
+                # 空行分隔
                 lines.append("")
 
         # 底部
-        lines.append(f"*{labels['report_time_label']}: {datetime.now().strftime('%H:%M')}*")
+        lines.append(f"⏱ {labels['report_time_label']}: {datetime.now().strftime('%H:%M')} | 源：因子+LLM分析系统")
         models = self._collect_models_used(results)
         if models:
-            lines.append(f"*{labels['analysis_model_label']}: {', '.join(models)}*")
+            lines.append(f"🤖 {labels['analysis_model_label']}: {', '.join(models)}")
 
         content = "\n".join(lines)
 
