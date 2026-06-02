@@ -902,6 +902,15 @@ class NotificationService(
         return name.replace("*", r"\*") if name else name
 
     @staticmethod
+    def _sniper_is_reasonable(ideal: float, stop: float, current_price: float, max_deviation: float = 0.5) -> bool:
+        """检查狙击点位相对于当前价是否合理。偏离超过 max_deviation 视为异常。"""
+        if not current_price or not ideal:
+            return False
+        ideal_dev = abs(ideal - current_price) / current_price
+        stop_dev = abs(stop - current_price) / current_price
+        return ideal_dev < max_deviation and stop_dev < max_deviation
+
+    @staticmethod
     def _clean_sniper_value(value: Any) -> str:
         """Normalize sniper point values and remove redundant label prefixes."""
         if value is None:
@@ -1070,27 +1079,22 @@ class NotificationService(
                 current_price = result.current_price
 
                 action_parts = []
-                if score >= 60 and ideal:
+                sniper_ok = self._sniper_is_reasonable(ideal, stop, current_price) if (ideal and stop and current_price) else False
+                if score >= 60 and sniper_ok:
                     action_parts.append(
                         f"📈 建议¥{ideal}附近建仓, 止损¥{stop}, 目标¥{profit}"
-                        if stop and profit
+                        if profit
                         else f"📈 建议¥{ideal}附近建仓"
                     )
                 elif score >= 60:
                     action_parts.append("📈 偏多，等待回踩确认后建仓")
-                elif score <= 40 and stop:
+                elif score <= 40 and sniper_ok:
                     action_parts.append(f"📉 持仓者建议¥{stop}止损，空仓观望")
                 elif score <= 40:
                     action_parts.append("📉 偏空，不建议操作")
                 elif 40 < score < 60:
-                    if ideal and stop and current_price:
-                        # 狙击点位合理性检查：偏离现价超过 50% 时认为异常
-                        ideal_dev = abs(ideal - current_price) / current_price
-                        stop_dev = abs(stop - current_price) / current_price
-                        if ideal_dev < 0.5 and stop_dev < 0.5:
-                            action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
-                        else:
-                            action_parts.append("⏸️ 中性，观望为主")
+                    if sniper_ok:
+                        action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
                     else:
                         action_parts.append("⏸️ 中性，观望为主")
                 if action_parts:
@@ -1507,26 +1511,22 @@ class NotificationService(
                 score = result.sentiment_score
                 current_price = getattr(result, "current_price", 0)
 
-                if score >= 60 and ideal:
+                sniper_ok = self._sniper_is_reasonable(ideal, stop, current_price) if (ideal and stop and current_price) else False
+                if score >= 60 and sniper_ok:
                     action_parts.append(
                         f"📈 建议¥{ideal}附近建仓，止损¥{stop}，目标¥{profit}"
-                        if stop and profit
+                        if profit
                         else f"📈 建议¥{ideal}附近建仓"
                     )
                 elif score >= 60:
                     action_parts.append("📈 偏多，等待回踩确认后建仓")
-                elif score <= 40 and stop:
+                elif score <= 40 and sniper_ok:
                     action_parts.append(f"📉 持仓者建议¥{stop}止损，空仓观望")
                 elif score <= 40:
                     action_parts.append("📉 偏空，不建议操作")
                 elif 40 < score < 60:
-                    if ideal and stop and current_price:
-                        ideal_dev = abs(ideal - current_price) / current_price
-                        stop_dev = abs(stop - current_price) / current_price
-                        if ideal_dev < 0.5 and stop_dev < 0.5:
-                            action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
-                        else:
-                            action_parts.append("⏸️ 中性，观望为主")
+                    if sniper_ok:
+                        action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
                     else:
                         action_parts.append("⏸️ 中性，观望为主")
                 if action_parts:
