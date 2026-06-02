@@ -238,7 +238,7 @@ class FusionEngine:
             mindlynx_advice, mindlynx_score, mindlynx_trend
         )
         tradingagent_normalized = self.normalizer.normalize_tradingagent(
-            tradingagent_rating
+            tradingagent_rating, debate_state=ta_debate_state
         )
 
         p_ly = self.normalizer.to_probability(lynx_normalized, self.probability_k)
@@ -398,6 +398,7 @@ class FusionEngine:
                 tradingagent_rating=tradingagent_rating,
                 tradingagent_valid=tradingagent_valid,
                 ta_is_stale=ta_is_stale,
+                ta_debate_state=ta_debate_state,
             )
             bayesian_result = self._fuse_bayesian(
                 stock_code=stock_code, stock_name=stock_name,
@@ -426,6 +427,7 @@ class FusionEngine:
             tradingagent_rating=tradingagent_rating,
             tradingagent_valid=tradingagent_valid,
             ta_is_stale=ta_is_stale,
+            ta_debate_state=ta_debate_state,
         )
 
     # ──────── 原始线性融合逻辑（重命名自 fuse_single_stock） ────────
@@ -443,6 +445,7 @@ class FusionEngine:
         tradingagent_rating: str = "Hold",
         tradingagent_valid: bool = True,
         ta_is_stale: bool = False,
+        ta_debate_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         线性加权融合（原始逻辑）。
@@ -460,7 +463,7 @@ class FusionEngine:
             mindlynx_advice, mindlynx_score, mindlynx_trend
         )
         tradingagent_normalized = self.normalizer.normalize_tradingagent(
-            tradingagent_rating
+            tradingagent_rating, debate_state=ta_debate_state
         )
 
         # 子系统有效性（来自 data_loader，不再硬编码 True）

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 # ══════════════════════════════════════════════
@@ -226,8 +226,8 @@ class SignalNormalizer:
 
         关键语义:
         - "持有" → base=0.0, 评分仅在中性带内微调 (±0.3)
-        - "买入" → base=2.2 向上，评分越高越强
-        - "卖出" → base=-2.1 向下
+        - "买入" → base=3.0 (v3.1), 评分越高越强
+        - "卖出" → base=-2.06 (v3.1), 评分越低越弱
 
         参数:
             operation_advice: 操作建议
@@ -246,7 +246,7 @@ class SignalNormalizer:
     # ────────── at: 离散评级归一化 ──────────
 
     @classmethod
-    def normalize_tradingagent(cls, rating: str) -> float:
+    def normalize_tradingagent(cls, rating: str, debate_state: Optional[Dict[str, Any]] = None) -> float:
         """
         at 归一化: 直接 L7 映射（v3.1）。
 
@@ -256,9 +256,18 @@ class SignalNormalizer:
           Hold → 0.0 (L7=0 中性)
           Underweight → -1.13 (L7=-1 谨慎看空)
           Sell → -3.0 (L7=-3 强烈看空)
+
+        Underweight 升级 (填补 L7=-2 看空缺口):
+          当 debate_state 显示强看空共识 (investment_agreement>0.7) 时，
+          将 Underweight 升级至 -2.06 (L7=-2 看空)。
         """
         normalized = rating.strip().capitalize()
-        return cls.TRADINGAGENT_L7_MAP.get(normalized, 0.0)
+        base = cls.TRADINGAGENT_L7_MAP.get(normalized, 0.0)
+        # 辩论强看空共识时升级 Underweight → L7=-2
+        if normalized == "Underweight" and debate_state:
+            if debate_state.get("investment_agreement", 0.5) > 0.7:
+                base = -2.06
+        return base
 
     # ────────── 原始信号解析辅助 ──────────
 

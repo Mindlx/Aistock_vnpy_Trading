@@ -167,10 +167,22 @@ class WeComNotifier:
             lines.append("")
 
         # ── 底部 ──
-        if stale_ta:
-            lines.append("⏳ TA为昨日结果（定时器16:00运行）")
+        health_parts = []
         if degraded:
-            lines.append("⚠ 部分数据缺失，结果仅供参考")
+            health_parts.append(f"降级{len(degraded)}")
+        if stale_ta:
+            health_parts.append(f"TA⏳{len(stale_ta)}")
+        if health_parts:
+            lines.append(" | ".join(health_parts))
+
+        # 子系统可用性摘要（健康监控）
+        ly_ok = sum(1 for r in valid if r.get("lynx_valid", False))
+        ml_ok = sum(1 for r in valid if r.get("mindlynx_valid", False))
+        at_ok = sum(1 for r in valid if r.get("tradingagent_valid", False))
+        health = f"ly{ly_ok}/{len(valid)} ml{ml_ok}/{len(valid)} at{at_ok}/{len(valid)}"
+        if degraded or stale_ta:
+            health += " ⚠"
+        lines.append(f"> {health}")
 
         return "\n".join(lines)
 

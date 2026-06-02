@@ -410,6 +410,7 @@ class TestWeComNotifier:
 def test_fusion_accepts_7level_scores():
     """验证融合引擎接受 L7 范围得分"""
     engine = FusionEngine("config/settings.yaml")
+    engine.fusion_mode = "linear"  # 测试用 linear 模式
     result = engine.fuse_single_stock(
         "601801", "皖新传媒",
         lynx_signal="🟢 买入", lynx_prob_up=75.0,
