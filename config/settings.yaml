@@ -15,7 +15,7 @@ weights:
 # linear:   线性加权 + 分歧检测（原始模式，向后兼容）
 # bayesian: 可靠性调制贝叶斯融合（Oracle 架构）
 # dual:     同时输出两种结果供 A/B 对比
-fusion_mode: "linear"
+fusion_mode: "dual"
 
 reliability:
   # 各系统基础可靠度（由系统本质决定，非日常调优参数）
