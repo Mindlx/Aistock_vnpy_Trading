@@ -902,6 +902,30 @@ class NotificationService(
         return name.replace("*", r"\*") if name else name
 
     @staticmethod
+    def _clean_md(text: str) -> str:
+        """Strip markdown syntax and leading emoji from short text fragments."""
+        if not text:
+            return ""
+        # Remove leading emoji/icon (⚠️, 📊, ❌, etc.)
+        text = re.sub(r'^[\U0001F300-\U0001F9FF\u2600-\u27BF\uFE0F]{1,2}\s*', '', text.strip())
+        # Remove markdown headers
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        # Remove markdown table lines
+        lines = [l for l in text.split(chr(10)) if not re.match(r'^\|.*\|$', l.strip()) and not re.match(r'^[-:| ]+$', l.strip())]
+        text = ' '.join(lines)
+        # Remove bold/italic/code markers
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        text = re.sub(r'\*(.+?)\*', r'\1', text)
+        text = re.sub(r'`(.+?)`', r'\1', text)
+        # Remove blockquotes
+        text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)
+        # Remove horizontal rules
+        text = re.sub(r'^[-*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+        return text.strip()
+
+
+
+    @staticmethod
     def _clean_sniper_value(value: Any) -> str:
         """Normalize sniper point values and remove redundant label prefixes."""
         if value is None:
@@ -1430,7 +1454,7 @@ class NotificationService(
                 if not one_sentence:
                     one_sentence = ""
                 quant = (dashboard or {}).get("quant_summary", {})
-                factor_text = quant.get("factor_summary", "")[:80] if quant else ""
+                factor_text = self._clean_md(quant.get("factor_summary", "")[:80] if quant else "")
                 core_parts = [one_sentence[:80].rstrip("。")]
                 if factor_text:
                     core_parts.append(factor_text)
@@ -1439,21 +1463,21 @@ class NotificationService(
 
                 # 📋业绩预期
                 if intel.get("earnings_outlook"):
-                    lines.append("📋业绩预期：" + str(intel["earnings_outlook"])[:60])
+                    lines.append("📋业绩预期：" + self._clean_md(str(intel["earnings_outlook"])[:60]))
 
                 # 🆕舆情情绪
                 if intel.get("sentiment_summary"):
-                    lines.append("🆕舆情情绪：" + str(intel["sentiment_summary"])[:50])
+                    lines.append("🆕舆情情绪：" + self._clean_md(str(intel["sentiment_summary"])[:50]))
 
                 # 🚨风险警报 + 催化
                 line_risk = []
                 risks = intel.get("risk_alerts", []) if intel else []
                 if risks:
-                    risk_texts = [str(r)[:40] for r in risks[:2]]
+                    risk_texts = [self._clean_md(str(r))[:40] for r in risks[:2]]
                     line_risk.append(" ｜ ".join(risk_texts))
                 catalysts = intel.get("positive_catalysts", []) if intel else []
                 if catalysts:
-                    cat_texts = [str(c)[:35] for c in catalysts[:2]]
+                    cat_texts = [self._clean_md(str(c))[:35] for c in catalysts[:2]]
                     line_risk.append("催化：" + " ｜ ".join(cat_texts))
                 if line_risk:
                     lines.append("🚨 风险警报：" + " ｜ ".join(line_risk))
@@ -1522,7 +1546,7 @@ class NotificationService(
                 # ⚠️未通过项
                 checklist = battle.get("action_checklist", []) if battle else []
                 if checklist:
-                    failed = [str(c)[:30] for c in checklist if str(c).startswith("❌") or str(c).startswith("⚠️")]
+                    failed = [self._clean_md(str(c))[:30] for c in checklist if str(c).startswith("❌") or str(c).startswith("⚠️")]
                     if failed:
                         lines.append("⚠️未通过项：" + " ｜ ".join(failed[:2]))
 
