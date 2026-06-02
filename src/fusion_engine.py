@@ -424,6 +424,22 @@ class FusionEngine:
                 "fusion_mode": "dual",
                 "linear": linear_result,
                 "bayesian": bayesian_result,
+                # 向下游暴露linear顶层字段（CSV/通知/汇总均读顶层）
+                "valid": linear_result.get("valid", False),
+                "fusion_score": linear_result.get("fusion_score", 0),
+                "lynx_score": linear_result.get("lynx_score", 0),
+                "lynx_valid": linear_result.get("lynx_valid", False),
+                "mindlynx_score": linear_result.get("mindlynx_score", 0),
+                "mindlynx_valid": linear_result.get("mindlynx_valid", False),
+                "tradingagent_score": linear_result.get("tradingagent_score", 0),
+                "tradingagent_valid": linear_result.get("tradingagent_valid", False),
+                "signal": linear_result.get("signal", "neutral"),
+                "signal_name": linear_result.get("signal_name", "中性/持有"),
+                "position_advice": linear_result.get("position_advice", "0成"),
+                "has_disagreement": linear_result.get("has_disagreement", False),
+                "is_degraded": linear_result.get("is_degraded", False),
+                "ta_is_stale": linear_result.get("ta_is_stale", False),
+                "message": linear_result.get("message", ""),
             }
 
         return self._fuse_linear(
