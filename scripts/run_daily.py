@@ -216,6 +216,7 @@ def _supply_ta_stale_data(
                 s["tradingagent_rating"] = result["rating"]
                 s["ta_debate_state"] = result.get("debate_state", {})
                 s["ta_is_stale"] = True
+                s["tradingagent_valid"] = True
                 print(f"  ⏳ TA [{code}] 使用 {prev_date} 数据 (stale, rating={result['rating']})")
         if any(s.get("ta_is_stale") for s in need_ta):
             break
@@ -366,7 +367,8 @@ def main():
                     if s.get("code") == r.get("code") and r.get("rating"):
                         s["tradingagent_rating"] = r["rating"]
                         s["ta_is_stale"] = False
-                        s["ta_debate_state"] = r.get("final_decision", "")
+                        s["tradingagent_valid"] = True
+                        s["ta_debate_state"] = {}
         # 如果所有数据都是空的且没有模拟，提示用户
         all_data_empty = all(
             s.get("lynx_signal") in ("观望", "") and s.get("tradingagent_rating") == "Hold"
