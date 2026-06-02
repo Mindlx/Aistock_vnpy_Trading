@@ -826,7 +826,9 @@ class UnifiedDataLoader:
                     "lynx_prob_up": float(lynx_prob_up) if lynx_prob_up else 50.0,
                     "mindlynx_advice": mindlynx_advice if mindlynx_advice else "观望",
                     "mindlynx_score": int(mindlynx_score) if mindlynx_score else 50,
+                    "mindlynx_valid": bool(mindlynx_advice),
                     "tradingagent_rating": ta_rating if ta_rating else "Hold",
+                    "tradingagent_valid": bool(ta_rating),
                 })
 
         logger.info(f"UnifiedDataLoader: 组织完成 {len(stock_signals)} 只股票")

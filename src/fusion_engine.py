@@ -213,7 +213,10 @@ class FusionEngine:
         mindlynx_advice: str = "观望",
         mindlynx_score: int = 50,
         mindlynx_trend: Optional[str] = None,
+        mindlynx_valid: bool = True,
         tradingagent_rating: str = "Hold",
+        tradingagent_valid: bool = True,
+        ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
@@ -262,6 +265,11 @@ class FusionEngine:
         w_ly = ReliabilityConfig.alpha("lynx_vnpy") * c_ly * (1.0 - h_ly)
         w_ml = ReliabilityConfig.alpha("mindlynx") * c_ml * (1.0 - h_ml)
         w_at = ReliabilityConfig.alpha("tradingagent") * c_at * (1.0 - h_at)
+
+        # ⚡ TA 数据过期处理：降低有效权重（与 linear 模式一致）
+        if ta_is_stale:
+            w_at *= 0.7
+            self.logger.info(f"[Bayesian][{stock_code}] TA 过期，权重降低 30%")
 
         total_w = w_ly + w_ml + w_at
         if total_w == 0:
@@ -350,7 +358,9 @@ class FusionEngine:
         mindlynx_advice: str = "观望",
         mindlynx_score: int = 50,
         mindlynx_trend: Optional[str] = None,
+        mindlynx_valid: bool = True,
         tradingagent_rating: str = "Hold",
+        tradingagent_valid: bool = True,
         ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -362,6 +372,7 @@ class FusionEngine:
           bayesian: 可靠性调制贝叶斯融合
           dual:     同时输出两种结果
 
+        mindlynx_valid/tradingagent_valid: 数据是否真实可用（来自 data_loader）
         ta_debate_state: 来自 data_loader._parse_debate_state()，贝叶斯模式使用
         """
         # 模式分发
@@ -371,8 +382,11 @@ class FusionEngine:
                 lynx_signal=lynx_signal, lynx_prob_up=lynx_prob_up,
                 mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
                 mindlynx_trend=mindlynx_trend,
+                mindlynx_valid=mindlynx_valid,
                 tradingagent_rating=tradingagent_rating,
+                tradingagent_valid=tradingagent_valid,
                 ta_debate_state=ta_debate_state,
+                ta_is_stale=ta_is_stale,
             )
         if self.fusion_mode == self.MODE_DUAL:
             linear_result = self._fuse_linear(
@@ -380,7 +394,9 @@ class FusionEngine:
                 lynx_signal=lynx_signal, lynx_prob_up=lynx_prob_up,
                 mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
                 mindlynx_trend=mindlynx_trend,
+                mindlynx_valid=mindlynx_valid,
                 tradingagent_rating=tradingagent_rating,
+                tradingagent_valid=tradingagent_valid,
                 ta_is_stale=ta_is_stale,
             )
             bayesian_result = self._fuse_bayesian(
@@ -388,8 +404,11 @@ class FusionEngine:
                 lynx_signal=lynx_signal, lynx_prob_up=lynx_prob_up,
                 mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
                 mindlynx_trend=mindlynx_trend,
+                mindlynx_valid=mindlynx_valid,
                 tradingagent_rating=tradingagent_rating,
+                tradingagent_valid=tradingagent_valid,
                 ta_debate_state=ta_debate_state,
+                ta_is_stale=ta_is_stale,
             )
             return {
                 "stock_code": stock_code, "stock_name": stock_name,
@@ -403,7 +422,9 @@ class FusionEngine:
             lynx_signal=lynx_signal, lynx_prob_up=lynx_prob_up,
             mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
             mindlynx_trend=mindlynx_trend,
+            mindlynx_valid=mindlynx_valid,
             tradingagent_rating=tradingagent_rating,
+            tradingagent_valid=tradingagent_valid,
             ta_is_stale=ta_is_stale,
         )
 
@@ -418,7 +439,9 @@ class FusionEngine:
         mindlynx_advice: str = "观望",
         mindlynx_score: int = 50,
         mindlynx_trend: Optional[str] = None,
+        mindlynx_valid: bool = True,
         tradingagent_rating: str = "Hold",
+        tradingagent_valid: bool = True,
         ta_is_stale: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -440,9 +463,8 @@ class FusionEngine:
             tradingagent_rating
         )
 
-        # MindLynx 和 TradingAgent 目前总是有效（基于设计文档假设）
-        mindlynx_valid = True
-        tradingagent_valid = True
+        # 子系统有效性（来自 data_loader，不再硬编码 True）
+
 
         # ⚡ TA 数据过期处理：降权 30%，权重重新分配
         ta_stale_penalty = 0.0
@@ -570,7 +592,9 @@ class FusionEngine:
                 lynx_prob_up=item.get("lynx_prob_up", 50.0),
                 mindlynx_advice=item.get("mindlynx_advice", "观望"),
                 mindlynx_score=item.get("mindlynx_score", 50),
+                mindlynx_valid=item.get("mindlynx_valid", True),
                 tradingagent_rating=item.get("tradingagent_rating", "Hold"),
+                tradingagent_valid=item.get("tradingagent_valid", True),
                 ta_is_stale=ta_is_stale,
             )
             # 补充行情数据（从输入透传到结果）
