@@ -1,7 +1,7 @@
 """
 准实时融合服务 — 文件交换区驱动，定时扫描融合。
 
-融合公式: score = ly×0.30 + ml_factor×0.40 + at×0.30
+融合公式: score = ly×0.30 + mindlynx×0.40 + at×0.30
 
 用法:
     python src/realtime_fusion.py                      # 执行一次
@@ -50,7 +50,7 @@ def _load_json(path: Path) -> dict:
 class RealtimeFusion:
     """准实时融合服务 — 读文件交换区 → 融合 → 推送"""
 
-    WEIGHTS = {"lynx": 0.30, "ml_factor": 0.40, "tradingagent": 0.30}
+    WEIGHTS = {"lynx": 0.30, "mindlynx": 0.40, "tradingagent": 0.30}
 
     def __init__(self):
         REALTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,7 +69,7 @@ class RealtimeFusion:
                 w = cfg.get("weights", {})
                 self.WEIGHTS = {
                     "lynx": w.get("lynx_vnpy", 0.30),
-                    "ml_factor": w.get("mindlynx", 0.40),
+                    "mindlynx": w.get("mindlynx", 0.40),
                     "tradingagent": w.get("tradingagent", 0.30),
                 }
         except Exception:
@@ -133,7 +133,7 @@ class RealtimeFusion:
 
             score = (
                 ly_score * self.WEIGHTS["lynx"]
-                + ml_score * self.WEIGHTS["ml_factor"]
+                + ml_score * self.WEIGHTS["mindlynx"]
                 + at_score * self.WEIGHTS["tradingagent"]
             )
             score = round(max(-3.0, min(3.0, score)), 3)
