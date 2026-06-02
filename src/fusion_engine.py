@@ -570,10 +570,15 @@ class FusionEngine:
             lynx_score=lynx_normalized,
             lynx_valid=lynx_valid,
             mindlynx_score=mindlynx_normalized,
+            mindlynx_valid=mindlynx_valid,
             tradingagent_score=tradingagent_normalized,
+            tradingagent_valid=tradingagent_valid,
             fusion_score=fusion_score,
             final_signal=final["signal"],
             position_advice=final["position"],
+            is_degraded=is_degraded,
+            has_disagreement=has_disagreement,
+            fusion_mode=self.fusion_mode,
         )
 
         return result

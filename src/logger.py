@@ -58,10 +58,15 @@ class FusionLogger:
         lynx_score: float,
         lynx_valid: bool,
         mindlynx_score: float,
+        mindlynx_valid: bool,
         tradingagent_score: float,
+        tradingagent_valid: bool,
         fusion_score: float,
         final_signal: str,
         position_advice: str,
+        is_degraded: bool = False,
+        has_disagreement: bool = False,
+        fusion_mode: str = "linear",
         fusion_output_dir: Optional[str] = None,
     ):
         """记录单次融合决策到 CSV"""
@@ -86,14 +91,18 @@ class FusionLogger:
                 writer.writerow([
                     "timestamp", "stock_code", "stock_name",
                     "lynx_score", "lynx_valid",
-                    "mindlynx_score", "tradingagent_score",
+                    "mindlynx_score", "mindlynx_valid",
+                    "tradingagent_score", "tradingagent_valid",
                     "fusion_score", "final_signal", "position_advice",
+                    "is_degraded", "has_disagreement", "fusion_mode",
                 ])
             writer.writerow([
                 timestamp, stock_code, stock_name,
                 f"{lynx_score:.3f}", lynx_valid,
-                f"{mindlynx_score:.3f}", f"{tradingagent_score:.3f}",
+                f"{mindlynx_score:.3f}", mindlynx_valid,
+                f"{tradingagent_score:.3f}", tradingagent_valid,
                 f"{fusion_score:.3f}", final_signal, position_advice,
+                is_degraded, has_disagreement, fusion_mode,
             ])
 
         # 3. 清理过期日志
