@@ -1067,6 +1067,7 @@ class NotificationService(
                 stop = _parse_price(sniper.get("stop_loss", ""))
                 profit = _parse_price(sniper.get("take_profit", ""))
                 score = result.sentiment_score
+                current_price = result.current_price
 
                 action_parts = []
                 if score >= 60 and ideal:
@@ -1082,8 +1083,14 @@ class NotificationService(
                 elif score <= 40:
                     action_parts.append("📉 偏空，不建议操作")
                 elif 40 < score < 60:
-                    if ideal and stop:
-                        action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
+                    if ideal and stop and current_price:
+                        # 狙击点位合理性检查：偏离现价超过 50% 时认为异常
+                        ideal_dev = abs(ideal - current_price) / current_price
+                        stop_dev = abs(stop - current_price) / current_price
+                        if ideal_dev < 0.5 and stop_dev < 0.5:
+                            action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
+                        else:
+                            action_parts.append("⏸️ 中性，观望为主")
                     else:
                         action_parts.append("⏸️ 中性，观望为主")
                 if action_parts:
@@ -1498,6 +1505,7 @@ class NotificationService(
                 profit = _parse_price(sniper.get("take_profit", ""))
                 advice = result.operation_advice or ""
                 score = result.sentiment_score
+                current_price = getattr(result, "current_price", 0)
 
                 if score >= 60 and ideal:
                     action_parts.append(
@@ -1512,8 +1520,13 @@ class NotificationService(
                 elif score <= 40:
                     action_parts.append("📉 偏空，不建议操作")
                 elif 40 < score < 60:
-                    if ideal and stop:
-                        action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
+                    if ideal and stop and current_price:
+                        ideal_dev = abs(ideal - current_price) / current_price
+                        stop_dev = abs(stop - current_price) / current_price
+                        if ideal_dev < 0.5 and stop_dev < 0.5:
+                            action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
+                        else:
+                            action_parts.append("⏸️ 中性，观望为主")
                     else:
                         action_parts.append("⏸️ 中性，观望为主")
                 if action_parts:
