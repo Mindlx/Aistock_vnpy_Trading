@@ -279,6 +279,10 @@ def write_ly_signal(results: List[Dict[str, Any]], date: str):
                 "score": r.get("lynx_score", 0),
                 "signal": r.get("signal_name", ""),
             }
+    # 保护：无有效ly数据时不覆盖已有文件，防止TA定时器(13:00)在lynx-signal(15:15)之前清空数据
+    if not ly_data["stocks"]:
+        print("  ⚠️ 无有效ly数据，保留现有ly_signal.json")
+        return
     rt_dir = Path("data/realtime")
     rt_dir.mkdir(parents=True, exist_ok=True)
     tmp = rt_dir / "ly_signal.json.tmp"
