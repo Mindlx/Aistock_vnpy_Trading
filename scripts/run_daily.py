@@ -436,6 +436,24 @@ def main():
     )
     save_fusion_output(results, today, output_dir, config)
 
+    # 回测: 记录预测到回测数据库 (融合完成后自动执行)
+    if not args.dry_run:
+        try:
+            import subprocess
+            bt_result = subprocess.run(
+                [sys.executable, "scripts/backtest.py", "update", "--date", today],
+                capture_output=True, text=True, timeout=30,
+            )
+            if bt_result.returncode == 0:
+                # 只打印非空行 (避免刷屏)
+                lines = [l for l in bt_result.stdout.split("\n") if l.strip()]
+                for line in lines:
+                    print(f"  [回测] {line}")
+            else:
+                print(f"  [回测] ❌ 失败: {bt_result.stderr[:200]}")
+        except Exception as e:
+            print(f"  [回测] ⚠️ 异常: {e}")
+
     # 企业微信推送
     if not args.dry_run and config.get("wecom", {}).get("enabled", False):
         wecom_webhook = config["wecom"].get("webhook_url", "")

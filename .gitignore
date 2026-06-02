@@ -40,3 +40,6 @@ systems/MindLynx-Aistock/logs/
 *.tmp
 systems/*/.venv
 systems/lynx_vnpy/lynx_env
+
+# Backtest runtime data (auto-generated)
+data/backtest/

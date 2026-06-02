@@ -1,0 +1,715 @@
+#!/usr/bin/env python3
+"""
+融合系统回测工具 — 记录预测→匹配行情→生成报告
+
+用法:
+    python scripts/backtest.py init             # 初始化回测数据库
+    python scripts/backtest.py record           # 读取今日融合CSV并记录预测
+    python scripts/backtest.py check            # 匹配已有预测与次日行情
+    python scripts/backtest.py report           # 生成累计回测报告
+    python scripts/backtest.py update           # record + check (每日执行一次)
+
+数据流:
+    1. record: 从 data/fusion_output/fusion_{date}.csv 读取今日融合结果
+    2. check:  从 unified_cache 查询次日实际涨跌幅,标记方向是否正确
+    3. report: 汇总所有历史记录,输出准确率/分歧分析/系统对比
+
+⚠️ 仅供学习和研究目的,不构成任何投资建议
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import sqlite3
+import sys
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+# ── 路径常量 ──────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+FUSION_OUTPUT_DIR = PROJECT_ROOT / "data" / "fusion_output"
+CACHE_DB = PROJECT_ROOT / "data" / "unified_cache" / "ohlcv_cache.db"
+BACKTEST_DB = PROJECT_ROOT / "data" / "backtest" / "bt_results.db"
+
+# 方向判断阈值 (融合分数超过此绝对值才视为有方向)
+DIRECTION_THRESHOLD = 0.1
+
+
+# ── 数据库 ────────────────────────────────────────────────
+
+def _get_db() -> sqlite3.Connection:
+    """获取回测数据库连接(自动创建目录)."""
+    BACKTEST_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(BACKTEST_DB))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS bt_predictions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    date        TEXT NOT NULL,          -- 预测日期 (交易日) "2026-05-30"
+    stock_code  TEXT NOT NULL,
+    stock_name  TEXT NOT NULL DEFAULT '',
+    fusion_score REAL,
+    ly_score    REAL,
+    ml_score    REAL,
+    at_score    REAL,
+    signal      TEXT,                   -- "cautious_bearish" / "neutral" / 等
+    has_disagreement INTEGER DEFAULT 0,
+    is_degraded     INTEGER DEFAULT 0,
+
+    -- 实际行情匹配 (由 check 命令填充)
+    next_date   TEXT,                   -- 匹配到的下一个交易日
+    next_pct_chg REAL,                  -- 下一个交易日的涨跌幅 (%)
+    next_close  REAL,                   -- 下一交易日收盘价
+    days_offset INTEGER,                -- 距预测日相差几个交易日 (通常=1)
+
+    -- 方向标记 (由 check 命令计算)
+    fusion_dir  INTEGER,                -- 1=看多, -1=看空, 0=中性
+    ly_dir      INTEGER,
+    ml_dir      INTEGER,
+    at_dir      INTEGER,
+    fusion_correct INTEGER,             -- 1=正确, 0=错误, NULL=未评估(中性/无数据)
+    ly_correct  INTEGER,
+    ml_correct  INTEGER,
+    at_correct  INTEGER,
+
+    created_at  TEXT DEFAULT (datetime('now','localtime')),
+    updated_at  TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(date, stock_code)
+);
+
+CREATE TABLE IF NOT EXISTS bt_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+"""
+
+
+def cmd_init() -> None:
+    """初始化回测数据库."""
+    conn = _get_db()
+    for stmt in SCHEMA_SQL.split(";"):
+        stmt = stmt.strip()
+        if stmt:
+            conn.execute(stmt)
+    # 写入元数据
+    conn.execute("INSERT OR IGNORE INTO bt_meta (key, value) VALUES (?, ?)",
+                 ("schema_version", "1.0"))
+    conn.execute("INSERT OR IGNORE INTO bt_meta (key, value) VALUES (?, ?)",
+                 ("created_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
+    print(f"✅ 回测数据库已初始化: {BACKTEST_DB}")
+
+
+# ── 方向判定 ──────────────────────────────────────────────
+
+def _sign(score: float, threshold: float = DIRECTION_THRESHOLD) -> int:
+    """分数→方向: 1=看多, -1=看空, 0=中性."""
+    if score > threshold:
+        return 1
+    elif score < -threshold:
+        return -1
+    return 0
+
+
+# ── Record ────────────────────────────────────────────────
+
+def cmd_record(target_date: Optional[str] = None) -> int:
+    """
+    从融合CSV读取预测并写入回测DB.
+    返回写入的记录数.
+    """
+    date = target_date or datetime.now().strftime("%Y-%m-%d")
+    csv_path = FUSION_OUTPUT_DIR / f"fusion_{date}.csv"
+
+    if not csv_path.exists():
+        print(f"⚠️ 融合CSV不存在: {csv_path}")
+        return 0
+
+    # 读取CSV
+    records = []
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            valid = row.get("valid", "").strip()
+            if valid.lower() != "true":
+                continue
+
+            try:
+                rec = {
+                    "date": date,
+                    "stock_code": row["stock_code"].strip(),
+                    "stock_name": row.get("stock_name", "").strip(),
+                    "fusion_score": _parse_float(row.get("fusion_score")),
+                    "ly_score": _parse_float(row.get("lynx_score")),
+                    "ml_score": _parse_float(row.get("mindlynx_score")),
+                    "at_score": _parse_float(row.get("tradingagent_score")),
+                    "signal": row.get("signal", "").strip(),
+                    "has_disagreement": 1 if row.get("has_disagreement", "").strip() == "True" else 0,
+                    "is_degraded": 1 if row.get("is_degraded", "").strip() == "True" else 0,
+                }
+                rec["fusion_dir"] = _sign(rec["fusion_score"])
+                rec["ly_dir"] = _sign(rec["ly_score"])
+                rec["ml_dir"] = _sign(rec["ml_score"])
+                rec["at_dir"] = _sign(rec["at_score"])
+                records.append(rec)
+            except (KeyError, ValueError) as e:
+                print(f"⚠️ 解析行错误 [{date}]: {e} | {row}")
+                continue
+
+    if not records:
+        print(f"⚠️ {date}: 没有有效记录可写入")
+        return 0
+
+    # 写入DB
+    conn = _get_db()
+    inserted = 0
+    for rec in records:
+        try:
+            conn.execute("""
+                INSERT OR REPLACE INTO bt_predictions
+                (date, stock_code, stock_name,
+                 fusion_score, ly_score, ml_score, at_score,
+                 signal, has_disagreement, is_degraded,
+                 fusion_dir, ly_dir, ml_dir, at_dir)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                rec["date"], rec["stock_code"], rec["stock_name"],
+                rec["fusion_score"], rec["ly_score"], rec["ml_score"], rec["at_score"],
+                rec["signal"], rec["has_disagreement"], rec["is_degraded"],
+                rec["fusion_dir"], rec["ly_dir"], rec["ml_dir"], rec["at_dir"],
+            ))
+            inserted += 1
+        except sqlite3.Error as e:
+            print(f"⚠️ 写入失败 [{rec['stock_code']}]: {e}")
+
+    conn.commit()
+    conn.close()
+    print(f"✅ {date}: 写入 {inserted} 条预测记录")
+    return inserted
+
+
+def _parse_float(val: Any) -> Optional[float]:
+    """安全解析浮点数."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+# ── Check (匹配行情) ─────────────────────────────────────
+
+def _get_pred_and_next_close(conn: sqlite3.Connection, date: str,
+                              stock_code: str) -> Optional[Dict]:
+    """
+    获取预测日的基准收盘价(向前取最近交易日)和下一个交易日的收盘价/涨跌幅.
+
+    预测日期可能是非交易日(如周末),此时取之前最近的交易日为基准.
+    """
+    # 找到 predict_date 当天或之前最近的交易日收盘价
+    pred_row = conn.execute("""
+        SELECT date, close FROM daily_ohlcv
+        WHERE stock_code = ? AND date <= ?
+          AND close IS NOT NULL AND close > 0
+        ORDER BY date DESC
+        LIMIT 1
+    """, (stock_code, date)).fetchone()
+    if not pred_row:
+        return None
+
+    pred_close = pred_row["close"]
+    pred_trade_date = pred_row["date"]
+
+    # 找到 pred_trade_date 之后的下一个交易日(不能与基准日相同)
+    next_row = conn.execute("""
+        SELECT date, close
+        FROM daily_ohlcv
+        WHERE stock_code = ? AND date > ?
+          AND close IS NOT NULL AND close > 0
+        ORDER BY date ASC
+        LIMIT 1
+    """, (stock_code, pred_trade_date)).fetchone()
+    if not next_row:
+        return None
+
+    next_close = next_row["close"]
+    pct_chg = round((next_close - pred_close) / pred_close * 100, 4)
+
+    return {
+        "pred_trade_date": pred_trade_date,
+        "next_date": next_row["date"],
+        "next_close": next_close,
+        "pct_chg": pct_chg,
+        "days_offset": None,  # 后面计算
+    }
+
+
+def cmd_check() -> Tuple[int, int]:
+    """
+    遍历所有未匹配行情的bt_predictions,从unified_cache获取次日行情并标记.
+    返回 (已匹配数, 已正确数).
+    """
+    # 检查缓存DB是否存在
+    if not CACHE_DB.exists():
+        print(f"⚠️ 统一缓存DB不存在: {CACHE_DB}")
+        print("  请先运行 cache_cli.py warm 预热缓存")
+        return 0, 0
+
+    conn_bt = _get_db()
+    conn_cache = sqlite3.connect(str(CACHE_DB))
+    conn_cache.row_factory = sqlite3.Row
+
+    # 找出所有未匹配的预测(包括之前没找到次日数据的)
+    pending = conn_bt.execute("""
+        SELECT id, date, stock_code, fusion_dir, ly_dir, ml_dir, at_dir
+        FROM bt_predictions
+        WHERE next_date IS NULL
+        ORDER BY date ASC
+    """).fetchall()
+
+    if not pending:
+        print("✅ 所有预测均已匹配,无需更新")
+        conn_bt.close()
+        conn_cache.close()
+        return 0, 0
+
+    matched = 0
+    correct = {"fusion": 0, "ly": 0, "ml": 0, "at": 0}
+    total = {"fusion": 0, "ly": 0, "ml": 0, "at": 0}
+
+    for row in pending:
+        pid = row["id"]
+        date = row["date"]
+        code = row["stock_code"]
+
+        next_day = _get_pred_and_next_close(conn_cache, date, code)
+        if next_day is None:
+            continue  # 还不够远,下次再查
+
+        pct_chg = next_day["pct_chg"]
+        if pct_chg is None:
+            continue
+
+        actual_dir = 1 if pct_chg > 0 else (-1 if pct_chg < 0 else 0)
+
+        # 计算每个系统是否正确
+        fusion_correct = _is_correct(row["fusion_dir"], actual_dir)
+        ly_correct = _is_correct(row["ly_dir"], actual_dir)
+        ml_correct = _is_correct(row["ml_dir"], actual_dir)
+        at_correct = _is_correct(row["at_dir"], actual_dir)
+
+        days_offset = _count_trading_days_between(conn_cache, code, date, next_day["next_date"])
+
+        conn_bt.execute("""
+            UPDATE bt_predictions SET
+                next_date = ?,
+                next_pct_chg = ?,
+                next_close = ?,
+                days_offset = ?,
+                fusion_correct = ?,
+                ly_correct = ?,
+                ml_correct = ?,
+                at_correct = ?,
+                updated_at = datetime('now','localtime')
+            WHERE id = ?
+        """, (
+            next_day["next_date"], next_day["pct_chg"], next_day["next_close"],
+            days_offset,
+            fusion_correct, ly_correct, ml_correct, at_correct,
+            pid,
+        ))
+        matched += 1
+
+        # 统计
+        if fusion_correct is not None:
+            total["fusion"] += 1
+            if fusion_correct:
+                correct["fusion"] += 1
+        if ly_correct is not None:
+            total["ly"] += 1
+            if ly_correct:
+                correct["ly"] += 1
+        if ml_correct is not None:
+            total["ml"] += 1
+            if ml_correct:
+                correct["ml"] += 1
+        if at_correct is not None:
+            total["at"] += 1
+            if at_correct:
+                correct["at"] += 1
+
+    conn_bt.commit()
+    conn_bt.close()
+    conn_cache.close()
+
+    if matched > 0:
+        print(f"✅ 本次匹配 {matched} 条预测")
+        _print_accuracy_summary(correct, total)
+    else:
+        print("ℹ️  还没有可匹配的次日行情数据(可能cache不足或日期太近)")
+
+    return matched, correct["fusion"]
+
+
+def _is_correct(pred_dir: Optional[int], actual_dir: int) -> Optional[int]:
+    """
+    判断预测方向是否正确.
+    pred_dir: 1=看多, -1=看空, 0=中性, None=无数据
+    actual_dir: 1=涨, -1=跌, 0=平
+    返回: 1=正确, 0=错误, None=无法判断(中性预测)
+    """
+    if pred_dir is None or pred_dir == 0:
+        return None  # 中性预测,不纳入准确率统计
+    return 1 if pred_dir == actual_dir else 0
+
+
+def _count_trading_days_between(conn: sqlite3.Connection, stock_code: str,
+                                 date1: str, date2: str) -> int:
+    """计算两个日期之间的交易日数."""
+    row = conn.execute("""
+        SELECT COUNT(*) as n
+        FROM daily_ohlcv
+        WHERE stock_code = ? AND date > ? AND date <= ?
+    """, (stock_code, date1, date2)).fetchone()
+    return row["n"] if row else 0
+
+
+def _print_accuracy_summary(correct: Dict[str, int], total: Dict[str, int]) -> None:
+    """打印实时准确率摘要."""
+    systems = [
+        ("融合", "fusion"),
+        ("lynx", "ly"),
+        ("mindlynx", "ml"),
+        ("tradingagent", "at"),
+    ]
+    print("  ── 实时准确率 ──")
+    for name, key in systems:
+        t = total.get(key, 0)
+        c = correct.get(key, 0)
+        pct = f"{c/t*100:.1f}%" if t > 0 else "N/A"
+        print(f"    {name:12s}: {c}/{t} ({pct})")
+
+
+# ── Update (record + check 合并) ─────────────────────────
+
+def cmd_update(target_date: Optional[str] = None) -> None:
+    """record + check = 每日一次."""
+    date = target_date or datetime.now().strftime("%Y-%m-%d")
+    print(f"\n{'='*50}")
+    print(f"  回测更新 [{date}]")
+    print(f"{'='*50}")
+
+    n_recorded = cmd_record(date)
+    n_matched, _ = cmd_check()
+
+    # 输出摘要
+    conn = _get_db()
+    stats = _compute_stats(conn)
+    conn.close()
+
+    if stats["total_predictions"] > 0:
+        print(f"\n── 累计概况 ──")
+        print(f"  总预测: {stats['total_predictions']} | 已匹配: {stats['total_matched']}")
+        print(f"  融合准确率: {stats['fusion_correct']}/{stats['fusion_total']} "
+              f"({stats['fusion_pct']:.1f}%)")
+        print(f"  回测天数: {stats['backtest_days']}")
+
+
+# ── Report ────────────────────────────────────────────────
+
+def _compute_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """从回测DB计算累计统计数据."""
+    stats = {}
+
+    # 基础计数
+    stats["total_predictions"] = conn.execute(
+        "SELECT COUNT(*) FROM bt_predictions").fetchone()[0]
+    stats["total_matched"] = conn.execute(
+        "SELECT COUNT(*) FROM bt_predictions WHERE next_pct_chg IS NOT NULL").fetchone()[0]
+    stats["total_unmatched"] = conn.execute(
+        "SELECT COUNT(*) FROM bt_predictions WHERE next_pct_chg IS NULL").fetchone()[0]
+
+    # 日期范围
+    r = conn.execute("SELECT MIN(date), MAX(date) FROM bt_predictions").fetchone()
+    stats["date_range"] = (r[0], r[1])
+    stats["backtest_days"] = conn.execute(
+        "SELECT COUNT(DISTINCT date) FROM bt_predictions").fetchone()[0]
+
+    # 各系统准确率
+    for name, field in [("融合", "fusion"), ("Lynx", "ly"),
+                         ("MindLynx", "ml"), ("TradingAgent", "at")]:
+        c = conn.execute(
+            f"SELECT COUNT(*) FROM bt_predictions "
+            f"WHERE {field}_correct = 1").fetchone()[0]
+        t = conn.execute(
+            f"SELECT COUNT(*) FROM bt_predictions "
+            f"WHERE {field}_correct IS NOT NULL").fetchone()[0]
+        stats[f"{field}_correct"] = c
+        stats[f"{field}_total"] = t
+        stats[f"{field}_pct"] = (c / t * 100) if t > 0 else 0.0
+
+    # 分歧场景分析
+    stats["disagreement_count"] = conn.execute(
+        "SELECT COUNT(*) FROM bt_predictions WHERE has_disagreement = 1").fetchone()[0]
+    stats["disagreement_matched"] = conn.execute(
+        "SELECT COUNT(*) FROM bt_predictions WHERE has_disagreement = 1 "
+        "AND fusion_correct IS NOT NULL").fetchone()[0]
+    stats["disagreement_correct"] = conn.execute(
+        "SELECT COUNT(*) FROM bt_predictions WHERE has_disagreement = 1 "
+        "AND fusion_correct = 1").fetchone()[0]
+    stats["disagreement_pct"] = (
+        stats["disagreement_correct"] / stats["disagreement_matched"] * 100
+    ) if stats["disagreement_matched"] > 0 else 0.0
+
+    # 非分歧场景准确率
+    stats["no_disagreement_matched"] = conn.execute(
+        "SELECT COUNT(*) FROM bt_predictions WHERE has_disagreement = 0 "
+        "AND fusion_correct IS NOT NULL").fetchone()[0]
+    stats["no_disagreement_correct"] = conn.execute(
+        "SELECT COUNT(*) FROM bt_predictions WHERE has_disagreement = 0 "
+        "AND fusion_correct = 1").fetchone()[0]
+    stats["no_disagreement_pct"] = (
+        stats["no_disagreement_correct"] / stats["no_disagreement_matched"] * 100
+    ) if stats["no_disagreement_matched"] > 0 else 0.0
+
+    # 各信号方向分布
+    stats["signal_breakdown"] = conn.execute("""
+        SELECT signal, COUNT(*) as cnt,
+               SUM(CASE WHEN fusion_correct = 1 THEN 1 ELSE 0 END) as correct,
+               SUM(CASE WHEN fusion_correct IS NOT NULL THEN 1 ELSE 0 END) as total
+        FROM bt_predictions
+        WHERE signal != ''
+        GROUP BY signal
+        ORDER BY cnt DESC
+    """).fetchall()
+
+    # 近期趋势 (最近N天每天的准确率)
+    stats["daily_trend"] = conn.execute("""
+        SELECT date,
+               COUNT(*) as total,
+               SUM(CASE WHEN fusion_correct = 1 THEN 1 ELSE 0 END) as correct,
+               SUM(CASE WHEN fusion_correct IS NOT NULL THEN 1 ELSE 0 END) as evaluated
+        FROM bt_predictions
+        GROUP BY date
+        ORDER BY date DESC
+        LIMIT 14
+    """).fetchall()
+
+    # 个股统计
+    stats["per_stock"] = conn.execute("""
+        SELECT stock_code, stock_name,
+               COUNT(*) as total,
+               SUM(CASE WHEN fusion_correct = 1 THEN 1 ELSE 0 END) as correct,
+               SUM(CASE WHEN fusion_correct IS NOT NULL THEN 1 ELSE 0 END) as evaluated
+        FROM bt_predictions
+        GROUP BY stock_code
+        ORDER BY evaluated DESC
+    """).fetchall()
+
+    return stats
+
+
+def cmd_report(detail: bool = False) -> None:
+    """生成累计回测报告."""
+    conn = _get_db()
+    stats = _compute_stats(conn)
+    conn.close()
+
+    date_from, date_to = stats["date_range"]
+    print(f"\n{'='*55}")
+    print(f"  融合系统回测报告 — {date_from} ~ {date_to}")
+    print(f"{'='*55}")
+
+    if stats["total_predictions"] == 0:
+        print("  ❌ 无数据,请先运行 python scripts/backtest.py update")
+        return
+
+    print(f"\n  📊 样本概况")
+    print(f"     总预测: {stats['total_predictions']} 条")
+    print(f"     已匹配: {stats['total_matched']} 条 (未匹配: {stats['total_unmatched']})")
+    print(f"     回测天数: {stats['backtest_days']} 天")
+    print(f"     股票数: {len(stats['per_stock'])} 只")
+
+    print(f"\n  📈 方向准确率 (T+1)")
+    print("     {:12s} {:>6s}/{:<6s}".format("系统", "正确", ""))
+    for name, field in [("融合", "fusion"), ("Lynx", "ly"),
+                         ("MindLynx", "ml"), ("TradingAgent", "at")]:
+        c = stats[f"{field}_correct"]
+        t = stats[f"{field}_total"]
+        pct = stats[f"{field}_pct"]
+        bar = _bar(pct, 20)
+        print(f"     {name:12s} {c:4d}/{t:<4d}   {pct:5.1f}% {bar}")
+
+    print(f"\n  🔀 分歧场景分析")
+    print(f"     分歧次数: {stats['disagreement_count']} 次")
+    if stats["disagreement_matched"] > 0:
+        print(f"     分歧时融合准确率: {stats['disagreement_correct']}/{stats['disagreement_matched']} "
+              f"({stats['disagreement_pct']:.1f}%)")
+    if stats["no_disagreement_matched"] > 0:
+        print(f"     无分歧时融合准确率: {stats['no_disagreement_correct']}/{stats['no_disagreement_matched']} "
+              f"({stats['no_disagreement_pct']:.1f}%)")
+
+    print(f"\n  🏷️  信号分布")
+    for row in stats["signal_breakdown"]:
+        signal = row["signal"]
+        cnt = row["cnt"]
+        corr = row["correct"]
+        tot = row["total"]
+        pct = f"{corr/tot*100:.1f}%" if tot > 0 else "N/A"
+        print(f"     {signal:20s}: {cnt:3d}次 | 准确率 {pct}")
+
+    print(f"\n  📅 近期逐日准确率")
+    for row in stats["daily_trend"]:
+        d = row["date"]
+        c = row["correct"]
+        t = row["evaluated"]
+        tot = row["total"]
+        pct = f"{c/t*100:.1f}%" if t > 0 else "—"
+        bar = _bar(c/t*100, 15) if t > 0 else ""
+        print(f"     {d}  {c:2d}/{t:<2d} 有效 {pct:>6s} {bar}")
+
+    if detail:
+        print(f"\n  🏢 个股统计")
+        for row in stats["per_stock"]:
+            code = row["stock_code"]
+            name = row["stock_name"]
+            c = row["correct"]
+            t = row["evaluated"]
+            tot = row["total"]
+            pct = f"{c/t*100:.1f}%" if t > 0 else "—"
+            print(f"     {code} {name:8s}: {c:2d}/{t:<2d} ({pct}) [{tot}次预测]")
+
+    # 融合 vs 最优单系统
+    print(f"\n  🏆 融合 vs 最优单系统")
+    sys_acc = [
+        ("Lynx", stats["ly_pct"]),
+        ("MindLynx", stats["ml_pct"]),
+        ("TradingAgent", stats["at_pct"]),
+    ]
+    sys_acc.sort(key=lambda x: x[1], reverse=True)
+    best_name, best_pct = sys_acc[0]
+    fusion_pct = stats["fusion_pct"]
+    diff = fusion_pct - best_pct
+    if diff > 0:
+        verdict = f"融合领先 {best_name} {diff:.1f}%"
+    elif diff < 0:
+        verdict = f"融合落后 {best_name} {abs(diff):.1f}%"
+    else:
+        verdict = "融合与最优单系统持平"
+    print(f"     最优单系统: {best_name} ({best_pct:.1f}%)")
+    print(f"     融合系统:   {fusion_pct:.1f}%")
+    print(f"     结论: {verdict}")
+
+    # 优势摘要
+    print(f"\n  💡 关键指标")
+    has_enough_data = stats["total_matched"] >= 30
+    print(f"     样本充足: {'✅' if has_enough_data else '❌'} ({stats['total_matched']}/30)")
+    if not has_enough_data:
+        print(f"     还需 {30 - stats['total_matched']} 个匹配样本才能做统计意义的分析")
+
+    print()
+
+
+def _bar(pct: float, width: int = 20) -> str:
+    """生成ASCII进度条."""
+    if pct <= 0:
+        return "░" * width
+    filled = int(pct / 100 * width)
+    filled = max(0, min(filled, width))
+    return "█" * filled + "░" * (width - filled)
+
+
+# ── 历史数据回填 ─────────────────────────────────────────
+
+def cmd_backfill() -> int:
+    """
+    扫描 fusion_output 目录所有历史CSV,记录尚未入库的预测.
+    这是首次部署时的初始化操作.
+    """
+    csv_files = sorted(FUSION_OUTPUT_DIR.glob("fusion_*.csv"))
+    if not csv_files:
+        print("⚠️  没有历史融合CSV文件")
+        return 0
+
+    conn = _get_db()
+    existing = set(
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT date FROM bt_predictions").fetchall()
+    )
+    conn.close()
+
+    total = 0
+    for csv_path in csv_files:
+        date = csv_path.stem.replace("fusion_", "")
+        if date in existing:
+            continue
+        n = cmd_record(date)
+        if n > 0:
+            total += n
+            print(f"  ✓ {date}: {n}条")
+        else:
+            print(f"  - {date}: 跳过(无有效数据)")
+
+    if total > 0:
+        print(f"\n✅ 历史回填完成,共 {total} 条记录")
+        cmd_check()
+    else:
+        print("ℹ️  没有新的历史数据需要回填")
+
+    return total
+
+
+# ── CLI ───────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="融合系统回测工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_init = sub.add_parser("init", help="初始化回测数据库")
+    p_record = sub.add_parser("record", help="记录当日融合预测到回测DB")
+    p_record.add_argument("--date", type=str, default=None,
+                          help="指定日期 (YYYY-MM-DD), 默认今天")
+    p_check = sub.add_parser("check", help="匹配已记录预测与次日实际行情")
+    p_update = sub.add_parser("update", help="record + check (每日一次)")
+    p_update.add_argument("--date", type=str, default=None,
+                          help="指定日期 (YYYY-MM-DD), 默认今天")
+    p_report = sub.add_parser("report", help="生成累计回测报告")
+    p_report.add_argument("--detail", action="store_true",
+                          help="显示个股明细")
+    p_backfill = sub.add_parser("backfill", help="扫描历史CSV回填数据库(首次部署用)")
+
+    args = parser.parse_args()
+
+    if args.command == "init":
+        cmd_init()
+    elif args.command == "record":
+        cmd_record(args.date)
+    elif args.command == "check":
+        cmd_check()
+    elif args.command == "update":
+        cmd_update(args.date)
+    elif args.command == "report":
+        cmd_report(detail=args.detail)
+    elif args.command == "backfill":
+        cmd_backfill()
+
+
+if __name__ == "__main__":
+    main()

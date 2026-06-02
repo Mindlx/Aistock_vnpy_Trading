@@ -86,7 +86,8 @@ unified_cache:
     tradingagent_cache_dir: "~/.mind_tradingagent/cache"
 
 backtest:
-  enabled: false            # 回测功能默认关闭
+  enabled: true            # 回测功能已启用
+  db_path: "data/backtest/bt_results.db"
   initial_weights:          # 回测使用的权重起始值（与 weights 保持一致即可）
     lynx_vnpy: 0.30
     mindlynx: 0.40
@@ -95,3 +96,6 @@ backtest:
     lynx_vnpy: [0.2, 0.3, 0.35, 0.4]
     mindlynx: [0.2, 0.3, 0.35, 0.4]
     tradingagent: [0.2, 0.3, 0.35, 0.4]
+  report:
+    weekly_cron: "30 17 * * 5"   # 每周五17:30推送周报
+    accuracy_threshold: 0.50      # 基准准确率（低于此阈值告警）
