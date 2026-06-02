@@ -593,9 +593,11 @@ class FusionEngine:
                 mindlynx_advice=item.get("mindlynx_advice", "观望"),
                 mindlynx_score=item.get("mindlynx_score", 50),
                 mindlynx_valid=item.get("mindlynx_valid", True),
+                mindlynx_trend=item.get("mindlynx_trend", ""),
                 tradingagent_rating=item.get("tradingagent_rating", "Hold"),
                 tradingagent_valid=item.get("tradingagent_valid", True),
                 ta_is_stale=ta_is_stale,
+                ta_debate_state=item.get("ta_debate_state", {}),
             )
             # 补充行情数据（从输入透传到结果）
             for k in ("price", "pct_chg", "volume_ratio", "ma5", "ma10", "ma20"):

@@ -829,6 +829,8 @@ class UnifiedDataLoader:
                     "mindlynx_valid": bool(mindlynx_advice),
                     "tradingagent_rating": ta_rating if ta_rating else "Hold",
                     "tradingagent_valid": bool(ta_rating),
+                    "ta_debate_state": ta.get("debate_state", {}),
+                    "mindlynx_trend": mindlynx.get("trend", ""),
                 })
 
         logger.info(f"UnifiedDataLoader: 组织完成 {len(stock_signals)} 只股票")
