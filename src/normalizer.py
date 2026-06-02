@@ -105,15 +105,14 @@ MAX_POSITION_DISAGREEMENT = "1成"
 
 
 class SignalNormalizer:
-    """三系统信号统一归一化 — 7级语义对齐 (v3.0)"""
+    """三系统信号统一归一化 — 7级语义对齐 (v3.1)"""
 
     # ══════════════════════════════════════════
-    # ly: 连续概率 → logit+tanh 映射
-    # 不再使用离散信号表。prob_up 是 sklearn 真实概率，
-    # 用 logit 变换自然映射到 [-3, +3] 空间。
+    # ly: 连续概率 → 分段线性映射（v3.1）
+    # 原 logit+tanh（v3.0）已废弃
     # ══════════════════════════════════════════
 
-    # emoji 剥离（仅用于兼容旧版 lynx_signal 输出）
+    # emoji 剥离（兼容旧版 lynx_signal 输出）
     EMOJI_PATTERN = re.compile(r"^[🟢🟡🔴⚪]\s*")
 
     # ══════════════════════════════════════════
@@ -164,12 +163,6 @@ class SignalNormalizer:
         return cls.EMOJI_PATTERN.sub("", text).strip()
 
     # ────────── ly: 连续概率归一化 ──────────
-
-    @staticmethod
-    def _logit(p: float) -> float:
-        """logit 变换: ln(p / (1-p))，p∈(0,1)"""
-        p = max(0.001, min(0.999, p / 100.0))
-        return math.log(p / (1.0 - p))
 
     @classmethod
     def normalize_lynx(cls, signal: str, prob_up: float) -> Tuple[float, bool]:
@@ -255,14 +248,14 @@ class SignalNormalizer:
     @classmethod
     def normalize_tradingagent(cls, rating: str) -> float:
         """
-        at 归一化: 直接 L7 映射。
+        at 归一化: 直接 L7 映射（v3.1）。
 
         at 无数值输出，仅 5 级分类，直接映射到 L7:
-          Buy → +2.3 (L7=+3)
-          Overweight → +1.3 (L7=+2)
-          Hold → 0.0 (L7=0)
-          Underweight → -1.3 (L7=-2)
-          Sell → -2.3 (L7=-3)
+          Buy → +3.0 (L7=+3 强烈看多)
+          Overweight → +2.06 (L7=+2 看多)
+          Hold → 0.0 (L7=0 中性)
+          Underweight → -1.13 (L7=-1 谨慎看空)
+          Sell → -3.0 (L7=-3 强烈看空)
         """
         normalized = rating.strip().capitalize()
         return cls.TRADINGAGENT_L7_MAP.get(normalized, 0.0)

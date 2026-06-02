@@ -343,12 +343,9 @@ def main():
             # 写入准实时信号文件
             write_at_signal(ta_results, today)
             # TA 已跑完，后续融合直接用结果，不需要回填 stale 数据
-            for s in stock_signals:
-                for r in ta_results:
-                    if s.get("code") == r.get("code") and r.get("rating"):
-                        s["tradingagent_rating"] = r["rating"]
-                        s["ta_is_stale"] = False
-                        s["ta_debate_state"] = r.get("final_decision", "")
+            # 注: 融合的 load_real_data 会从 TA 日志文件读取 propagate() 输出，
+            # 快速降级路径不写日志，需在 data loading 后注入结果
+            _ta_results_cache = ta_results
         except ImportError as e:
             print(f"  ⚠️  TradingAgent 导入失败: {e}")
             print(f"     确保已 clone mind_TradingAgent 并安装依赖")
@@ -362,6 +359,14 @@ def main():
     else:
         print("\n📡 加载真实系统数据（零侵入，不修改原系统）...")
         stock_signals = load_real_data(stock_pool, today, config, args.stock_pool)
+        # 如果 --run-ta 使用了快速降级，注入 TA 结果到 stock_signals
+        if args.run_ta and '_ta_results_cache' in dir() and _ta_results_cache:
+            for s in stock_signals:
+                for r in _ta_results_cache:
+                    if s.get("code") == r.get("code") and r.get("rating"):
+                        s["tradingagent_rating"] = r["rating"]
+                        s["ta_is_stale"] = False
+                        s["ta_debate_state"] = r.get("final_decision", "")
         # 如果所有数据都是空的且没有模拟，提示用户
         all_data_empty = all(
             s.get("lynx_signal") in ("观望", "") and s.get("tradingagent_rating") == "Hold"
