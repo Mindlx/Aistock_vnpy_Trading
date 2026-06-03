@@ -33,6 +33,7 @@ from src.reliability import (
     probability_to_decision,
 )
 from src.wecom_notifier import WeComNotifier
+from src.realtime_fusion import RealtimeFusion
 
 
 MINIMAL_CONFIG = {
@@ -402,24 +403,98 @@ class TestWeComNotifier:
         assert "强烈看多" in summary
 
 
-# ══════════════════════════════════════════
-# 集成测试
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════
+# 集成测试: realtime_fusion + 文件交换区
+# ══════════════════════════════════════════════
 
+class TestRealtimeFusion:
+    """realtime_fusion 文件交换区集成测试"""
 
-def test_fusion_accepts_7level_scores():
-    """验证融合引擎接受 L7 范围得分"""
-    engine = FusionEngine("config/settings.yaml")
-    engine.fusion_mode = "linear"  # 测试用 linear 模式
-    result = engine.fuse_single_stock(
-        "601801", "皖新传媒",
-        lynx_signal="🟢 买入", lynx_prob_up=75.0,
-        mindlynx_advice="买入", mindlynx_score=80,
-        tradingagent_rating="Buy",
-    )
-    assert result["valid"] is True
-    # L7 范围应在 -3~+3
-    assert -3 <= result["fusion_score"] <= 3
+    def test_scan_and_fuse_all_available(self, tmp_path):
+        """三个系统数据都可用时融合结果正确（含分歧惩罚）"""
+        import json
+        from pathlib import Path
+
+        # 准备测试信号文件: ly=1.5(看多), ml=2.0(看多), at=-1.3(看空) → 有分歧
+        realtime_dir = tmp_path / "realtime"
+        realtime_dir.mkdir()
+
+        ly_data = {"stocks": {"601801": {"score": 1.5}}, "updated_at": "2026-06-03"}
+        ml_data = {"stocks": {"601801": {"l7_score": 2.0}}, "updated_at": "2026-06-03"}
+        at_data = {"stocks": {"601801": {"score": -1.3}}, "updated_at": "2026-06-03"}
+
+        for name, data in [("ly_signal.json", ly_data), ("ml_signal.json", ml_data), ("at_signal.json", at_data)]:
+            (realtime_dir / name).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+        import src.realtime_fusion as rf
+        original_dir = rf.REALTIME_DIR
+        rf.REALTIME_DIR = realtime_dir
+
+        try:
+            service = rf.RealtimeFusion()
+            changes = service.scan_and_fuse()
+
+            assert len(changes) == 1
+            c = changes[0]
+            assert c["code"] == "601801"
+            # 原始融合 = 1.5*0.3 + 2.0*0.4 + (-1.3)*0.3 = 0.86
+            # 分歧(std[1.5,2.0,-1.3]=1.452) → penalty=min(2,(1.452-0.5)*1.2)=1.142
+            # 惩罚后 = 0.86 - 1.142 = -0.282
+            assert abs(c["score"] - (-0.282)) < 0.01
+        finally:
+            rf.REALTIME_DIR = original_dir
+
+    def test_scan_and_fuse_ml_missing(self, tmp_path):
+        """ml 数据缺失时仍能用 ly+at 融合"""
+        import json
+
+        realtime_dir = tmp_path / "realtime2"
+        realtime_dir.mkdir()
+
+        ly_data = {"stocks": {"601801": {"score": 1.5}}, "updated_at": "2026-06-03"}
+        ml_data = {"stocks": {}, "updated_at": "2026-06-03"}
+        at_data = {"stocks": {"601801": {"score": -0.5}}, "updated_at": "2026-06-03"}
+
+        for name, data in [("ly_signal.json", ly_data), ("ml_signal.json", ml_data), ("at_signal.json", at_data)]:
+            (realtime_dir / name).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+        import src.realtime_fusion as rf
+        original_dir = rf.REALTIME_DIR
+        rf.REALTIME_DIR = realtime_dir
+
+        try:
+            service = rf.RealtimeFusion()
+            changes = service.scan_and_fuse()
+
+            assert len(changes) == 1
+            c = changes[0]
+            # 融合 = 1.5*0.3 + 0 + (-0.5)*0.3 = 0.30
+            # at=-0.5 未达分歧阈值(< -0.5)，无惩罚
+            assert abs(c["score"] - 0.30) < 0.01
+            assert c["signal"] == "中性/持有"
+        finally:
+            rf.REALTIME_DIR = original_dir
+
+    def test_scan_and_fuse_no_data(self, tmp_path):
+        """无数据时返回空列表"""
+        import json
+
+        realtime_dir = tmp_path / "realtime3"
+        realtime_dir.mkdir()
+
+        for name in ["ly_signal.json", "ml_signal.json", "at_signal.json"]:
+            (realtime_dir / name).write_text(json.dumps({"stocks": {}}), encoding="utf-8")
+
+        import src.realtime_fusion as rf
+        original_dir = rf.REALTIME_DIR
+        rf.REALTIME_DIR = realtime_dir
+
+        try:
+            service = rf.RealtimeFusion()
+            changes = service.scan_and_fuse()
+            assert len(changes) == 0
+        finally:
+            rf.REALTIME_DIR = original_dir
 
 
 if __name__ == "__main__":
