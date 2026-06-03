@@ -431,7 +431,7 @@ class TradingAgentDataLoader:
         all_results = loader.load_all_by_date("2026-05-29")
     """
 
-    def __init__(self, logs_dir: str = "~/.mind_tradingagent/logs/"):
+    def __init__(self, logs_dir: str = "data/tradingagent/ta_logs/"):
         self.logs_dir = Path(logs_dir).expanduser().resolve()
         logger.info(f"TradingAgent 日志目录: {self.logs_dir}")
 
