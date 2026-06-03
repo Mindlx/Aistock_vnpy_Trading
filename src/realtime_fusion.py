@@ -237,15 +237,15 @@ class RealtimeFusion:
 
     def run_daemon(self, interval: int = 300):
         """守护模式"""
-        print(f"[realtime-fusion] daemon started, interval={interval}s")
+        print(f"[realtime-fusion] daemon started, interval={interval}s", flush=True)
         while True:
             try:
                 changes = self.run_once()
                 if changes:
                     print(f"[realtime-fusion] {datetime.now().isoformat()} "
-                          f"{len(changes)} changes pushed")
+                          f"{len(changes)} changes pushed", flush=True)
             except Exception as e:
-                print(f"[realtime-fusion] error: {e}")
+                print(f"[realtime-fusion] error: {e}", flush=True)
             time.sleep(interval)
 
 
