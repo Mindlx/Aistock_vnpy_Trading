@@ -49,8 +49,8 @@ class NotificationMixin:
         with notify_lock:
             try:
                 if report_type == ReportType.FULL:
-                    report_content = self.notifier.generate_dashboard_report([result])
-                    logger.info(f"[{stock_code}] 使用完整报告格式")
+                    report_content = self.notifier.generate_wechat_dashboard([result])
+                    logger.info(f"[{stock_code}] 使用企业微信仪表盘格式")
                 elif report_type == ReportType.BRIEF:
                     report_content = self.notifier.generate_brief_report([result])
                     logger.info(f"[{stock_code}] 使用简洁报告格式")

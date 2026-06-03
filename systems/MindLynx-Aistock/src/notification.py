@@ -898,8 +898,17 @@ class NotificationService(
 
     @staticmethod
     def _escape_md(name: str) -> str:
-        """Escape markdown special characters in stock names (e.g. *ST → \\*ST)."""
+        """Escape markdown special characters in stock names (e.g. *ST → \*ST)."""
         return name.replace("*", r"\*") if name else name
+
+    @staticmethod
+    def _sniper_is_reasonable(ideal: float, stop: float, current_price: float, max_deviation: float = 0.5) -> bool:
+        """检查狙击点位相对于当前价是否合理。偏离超过 max_deviation 视为异常。"""
+        if not current_price or not ideal:
+            return False
+        ideal_dev = abs(ideal - current_price) / current_price
+        stop_dev = abs(stop - current_price) / current_price
+        return ideal_dev < max_deviation and stop_dev < max_deviation
 
     @staticmethod
     def _clean_md(text: str) -> str:
@@ -1091,35 +1100,24 @@ class NotificationService(
                 stop = _parse_price(sniper.get("stop_loss", ""))
                 profit = _parse_price(sniper.get("take_profit", ""))
                 score = result.sentiment_score
-
-                # 最终安全校验：ideal_buy偏差超过15%时截断（不显示）
-                if ideal is not None and result.current_price:
-                    dev = abs(ideal - result.current_price) / result.current_price
-                    if dev > 0.15:
-                        logger = logging.getLogger(__name__)
-                        logger.warning(
-                            "ideal_buy异常(偏差%.1f%%): %s ideal=%.2f current=%.2f → 截断",
-                            dev * 100, result.code, ideal, result.current_price,
-                        )
-                        ideal = None  # 超限不显示
-                        stop = None if stop and abs(stop - result.current_price) / result.current_price > 0.15 else stop
-                        profit = None if profit and abs(profit - result.current_price) / result.current_price > 0.15 else profit
+                current_price = result.current_price
 
                 action_parts = []
-                if score >= 60 and ideal:
+                sniper_ok = self._sniper_is_reasonable(ideal, stop, current_price) if (ideal and stop and current_price) else False
+                if score >= 60 and sniper_ok:
                     action_parts.append(
                         f"📈 建议¥{ideal}附近建仓, 止损¥{stop}, 目标¥{profit}"
-                        if stop and profit
+                        if profit
                         else f"📈 建议¥{ideal}附近建仓"
                     )
                 elif score >= 60:
                     action_parts.append("📈 偏多，等待回踩确认后建仓")
-                elif score <= 40 and stop:
+                elif score <= 40 and sniper_ok:
                     action_parts.append(f"📉 持仓者建议¥{stop}止损，空仓观望")
                 elif score <= 40:
                     action_parts.append("📉 偏空，不建议操作")
                 elif 40 < score < 60:
-                    if ideal and stop:
+                    if sniper_ok:
                         action_parts.append(f"⏸️ 建议¥{ideal}附近轻仓试探，破¥{stop}离场")
                     else:
                         action_parts.append("⏸️ 中性，观望为主")
@@ -1454,7 +1452,14 @@ class NotificationService(
                 if not one_sentence:
                     one_sentence = ""
                 quant = (dashboard or {}).get("quant_summary", {})
-                factor_text = self._clean_md(quant.get("factor_summary", "")[:80] if quant else "")
+                factor_text = self._clean_md(quant.get("factor_summary", "") if quant else "")
+                # 去掉「量化因子得分」等仪表盘标签
+                factor_text = re.sub(
+                    r'^量化因子得分\s*(?:\(Quantitative Factor Scores\))?\s*[:：]?\s*',
+                    '', factor_text
+                ).strip()
+                if factor_text:
+                    factor_text = factor_text[:120]
                 core_parts = [one_sentence[:80].rstrip("。")]
                 if factor_text:
                     core_parts.append(factor_text)
@@ -1463,11 +1468,11 @@ class NotificationService(
 
                 # 📋业绩预期
                 if intel.get("earnings_outlook"):
-                    lines.append("📋业绩预期：" + self._clean_md(str(intel["earnings_outlook"])[:60]))
+                    lines.append("📋业绩预期：" + self._clean_md(str(intel["earnings_outlook"]))[:60])
 
                 # 🆕舆情情绪
                 if intel.get("sentiment_summary"):
-                    lines.append("🆕舆情情绪：" + self._clean_md(str(intel["sentiment_summary"])[:50]))
+                    lines.append("🆕舆情情绪：" + self._clean_md(str(intel["sentiment_summary"]))[:50])
 
                 # 🚨风险警报 + 催化
                 line_risk = []
@@ -1517,26 +1522,19 @@ class NotificationService(
                 stop = _parse_price(sniper2.get("stop_loss", ""))
                 profit = _parse_price(sniper2.get("take_profit", ""))
                 score = result.sentiment_score
-                if ideal is not None and result.current_price:
-                    dev = abs(ideal - result.current_price) / result.current_price
-                    if dev > 0.15:
-                        logger = logging.getLogger(__name__)
-                        logger.warning(
-                            "ideal_buy异常(偏差%.1f%%) [format2]: %s ideal=%.2f current=%.2f → 截断",
-                            dev * 100, result.code, ideal, result.current_price,
-                        )
-                        ideal = None
+                current_price = result.current_price
+                sniper_ok = self._sniper_is_reasonable(ideal, stop, current_price) if (ideal and stop and current_price) else False
                 action_text = ""
-                if score >= 60 and ideal:
-                    action_text = f"建仓{ideal}" + (f"，止损{stop}，目标{profit}" if stop and profit else "")
+                if score >= 60 and sniper_ok:
+                    action_text = f"建仓{ideal}" + (f"，止损{stop}，目标{profit}" if profit else "")
                 elif score >= 60:
                     action_text = "偏多，等待回踩确认"
-                elif score <= 40 and stop:
+                elif score <= 40 and sniper_ok:
                     action_text = f"持仓止损{stop}，空仓观望"
                 elif score <= 40:
                     action_text = "偏空，不操作"
                 elif 40 < score < 60:
-                    if ideal and stop:
+                    if sniper_ok:
                         action_text = f"轻仓试探{ideal}，破{stop}离场"
                     else:
                         action_text = "中性观望"
