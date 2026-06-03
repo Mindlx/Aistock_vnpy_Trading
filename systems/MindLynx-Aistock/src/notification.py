@@ -736,12 +736,9 @@ class NotificationService(
 
                 report_lines.extend(
                     [
-                        f"### {emoji} {self._get_display_name(result, report_language)} ({result.code})",
                         "",
-                        f"**{labels['action_advice_label']}：{localize_operation_advice(result.operation_advice, report_language)}** | "
-                        f"**{labels['score_label']}：{result.sentiment_score}** | "
-                        f"**{labels['trend_label']}：{localize_trend_prediction(result.trend_prediction, report_language)}** | "
-                        f"**Confidence：{confidence_stars}**",
+                        f"**{self._get_display_name(result, report_language)}**({result.code})",
+                        f"¥{result.current_price:.2f} {result.change_pct:+.1f}%",
                         "",
                     ]
                 )
@@ -1066,7 +1063,9 @@ class NotificationService(
 
                 report_lines.extend(
                     [
-                        f"## {signal_emoji} {stock_name} ({result.code})",
+                        "",
+                        f"**{stock_name}**({result.code})",
+                        f"¥{result.current_price:.2f} {result.change_pct:+.1f}%",
                         "",
                     ]
                 )
