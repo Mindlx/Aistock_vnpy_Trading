@@ -799,16 +799,18 @@ class UnifiedDataLoader:
                 import sqlite3
                 db_path = "systems/MindLynx-Aistock/data/stock_analysis.db"
                 db = sqlite3.connect(db_path)
-                row = db.execute(
-                    f"SELECT volume_ratio, ma5, ma10, ma20 FROM stock_daily "
-                    f"WHERE code=? ORDER BY date DESC LIMIT 1", (code,)
-                ).fetchone()
-                if row:
-                    volume_ratio = round(row[0], 2) if row[0] else 0.0
-                    ma5 = round(row[1], 2) if row[1] else 0.0
-                    ma10 = round(row[2], 2) if row[2] else 0.0
-                    ma20 = round(row[3], 2) if row[3] else 0.0
-                db.close()
+                try:
+                    row = db.execute(
+                        f"SELECT volume_ratio, ma5, ma10, ma20 FROM stock_daily "
+                        f"WHERE code=? ORDER BY date DESC LIMIT 1", (code,)
+                    ).fetchone()
+                    if row:
+                        volume_ratio = round(row[0], 2) if row[0] else 0.0
+                        ma5 = round(row[1], 2) if row[1] else 0.0
+                        ma10 = round(row[2], 2) if row[2] else 0.0
+                        ma20 = round(row[3], 2) if row[3] else 0.0
+                finally:
+                    db.close()
             except Exception:
                 pass
 
