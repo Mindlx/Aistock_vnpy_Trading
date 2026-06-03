@@ -223,8 +223,6 @@ class RealtimeFusion:
             position = c.get('position', '')
             emoji = "🟢" if score > 0 else "🔴" if score < 0 else "⚪"
             line = f"{emoji}**{name}** {signal}({score:+.2f})"
-            if position:
-                line += f" 仓位{position}"
             lines.append(line)
         lines.append("")
         lines.append("📡 ly昨日 | factor实时 | at盘中")
