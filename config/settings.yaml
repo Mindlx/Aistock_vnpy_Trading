@@ -85,6 +85,17 @@ unified_cache:
     mindlynx_db: "systems/MindLynx-Aistock/data/stock_analysis.db"
     tradingagent_cache_dir: "~/.mind_tradingagent/cache"
 
+# ═══════════════════════════════════════
+# 可选功能（每日融合推送时附带）
+# ═══════════════════════════════════════
+features:
+  dragon_tiger:
+    enabled: true             # 龙虎榜资金流向追踪
+    top_n: 10                  # 龙虎榜前N只股票
+  xueqiu:
+    enabled: true              # 东方财富个股评级/关注度（非社交水军，机构数据）
+    disabled_reason: "使用东方财富API，数据为机构评级，质量可靠"
+
 backtest:
   enabled: true            # 回测功能已启用
   db_path: "data/backtest/bt_results.db"

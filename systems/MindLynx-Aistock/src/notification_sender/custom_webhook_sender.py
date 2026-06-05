@@ -334,7 +334,7 @@ class CustomWebhookSender:
         ok = 0
 
         for idx, chunk in enumerate(chunks):
-            marker = f"\n\n📄 *({idx + 1}/{total})*" if total > 1 else ""
+            marker = f"\n\n📡 {idx + 1}/{total}" if total > 1 else ""
             payload = {
                 "msgtype": "markdown",
                 "markdown": {

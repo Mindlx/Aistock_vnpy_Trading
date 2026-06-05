@@ -32,7 +32,7 @@ def _get_market_review_text(language: str) -> dict[str, str]:
     if normalized == "en":
         return {
             "root_title": "# 🎯 Market Review",
-            "push_title": "🎯 Market Review",
+            "push_title": "👾 Market Review",
             "cn_title": "# A-share Market Recap",
             "us_title": "# US Market Recap",
             "hk_title": "# HK Market Recap",
@@ -40,7 +40,7 @@ def _get_market_review_text(language: str) -> dict[str, str]:
         }
     return {
         "root_title": "# 🎯 大盘复盘",
-        "push_title": "🎯 大盘复盘",
+        "push_title": "👾大盘复盘",
         "cn_title": "# A股大盘复盘",
         "us_title": "# 美股大盘复盘",
         "hk_title": "# 港股大盘复盘",
@@ -222,7 +222,7 @@ def run_market_review(
         date_str = datetime.now().strftime("%Y%m%d")
         date_str_display = datetime.now().strftime("%Y-%m-%d")
         review_text['root_title'] = f"# 🎯 {date_str_display} 大盘复盘（{session_label}）"
-        review_text['push_title'] = f"🎯 {date_str_display} 大盘复盘（{session_label}）"
+        review_text['push_title'] = f"👾{datetime.now().strftime('%H:%M')}大盘复盘"
 
         # 午盘复盘：明日交易计划 → 午后交易计划
         if review_report and session_label == "午盘":

@@ -491,7 +491,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     def generate_market_review(self, overview: MarketOverview, news: list,
                                previous_plan: str | None = None,
-                               session_label: str = "全天") -> str:
+                               session_label: str = "全天",
+                               stock_data: str | None = None) -> str:
         """
         使用大模型生成大盘复盘报告
 
@@ -506,8 +507,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             logger.warning("[大盘] AI分析器未配置或不可用，使用模板生成报告")
             return self._generate_template_review(overview, news)
 
-        # 构建 Prompt
-        prompt = self._build_review_prompt(overview, news, previous_plan, session_label)
+        # 构建 Prompt（含自选股数据，如有）
+        prompt = self._build_review_prompt(overview, news, previous_plan, session_label, stock_data=stock_data)
 
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point — never access private analyzer attributes.
@@ -1073,7 +1074,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     def _build_review_prompt(self, overview: MarketOverview, news: list,
                              previous_plan: str | None = None,
-                             session_label: str = "全天") -> str:
+                             session_label: str = "全天",
+                             stock_data: str | None = None) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
 
@@ -1197,6 +1199,8 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 
 {self._get_strategy_prompt_block()}
 
+{stock_data or ""}
+
 ---
 
 # Output Template (follow this structure)
@@ -1223,6 +1227,9 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 
 ### 7. Strategy Plan
 (Provide an offensive/balanced/defensive stance, a position-sizing guideline, one invalidation trigger, and end with “For reference only, not investment advice.”)
+
+### 8. Stock Pool Advice
+(If stock pool factor data is provided above, give concise operation advice for each tracked stock based on factor signals and market context. Skip if no data.)
 
 ---
 
@@ -1292,6 +1299,9 @@ Output the report content directly, no extra commentary.
 
 ### 七、风险提示
 （列出需要关注的风险点；文末用引用形式补充：“> 以上数据仅供参考，不构成投资建议”）
+
+### 八、自选股操盘建议
+（如果【自选股因子数据】不为空，基于这些数据和当日大盘背景，对每只自选股给出独立操盘建议：明确操作方向、仓位参考和关键价位。如果数据为空则跳过此章节。）
 
 ---
 
@@ -1529,6 +1539,33 @@ Market conditions can change quickly. The data above is for reference only and d
         text = f"上期建议为{prev_text}，今日{result_word}。"
         return f"> {text}"
 
+    def _load_stock_pool_data(self) -> str | None:
+        """加载当日融合系统自选股分析数据，供LLM生成操盘建议。"""
+        try:
+            from pathlib import Path
+            today = datetime.now().strftime("%Y-%m-%d")
+            fusion_dir = Path("data/fusion_output")
+            if not fusion_dir.exists():
+                return None
+            files = sorted(fusion_dir.glob(f"fusion_{today}*.json"))
+            if not files:
+                return None
+            import json
+            data = json.loads(files[-1].read_text(encoding="utf-8"))
+            lines = ["## 自选股因子数据"]
+            for item in data if isinstance(data, list) else data.get("results", []):
+                code = item.get("stock_code", item.get("code", ""))
+                name = item.get("stock_name", "")
+                ly = item.get("lynx_score", 0)
+                ml = item.get("mindlynx_score", 0)
+                fusion = item.get("fusion_score", 0)
+                sig = item.get("signal_name", "")
+                lines.append(f"- {name}({code})  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}")
+            return "\n".join(lines) if len(lines) > 1 else None
+        except Exception as e:
+            logger.debug(f"[大盘] 自选股数据加载失败: {e}")
+            return None
+
     def run_daily_review(self, session_label: str = "全天") -> str:
         """
         执行每日大盘复盘流程
@@ -1550,8 +1587,12 @@ Market conditions can change quickly. The data above is for reference only and d
         # 3. 读取上一期全天报告的明日交易计划，供 LLM 参考
         previous_plan = self._load_previous_plan()
 
-        # 4. 生成复盘报告（LLM 自动包含上期建议验证）
-        report = self.generate_market_review(overview, news, previous_plan, session_label)
+        # 3b. 读取当日融合系统自选股分析数据（如有）
+        stock_data = self._load_stock_pool_data()
+        logger.info(f"[大盘] 自选股数据: {'已加载' if stock_data else '无数据'}")
+
+        # 4. 生成复盘报告（LLM 自动包含上期建议验证 + 自选股分析）
+        report = self.generate_market_review(overview, news, previous_plan, session_label, stock_data=stock_data)
 
         logger.info("========== 大盘复盘分析完成 ==========")
 

@@ -11,7 +11,7 @@ import re
 import markdown2
 
 TRUNCATION_SUFFIX = "\n\n...(本段内容过长已截断)"
-PAGE_MARKER_PREFIX = "\n\n📄"
+PAGE_MARKER_PREFIX = "\n\n📡"
 PAGE_MARKER_SAFE_BYTES = 16  # "\n\n📄 9999/9999"
 PAGE_MARKER_SAFE_LEN = 13  # "\n\n📄 9999/9999"
 MIN_MAX_WORDS = 10

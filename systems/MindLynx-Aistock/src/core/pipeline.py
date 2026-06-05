@@ -526,6 +526,8 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 realtime_data = enhanced_context.get("realtime", {})
                 result.current_price = realtime_data.get("price")
                 result.change_pct = realtime_data.get("change_pct")
+                # 同步设置 volume_ratio 到 result，供通知推送使用
+                result.volume_ratio_5d = realtime_data.get("volume_ratio")
 
             # Step 7.6: chip_structure fallback (Issue #589)
             if result and chip_data:
@@ -1341,7 +1343,12 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     kb_text = initial_context.get("knowledge_prompt", "")
                     regime_text = getattr(self, "_regime_prompt", "")
                     if factor_text:
-                        quant_extra["factor_summary"] = factor_text[:200]
+                        # 按行边界截断，避免切碎表格行产生孤立符号
+                        _truncated = factor_text[:200]
+                        _last_newline = _truncated.rfind('\n')
+                        if _last_newline > 50:  # 至少在50字之后才回退行尾
+                            _truncated = _truncated[:_last_newline]
+                        quant_extra["factor_summary"] = _truncated
                     if kb_text:
                         quant_extra["knowledge_summary"] = kb_text[:150]
                     if regime_text:

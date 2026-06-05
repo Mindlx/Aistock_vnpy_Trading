@@ -96,12 +96,12 @@ class WeComNotifier:
             sup_str = f"支撑{support:.2f} 压力{resist:.2f}"
 
         extras = [x for x in [vr_str, sup_str] if x]
-        extra_str = f"| {' '.join(extras)}" if extras else ""
+        extra_str = f"｜{' '.join(extras)}" if extras else ""
 
         return (
             f"{emoji} **{name}({code})** {price_str} {chg_str}"
-            f" | {sys_str}"
-            f" | {sig} | 仓位{pos}"
+            f"｜{sys_str}"
+            f"｜{sig}｜仓位{pos}"
             f"{extra_str}"
         )
 
@@ -118,10 +118,9 @@ class WeComNotifier:
 
         now = self._tz_cn_now()
         lines = [
-            f"## 📊融合决策"
-            f"|{now.strftime('%m-%d %H:%M')}"
-            f"|有效{len(valid)}"
-            f"|TA{len(results)}",
+            f"## 🛟{now.strftime('%H:%M')}融合决策"
+            f"｜有效{len(valid)}"
+            f"｜TA{len(results)}",
             "",
         ]
 
@@ -173,7 +172,7 @@ class WeComNotifier:
         if stale_ta:
             health_parts.append(f"TA⏳{len(stale_ta)}")
         if health_parts:
-            lines.append(" | ".join(health_parts))
+            lines.append("｜".join(health_parts))
 
         # 子系统可用性摘要（健康监控）
         ly_ok = sum(1 for r in valid if r.get("lynx_valid", False))
@@ -186,7 +185,8 @@ class WeComNotifier:
 
         return "\n".join(lines)
 
-    def push_daily_decision(self, results: List[Dict[str, Any]], date: Optional[str] = None):
+    def push_daily_decision(self, results: List[Dict[str, Any]], date: Optional[str] = None,
+                            extra_sections: Optional[List[str]] = None):
         """推送每日融合决策结果"""
         if not self.enabled:
             return
@@ -199,3 +199,11 @@ class WeComNotifier:
 
         if result and result.get("errcode") == 0:
             print(f"✅ 企业微信推送成功 ({len(results)} 只股票)")
+
+        # 可选附加信息（龙虎榜、雪球情绪等）
+        if extra_sections:
+            for section in extra_sections:
+                self.send_markdown(section)
+                if extra_sections.index(section) < len(extra_sections) - 1:
+                    import time
+                    time.sleep(0.5)

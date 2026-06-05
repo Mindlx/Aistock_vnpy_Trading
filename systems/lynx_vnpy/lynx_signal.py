@@ -313,13 +313,13 @@ def push_wecom(signals: list[dict]):
         return
 
     now = datetime.now()
-    lines = [f"🧬 **lynx 量化信号**\n   **{now.strftime('%Y-%m-%d %H:%M:%S')}**\n"]
+    lines = [f"🧬{now.strftime('%H:%M')}量化信号"]
     for s in signals:
         _sig = s['signal']
         _emoji = _sig.split()[0] if ' ' in _sig else '⚪'
         _label = _sig[len(_emoji):].strip()
         parts = [
-            f"{_emoji} {s['name']} ¥{s['price']:.2f} {s['change_pct']:+.2f}%",
+            f"{_emoji} **{s['name']}** ¥{s['price']:.2f} {s['change_pct']:+.2f}%",
             f"L7{s['l7_score']:+0.2f}",
             f"置信{s['prob_up']}%",
         ]
@@ -331,7 +331,7 @@ def push_wecom(signals: list[dict]):
         if s.get('atr_ratio') is not None:
             parts.append(f"ATR{s['atr_ratio']}%")
         parts.append(_label)
-        lines.append("|".join(parts))
+        lines.append("｜".join(parts))
 
     lines.append("\n> 数据源: efinance")
     lines.append("> 模型: RandomForest")

@@ -144,7 +144,7 @@ def _build_briefing_text(
     lines: list[str] = []
     tz = timezone(timedelta(hours=8))
     now_str = datetime.now(tz).strftime("%H:%M")
-    lines.append(f"📊{now_str}盘中速报")
+    lines.append(f"👾{now_str}盘中速报")
 
     # 先算每支股票的状态 → 按类别 + 涨跌幅排序
     _sorted_data = []
@@ -208,7 +208,7 @@ def _build_briefing_text(
         else:
             color_icon = "🟡"  # 均线上方盘整/短线争夺/回踩企稳/震荡观望
 
-        fields = [f"{color_icon} {name}({s.code})", f"¥{price:.2f} {change_str}"]
+        fields = [f"{color_icon} **{name}({s.code})**", f"¥{price:.2f} {change_str}"]
         if s.score > 0:
             fields.append(f"评分{s.score}")
         # 窗口区间（最近15分钟价格区间）
@@ -233,7 +233,7 @@ def _build_briefing_text(
         if outlook:
             assessment += outlook
         fields.append(f"走势{assessment}")
-        lines.append(" ｜ ".join(fields))
+        lines.append("｜".join(fields))
 
     return "\n".join(lines)
 
@@ -325,8 +325,8 @@ def _build_atr_alert_text(
     """生成 ATR 止损预警文本（移动端紧凑格式）"""
     now_str = datetime.now().strftime("%H:%M")
     change_sign = "+" if change_pct >= 0 else ""
-    score_str = f" ｜ 评分{score}" if score > 0 else ""
-    return f"🚨{now_str} ATR止损{score_str}\n{name}({code}) ¥{price:.2f} {change_sign}{change_pct:.1f}% 跌破{multiplier}×ATR ¥{stop_price:.2f}"
+    score_str = f"｜评分{score}" if score > 0 else ""
+    return f"🚨{now_str} ATR止损{score_str}\n**{name}({code})** ¥{price:.2f} {change_sign}{change_pct:.1f}% 跌破{multiplier}×ATR ¥{stop_price:.2f}"
 
 
 def _build_volume_alert_text(
@@ -357,8 +357,8 @@ def _build_volume_alert_text(
     tip = tips.get(alert_type, "")
 
     now_str = datetime.now().strftime("%H:%M")
-    score_str = f" ｜ 评分{score}" if score > 0 else ""
-    return f"{emoji}{now_str}异动预警{score_str}\n{name}({code}) ¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
+    score_str = f"｜评分{score}" if score > 0 else ""
+    return f"{emoji}{now_str}异动预警{score_str}\n**{name}({code})** ¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
 
 
 def _build_ma_cross_alert_text(
@@ -387,9 +387,9 @@ def _build_ma_cross_alert_text(
 
     now_str = datetime.now().strftime("%H:%M")
     change_sign = "+" if change_pct >= 0 else ""
-    tip_suffix = f" ｜ {tip}" if tip else ""
-    score_str = f" ｜ 评分{score}" if score > 0 else ""
-    return f"{emoji}{now_str}均线{cross_type}{score_str}\n{name}({code}) ¥{price:.2f} {change_sign}{change_pct:.1f}% {cross_type}{ma_period}(¥{ma_value:.2f})"
+    tip_suffix = f"｜{tip}" if tip else ""
+    score_str = f"｜评分{score}" if score > 0 else ""
+    return f"{emoji}{now_str}均线{cross_type}{score_str}\n**{name}({code})** ¥{price:.2f} {change_sign}{change_pct:.1f}% {cross_type}{ma_period}(¥{ma_value:.2f})"
 
 
 # ============================================================
@@ -520,32 +520,15 @@ class RealtimeMonitorService:
         if tip:
             extras.append(tip)
 
-        # 仓位标签 → 操作建议
-            uptrend = price > state.ma5 > state.ma10 > 0
-            mild = state.ma5 > price > state.ma10 > 0
-            downtrend = state.ma10 > state.ma5 > price
-
-            if state.position_label == "重仓":
-                action = "持有" if uptrend else ("持有观察" if mild else "减仓")
-            elif state.position_label == "中仓":
-                action = "持有" if uptrend else ("观望" if not downtrend else "减仓")
-            elif state.position_label == "轻仓":
-                action = "加仓" if uptrend else "观望"
-            else:
-                action = state.position_label
-            extras.append(action)
-        elif state.position_label:
-            extras.append(state.position_label)
-
         if extras:
-            suffix = " ｜ ".join(extras)
+            suffix = "｜".join(extras)
             # 最后两项去掉 | 和空格，直接连写让信息更紧凑
-            # 例如"主力介入 | 持有"→"主力介入持有"
+            # 例如"主力介入｜持有"→"主力介入持有"
             if len(extras) >= 4:
-                last_sep = suffix.rfind(" ｜ ")
+                last_sep = suffix.rfind("｜")
                 if last_sep > 0:
-                    suffix = suffix[:last_sep] + suffix[last_sep + 3:]
-            text += " ｜ " + suffix
+                    suffix = suffix[:last_sep] + suffix[last_sep + 1:]
+            text += "｜" + suffix
         return text
 
     async def _load_historical_data(self) -> None:

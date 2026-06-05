@@ -459,7 +459,28 @@ def main():
         wecom_webhook = config["wecom"].get("webhook_url", "")
         if wecom_webhook and wecom_webhook != "YOUR_KEY_HERE":
             notifier = WeComNotifier(wecom_webhook, enabled=True)
-            notifier.push_daily_decision(results, today)
+
+            # 收集可选功能附加推送（零侵入，失败不影响主流程）
+            extra_sections = []
+            try:
+                from src.feature_bridge import run_dragon_tiger, run_xueqiu_sentiment
+                fc = config.get("features", {})
+
+                if fc.get("dragon_tiger", {}).get("enabled"):
+                    codes = [s["code"] for s in stock_pool]
+                    dt = run_dragon_tiger(codes, fc["dragon_tiger"].get("top_n", 10))
+                    if dt:
+                        extra_sections.append(f"🐉 龙虎榜 ({today})\n{dt}")
+
+                if fc.get("xueqiu", {}).get("enabled"):
+                    codes = [s["code"] for s in stock_pool]
+                    xq = run_xueqiu_sentiment(codes)
+                    if xq:
+                        extra_sections.append(xq)
+            except Exception:
+                pass
+
+            notifier.push_daily_decision(results, today, extra_sections=extra_sections or None)
         else:
             print("\n⚠️  企业微信 webhook 未配置，请先更新 config/settings.yaml")
     else:

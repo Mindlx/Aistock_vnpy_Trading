@@ -26,7 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.wecom_notifier import WeComNotifier
-from src.normalizer import SignalNormalizer, L7_SIGNAL_NAMES, MAX_POSITION_DISAGREEMENT, L7_POSITION
+from src.normalizer import SignalNormalizer, L7_SIGNAL_NAMES, MAX_POSITION_DISAGREEMENT, L7_POSITION, L7_EMOJI
 
 REALTIME_DIR = Path("data/realtime")
 
@@ -215,17 +215,17 @@ class RealtimeFusion:
         if not changes:
             return
         now = datetime.now().strftime("%H:%M")
-        lines = [f"📊 盘中融合速报 ({now})", ""]
+        lines = [f"🛟{now}融合速报", ""]
         for c in changes:
             name = self._stock_names.get(c['code'], c['code'])
             signal = c['signal']
             score = c['score']
             position = c.get('position', '')
-            emoji = "🟢" if score > 0 else "🔴" if score < 0 else "⚪"
-            line = f"{emoji}**{name}** {signal}({score:+.2f})"
+            emoji = L7_EMOJI.get(c['signal'], "⚪")
+            line = f"{emoji}**{name}** {signal} Δ{score:+.2f}"
             lines.append(line)
         lines.append("")
-        lines.append("📡 ly昨日 | factor实时 | at盘中")
+        lines.append("📡 ly昨日｜ml实时｜at盘中")
         self.notifier.send_markdown("\n".join(lines))
 
     def run_once(self) -> List[Dict[str, Any]]:
