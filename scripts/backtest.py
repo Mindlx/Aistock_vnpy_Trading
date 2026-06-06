@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS bt_predictions (
     ly_score    REAL,
     ml_score    REAL,
     at_score    REAL,
+    ly_valid    INTEGER DEFAULT 1,      -- 子系统是否有有效数据
+    ml_valid    INTEGER DEFAULT 1,
+    at_valid    INTEGER DEFAULT 1,
+    ta_is_stale INTEGER DEFAULT 0,      -- TA 数据是否过期
     signal      TEXT,                   -- "cautious_bearish" / "neutral" / 等
     has_disagreement INTEGER DEFAULT 0,
     is_degraded     INTEGER DEFAULT 0,
@@ -152,6 +156,10 @@ def cmd_record(target_date: Optional[str] = None) -> int:
                     "ly_score": _parse_float(row.get("lynx_score")),
                     "ml_score": _parse_float(row.get("mindlynx_score")),
                     "at_score": _parse_float(row.get("tradingagent_score")),
+                    "ly_valid": 1 if row.get("lynx_valid", "").strip() == "True" else 0,
+                    "ml_valid": 1 if row.get("mindlynx_valid", "").strip() == "True" else 0,
+                    "at_valid": 1 if row.get("tradingagent_valid", "").strip() == "True" else 0,
+                    "ta_is_stale": 1 if row.get("ta_is_stale", "").strip() == "True" else 0,
                     "signal": row.get("signal", "").strip(),
                     "has_disagreement": 1 if row.get("has_disagreement", "").strip() == "True" else 0,
                     "is_degraded": 1 if row.get("is_degraded", "").strip() == "True" else 0,
@@ -178,12 +186,14 @@ def cmd_record(target_date: Optional[str] = None) -> int:
                 INSERT OR REPLACE INTO bt_predictions
                 (date, stock_code, stock_name,
                  fusion_score, ly_score, ml_score, at_score,
+                 ly_valid, ml_valid, at_valid, ta_is_stale,
                  signal, has_disagreement, is_degraded,
                  fusion_dir, ly_dir, ml_dir, at_dir)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 rec["date"], rec["stock_code"], rec["stock_name"],
                 rec["fusion_score"], rec["ly_score"], rec["ml_score"], rec["at_score"],
+                rec["ly_valid"], rec["ml_valid"], rec["at_valid"], rec["ta_is_stale"],
                 rec["signal"], rec["has_disagreement"], rec["is_degraded"],
                 rec["fusion_dir"], rec["ly_dir"], rec["ml_dir"], rec["at_dir"],
             ))
@@ -461,6 +471,14 @@ def _compute_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
         stats[f"{field}_total"] = t
         stats[f"{field}_pct"] = (c / t * 100) if t > 0 else 0.0
 
+    # 子系统可用性统计
+    for name, field in [("Lynx", "ly"), ("MindLynx", "ml"), ("TradingAgent", "at")]:
+        stats[f"{field}_available"] = conn.execute(
+            f"SELECT COUNT(*) FROM bt_predictions WHERE {field}_valid = 1").fetchone()[0]
+        stats[f"{field}_available_pct"] = round(
+            stats[f"{field}_available"] / stats["total_predictions"] * 100, 1
+        ) if stats["total_predictions"] > 0 else 0.0
+
     # 分歧场景分析
     stats["disagreement_count"] = conn.execute(
         "SELECT COUNT(*) FROM bt_predictions WHERE has_disagreement = 1").fetchone()[0]
@@ -617,6 +635,13 @@ def cmd_report(detail: bool = False) -> None:
     print(f"\n  💡 关键指标")
     has_enough_data = stats["total_matched"] >= 30
     print(f"     样本充足: {'✅' if has_enough_data else '❌'} ({stats['total_matched']}/30)")
+
+    print(f"\n  🔌 子系统数据可用率 (有数据天数/总天数)")
+    for name, field in [("Lynx", "ly"), ("MindLynx", "ml"), ("TradingAgent", "at")]:
+        avail = stats[f"{field}_available"]
+        pct = stats[f"{field}_available_pct"]
+        bar = _bar(pct, 15)
+        print(f"     {name:12s}: {avail}/{stats['total_predictions']} ({pct}%) {bar}")
     if not has_enough_data:
         print(f"     还需 {30 - stats['total_matched']} 个匹配样本才能做统计意义的分析")
 

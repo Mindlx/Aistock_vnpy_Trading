@@ -252,9 +252,11 @@ def save_fusion_output(
         csv_path = output_path / f"fusion_{date}.csv"
         fieldnames = [
             "stock_code", "stock_name", "valid",
-            "lynx_score", "mindlynx_score", "tradingagent_score",
+            "lynx_score", "lynx_valid",
+            "mindlynx_score", "mindlynx_valid",
+            "tradingagent_score", "tradingagent_valid",
             "fusion_score", "signal", "signal_name", "position_advice",
-            "is_degraded", "has_disagreement",
+            "is_degraded", "has_disagreement", "ta_is_stale",
         ]
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
