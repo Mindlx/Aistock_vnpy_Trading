@@ -429,56 +429,69 @@ def _bt_predict_at(df: pd.DataFrame, model, scaler, idx: int) -> float | None:
 
 
 def cmd_backtest() -> int:
-    """回测模式：用历史数据验证模型预测准确率。"""
+    """回测模式：Walk-forward 验证模型预测准确率。
+
+    Walk-forward: 每 RETRAIN_INTERVAL 天用截至当天的数据训练模型，
+    然后预测接下来 RETRAIN_INTERVAL 天的方向，逐步滚动。
+    消除 in-sample 偏差，得到真实的 out-of-sample 准确率。
+    """
     print(f"{'='*55}")
-    print(f"🧬  lynx 量化信号 — 回测模式")
+    print(f"🧬  lynx 量化信号 — Walk-Forward 回测")
     print(f"    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*55}")
 
+    RETRAIN_INTERVAL = 20  # 每隔 20 个交易日重新训练一次
+    MIN_TRAIN = 60         # 最少 60 个交易日作为初始训练集
+
     all_results: list[dict] = []
     for code in STOCK_CODES:
-        model_path = os.path.join(MODEL_DIR, f"{code}_model.pkl")
-        scaler_path = os.path.join(MODEL_DIR, f"{code}_scaler.pkl")
-        if not os.path.exists(model_path):
-            print(f"⏭️  {code} 无训练模型，跳过")
-            continue
-
-        try:
-            model = joblib.load(model_path)
-            scaler = joblib.load(scaler_path)
-        except Exception as e:
-            print(f"❌  {code} 模型加载失败: {e}")
-            continue
+        print(f"\n📡  {code} ({STOCK_NAMES.get(code, code)})...")
 
         df = fetch_daily_bars(code)
-        if df is None or len(df) < 60:
-            print(f"⏭️  {code} 数据不足，跳过")
+        if df is None or len(df) < MIN_TRAIN + RETRAIN_INTERVAL:
+            print(f"  ⏭️  数据不足 ({len(df) if df is not None else 0} < {MIN_TRAIN + RETRAIN_INTERVAL})")
             continue
 
-        print(f"\n📡  {code} ({STOCK_NAMES.get(code, code)})...", end=" ")
+        # 预计算全部特征（rolling 操作只依赖历史数据，无未来信息泄露）
+        df_feat = compute_features(df)
         results = []
-        # 从第 60 行开始逐日回测（需要足够历史数据做特征）
-        for i in range(60, len(df) - 1):
-            prob_up = _bt_predict_at(df, model, scaler, i)
-            if prob_up is None:
+        train_windows = 0
+
+        # Walk-forward: 用 expanding window 训练，在后续窗口测试
+        for train_end in range(MIN_TRAIN, len(df) - 1, RETRAIN_INTERVAL):
+            test_start = train_end
+            test_end = min(train_end + RETRAIN_INTERVAL, len(df) - 1)
+
+            # 用截至 train_end 的数据训练模型
+            train_df = df.iloc[:train_end]
+            trained = train_model(train_df, code)
+            if trained is None:
                 continue
+            model, scaler = trained
+            train_windows += 1
 
-            pred_dir = 1 if prob_up >= 0.5 else -1  # 预测方向
-            actual_ret = df.iloc[i + 1].get("涨跌幅", 0)
-            if actual_ret == 0 and len(df) > i + 2:
-                prev_close = float(df.iloc[i].get("收盘", 0))
-                curr_close = float(df.iloc[i + 1].get("收盘", 0))
-                if prev_close > 0:
-                    actual_ret = (curr_close - prev_close) / prev_close * 100
-            actual_dir = 1 if actual_ret > 0 else (-1 if actual_ret < 0 else 0)
-            correct = 1 if pred_dir == actual_dir else (0 if actual_dir != 0 else None)
+            # 测试后续 RETRAIN_INTERVAL 天
+            for i in range(test_start, test_end):
+                prob_up = _bt_predict_at(df_feat, model, scaler, i)
+                if prob_up is None:
+                    continue
 
-            results.append({
-                "code": code, "date": str(df.iloc[i].get("日期", "")),
-                "prob_up": round(prob_up * 100, 1),
-                "pred_dir": pred_dir, "actual_ret": round(actual_ret, 2),
-                "actual_dir": actual_dir, "correct": correct,
-            })
+                pred_dir = 1 if prob_up >= 0.5 else -1
+                actual_ret = df.iloc[i + 1].get("涨跌幅", 0)
+                if actual_ret == 0 and len(df) > i + 2:
+                    prev_close = float(df.iloc[i].get("收盘", 0))
+                    curr_close = float(df.iloc[i + 1].get("收盘", 0))
+                    if prev_close > 0:
+                        actual_ret = (curr_close - prev_close) / prev_close * 100
+                actual_dir = 1 if actual_ret > 0 else (-1 if actual_ret < 0 else 0)
+                correct = 1 if pred_dir == actual_dir else (0 if actual_dir != 0 else None)
+
+                results.append({
+                    "code": code, "date": str(df.iloc[i].get("日期", "")),
+                    "prob_up": round(prob_up * 100, 1),
+                    "pred_dir": pred_dir, "actual_ret": round(actual_ret, 2),
+                    "actual_dir": actual_dir, "correct": correct,
+                })
 
         if results:
             total = len(results)
@@ -487,23 +500,25 @@ def cmd_backtest() -> int:
             eval_count = correct_count + wrong_count
             accuracy = correct_count / eval_count * 100 if eval_count > 0 else 0
 
-            # 按置信度分组
             high_conf = [r for r in results if r["prob_up"] >= 65 or r["prob_up"] <= 35]
             high_correct = sum(1 for r in high_conf if r["correct"] == 1)
             high_total = len(high_conf)
 
-            print(f"准确率 {accuracy:.1f}% ({correct_count}/{eval_count})"
+            print(f"  准确率 {accuracy:.1f}% ({correct_count}/{eval_count})"
+                  f" | 训练窗口 {train_windows} 次"
                   f" | 高置信 {high_correct}/{high_total} ({high_correct/high_total*100:.1f}%"
-                  f" )" if high_total > 0 else f"准确率 {accuracy:.1f}% ({correct_count}/{eval_count})")
+                  f" )" if high_total > 0 else
+                  f"  准确率 {accuracy:.1f}% ({correct_count}/{eval_count})"
+                  f" | 训练窗口 {train_windows} 次")
 
             all_results.append({
                 "code": code, "name": STOCK_NAMES.get(code, code),
-                "results": results, "accuracy": accuracy,
-                "total": eval_count, "correct": correct_count,
+                "accuracy": accuracy, "total": eval_count, "correct": correct_count,
                 "high_conf_correct": high_correct, "high_conf_total": high_total,
+                "train_windows": train_windows,
             })
         else:
-            print("无有效回测结果")
+            print("  无有效回测结果")
 
     # ── 输出汇总 ──
     if not all_results:
@@ -511,21 +526,22 @@ def cmd_backtest() -> int:
         return 1
 
     print(f"\n{'='*55}")
-    print(f"📊 回测结果汇总")
+    print(f"📊 Walk-Forward 回测结果汇总 (OOS)")
     print(f"{'='*55}")
     correct_total = sum(r["correct"] for r in all_results)
     total_total = sum(r["total"] for r in all_results)
     overall_acc = correct_total / total_total * 100 if total_total > 0 else 0
-    print(f"\n  总体准确率: {correct_total}/{total_total} ({overall_acc:.1f}%)")
-    print(f"\n  个股准确率:")
+    print(f"\n  总体 OOS 准确率: {correct_total}/{total_total} ({overall_acc:.1f}%)")
+    print(f"  ({sum(r['train_windows'] for r in all_results)} 次模型训练 / 10 只股票)\n")
+
+    print(f"  个股 OOS 准确率:")
     all_results.sort(key=lambda r: -r["accuracy"])
     for r in all_results:
         bar = "█" * int(r["accuracy"] / 5) + "░" * (20 - int(r["accuracy"] / 5))
-        print(f"    {r['code']} {r['name']:8s}: {r['accuracy']:.1f}% "
-              f"({r['correct']}/{r['total']}) {bar}")
-        if r["high_conf_total"] > 0:
-            print(f"     高置信: {r['high_conf_correct']}/{r['high_conf_total']} "
-                  f"({r['high_conf_correct']/r['high_conf_total']*100:.1f}%)")
+        hc_str = f" 高置信: {r['high_conf_correct']}/{r['high_conf_total']} ({r['high_conf_correct']/r['high_conf_total']*100:.1f}%)" if r['high_conf_total'] > 0 else ""
+        print(f"    {r['code']} {r['name']:8s}: {r['accuracy']:.1f}% ({r['correct']}/{r['total']}) {bar}")
+        if hc_str:
+            print(f"      {hc_str}")
 
     print(f"\n{'='*55}")
     print(f"  回测完成")
