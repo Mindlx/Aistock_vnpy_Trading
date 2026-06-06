@@ -633,8 +633,11 @@ class FusionEngine:
                 ta_is_stale=ta_is_stale,
                 ta_debate_state=item.get("ta_debate_state", {}),
             )
-            # 补充行情数据（从输入透传到结果）
-            for k in ("price", "pct_chg", "volume_ratio", "ma5", "ma10", "ma20"):
+            # 补充行情数据和子系统原始数据（从输入透传到结果）
+            for k in ("price", "pct_chg", "volume_ratio", "ma5", "ma10", "ma20",
+                      "mindlynx_trend", "mindlynx_sentiment", "mindlynx_operation",
+                      "mindlynx_analysis", "mindlynx_ideal_buy", "mindlynx_stop_loss",
+                      "mindlynx_take_profit"):
                 if k in item:
                     result[k] = item[k]
             results.append(result)

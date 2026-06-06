@@ -285,15 +285,75 @@ class MindLynxDataLoader:
         self.reports_dir = Path(reports_dir).expanduser().resolve()
 
     def load_by_date(self, date_str: str) -> Dict[str, Dict[str, Any]]:
-        """从 Markdown 报告解析信号"""
-        # 优先解析报告
+        """从 Markdown 报告解析信号，优先从 ML 的 analysis_history DB 获取结构化数据"""
+        # 优先从 ML SQLite DB 获取结构化分析数据
+        db_signals = self._load_from_db(date_str)
+        if db_signals:
+            logger.info(f"MindLynx: 从 analysis_history DB 获取 {len(db_signals)} 只股票结构化数据")
+            return db_signals
+
+        # 后备: 解析 Markdown 报告
         signals = self._parse_report(date_str)
         if signals:
             return signals
 
-        # 看看是否有 market review 报告中包含个股信息
         logger.warning(f"MindLynx 报告未找到 ({date_str})")
         return {}
+
+    # ── ML stock_analysis.db 结构化数据读取 ──────────────────────
+
+    def _load_from_db(self, date_str: str) -> Dict[str, Dict[str, Any]]:
+        """从 ML 的 stock_analysis.db → analysis_history 表读取结构化分析结果."""
+        db_path = Path("systems/MindLynx-Aistock/data/stock_analysis.db").resolve()
+        if not db_path.exists():
+            return {}
+
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
+                SELECT ah.code, ah.name, ah.sentiment_score, ah.trend_prediction,
+                       ah.operation_advice, ah.analysis_summary, ah.raw_result,
+                       ah.context_snapshot, ah.ideal_buy, ah.stop_loss, ah.take_profit
+                FROM analysis_history ah
+                INNER JOIN (
+                    SELECT code, MAX(created_at) as max_created
+                    FROM analysis_history
+                    WHERE date(created_at) = ?
+                      AND code IS NOT NULL AND code != '' AND code != 'MARKET'
+                    GROUP BY code
+                ) latest ON ah.code = latest.code AND ah.created_at = latest.max_created
+                ORDER BY ah.code
+            """, (date_str,)).fetchall()
+            conn.close()
+
+            signals = {}
+            for row in rows:
+                code = row["code"]
+                raw = row["raw_result"] or ""
+                ctx = row["context_snapshot"] or ""
+                signals[code] = {
+                    "code": code,
+                    "name": row["name"] or "",
+                    "signal": row["operation_advice"] or "观望",
+                    "score": row["sentiment_score"] or 50,
+                    "trend": row["trend_prediction"] or "",
+                    "sentiment_score": row["sentiment_score"],
+                    "trend_prediction": row["trend_prediction"] or "",
+                    "operation_advice": row["operation_advice"] or "观望",
+                    "analysis_summary": row["analysis_summary"] or "",
+                    "raw_result": raw,
+                    "context_snapshot": ctx,
+                    "ideal_buy": row["ideal_buy"],
+                    "stop_loss": row["stop_loss"],
+                    "take_profit": row["take_profit"],
+                    "source": "analysis_db",
+                }
+            return signals
+        except Exception as e:
+            logger.debug(f"MindLynx DB 查询失败: {e}")
+            return {}
 
     def _parse_report(self, date_str: str) -> Dict[str, Dict[str, Any]]:
         """
@@ -829,6 +889,13 @@ class UnifiedDataLoader:
                     "mindlynx_advice": mindlynx_advice if mindlynx_advice else "观望",
                     "mindlynx_score": int(mindlynx_score) if mindlynx_score else 50,
                     "mindlynx_valid": bool(mindlynx_advice),
+                    "mindlynx_trend": mindlynx.get("trend", ""),
+                    "mindlynx_sentiment": mindlynx.get("sentiment_score"),
+                    "mindlynx_operation": mindlynx.get("operation_advice", mindlynx_advice),
+                    "mindlynx_analysis": mindlynx.get("analysis_summary", ""),
+                    "mindlynx_ideal_buy": mindlynx.get("ideal_buy"),
+                    "mindlynx_stop_loss": mindlynx.get("stop_loss"),
+                    "mindlynx_take_profit": mindlynx.get("take_profit"),
                     "tradingagent_rating": ta_rating if ta_rating else "Hold",
                     "tradingagent_valid": bool(ta_rating),
                     "ta_debate_state": ta.get("debate_state", {}),

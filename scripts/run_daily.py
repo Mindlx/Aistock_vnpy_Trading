@@ -254,6 +254,7 @@ def save_fusion_output(
             "stock_code", "stock_name", "valid",
             "lynx_score", "lynx_valid",
             "mindlynx_score", "mindlynx_valid",
+            "mindlynx_sentiment", "mindlynx_trend", "mindlynx_operation",
             "tradingagent_score", "tradingagent_valid",
             "fusion_score", "signal", "signal_name", "position_advice",
             "is_degraded", "has_disagreement", "ta_is_stale",
