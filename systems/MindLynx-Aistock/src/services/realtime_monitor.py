@@ -961,7 +961,14 @@ class RealtimeMonitorService:
                             (wait_seconds % 3600) / 60,
                             next_day.isoformat(),
                         )
-                        time.sleep(wait_seconds)
+                        # 分片 sleep，每 20s 检查 closing，避免 systemd SIGTERM 超时
+                        next_market_open = datetime.combine(next_day, T_0915, tzinfo=now.tzinfo)
+                        while not self._closing:
+                            now_t = get_market_now("cn")
+                            if now_t >= next_market_open:
+                                break
+                            remaining = (next_market_open - now_t).total_seconds()
+                            time.sleep(min(20, max(1, remaining)))
                     continue
 
                 # 在交易时段内运行监控（分上午盘和下午盘，午休自动暂停）
@@ -978,7 +985,13 @@ class RealtimeMonitorService:
                         wait_seconds // 3600,
                         (wait_seconds % 3600) / 60,
                     )
-                    time.sleep(wait_seconds)
+                    # 分片 sleep，每 20s 检查 closing
+                    while not self._closing:
+                        now_t = get_market_now("cn")
+                        if now_t >= morning_start:
+                            break
+                        remaining = (morning_start - now_t).total_seconds()
+                        time.sleep(min(20, max(1, remaining)))
 
                 elif now < morning_end:
                     # 上午盘：运行监控到 11:30

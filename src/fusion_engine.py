@@ -649,9 +649,9 @@ class FusionEngine:
         valid_results = [r for r in results if r.get("valid", False)]
 
         strong_bullish = [r for r in valid_results if r["signal"] == "strong_bullish"]
-        weak_bullish = [r for r in valid_results if r["signal"] == "weak_bullish"]
+        weak_bullish = [r for r in valid_results if r["signal"] in ("bullish", "cautious_bullish")]
         neutral = [r for r in valid_results if r["signal"] == "neutral"]
-        weak_bearish = [r for r in valid_results if r["signal"] == "weak_bearish"]
+        weak_bearish = [r for r in valid_results if r["signal"] in ("cautious_bearish", "bearish")]
         strong_bearish = [r for r in valid_results if r["signal"] == "strong_bearish"]
 
         return {

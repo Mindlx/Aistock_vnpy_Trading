@@ -623,6 +623,22 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             # 移除 None 值以减少上下文大小
             enhanced["realtime"] = {k: v for k, v in enhanced["realtime"].items() if v is not None}
 
+            # ⚡ 如果实时数据中量比缺失，从日K线数据自行计算
+            if "volume_ratio" not in enhanced["realtime"] and "code" in context:
+                try:
+                    code = context["code"]
+                    rows = self.db.get_latest_data(code, days=6)
+                    if rows and len(rows) >= 2:
+                        today_vol = float(getattr(rows[0], "volume", 0) or 0)
+                        vols = [float(getattr(r, "volume", 0) or 0) for r in rows[1:]]
+                        avg_5d = sum(vols) / len(vols) if vols else 0
+                        if today_vol > 0 and avg_5d > 0:
+                            vr = round(today_vol / avg_5d, 2)
+                            enhanced["realtime"]["volume_ratio"] = vr
+                            enhanced["realtime"]["volume_ratio_desc"] = self._describe_volume_ratio(vr)
+                except Exception as e:
+                    logger.debug(f"[pipeline] 量比计算失败({context.get('code','?')}): {e}")
+
         # 添加筹码分布
         if chip_data:
             current_price = getattr(realtime_quote, "price", 0) if realtime_quote else 0

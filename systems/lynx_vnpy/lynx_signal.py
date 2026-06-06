@@ -264,7 +264,7 @@ def predict_signal(df: pd.DataFrame, stock_code: str,
     elif prob_up >= 0.35:
         strength = "中"
     else:
-        strength = "强"
+        strength = "弱"
 
     # 获取最新价和涨跌幅
     last = df.iloc[-1]
@@ -356,10 +356,13 @@ def push_wecom(signals: list[dict]):
     text = "\n".join(lines)
 
     result = _send(text)
-    if result is not None and (isinstance(result, dict) and result.get("errcode") == 0 or not isinstance(result, dict)):
-        print("  ✅ 推送成功")
-    else:
-        print("  ❌ 推送失败")
+    ok = False
+    if result is not None:
+        if isinstance(result, dict):
+            ok = result.get("errcode") == 0
+        else:
+            ok = getattr(result, "status_code", 0) == 200
+    print("  ✅ 推送成功" if ok else "  ❌ 推送失败")
 
 # ===== 6. 主流程 =====
 def run():

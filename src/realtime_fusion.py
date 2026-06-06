@@ -158,7 +158,8 @@ class RealtimeFusion:
                 changes.append({
                     "code": code,
                     "score": score_penalized,
-                    "signal": signal_name,
+                    "signal": label,
+                    "signal_name": signal_name,
                     "position": position,
                     "ly": ly_score,
                     "ml": ml_score,
@@ -220,11 +221,11 @@ class RealtimeFusion:
         lines = [f"🛟 {now} 融合速报", ""]
         for c in changes:
             name = self._stock_names.get(c['code'], c['code'])
-            signal = c['signal']
+            signal_display = c.get('signal_name', c['signal'])
             score = c['score']
             position = c.get('position', '')
             emoji = L7_EMOJI.get(c['signal'], "⚪")
-            line = f"{emoji}**{name}** {signal} Δ{score:+.2f}"
+            line = f"{emoji}**{name}** {signal_display} Δ{score:+.2f}"
             lines.append(line)
         lines.append("")
         lines.append("📡 ly昨日｜ml实时｜at盘中")

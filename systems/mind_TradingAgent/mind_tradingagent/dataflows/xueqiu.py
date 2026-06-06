@@ -114,3 +114,21 @@ def _placeholder(reason: str) -> str:
         f"Reason: {reason}\n"
         f"</unavailable>"
     )
+
+
+def fetch_desire_raw(symbol: str):
+    """返回东方财富参与意愿原始DataFrame（最新一条）。"""
+    from akshare import stock_comment_detail_scrd_desire_em as _api
+    df = _api(symbol=symbol)
+    if df is not None and not df.empty:
+        df = df.sort_values("交易日期")
+    return df
+
+
+def fetch_focus_raw(symbol: str):
+    """返回东方财富用户关注指数原始DataFrame（最新一条）。"""
+    from akshare import stock_comment_detail_scrd_focus_em as _api
+    df = _api(symbol=symbol)
+    if df is not None and not df.empty:
+        df = df.sort_values("交易日")
+    return df
