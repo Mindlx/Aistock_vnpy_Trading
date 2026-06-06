@@ -403,6 +403,136 @@ def run():
     if all_signals:
         push_wecom(all_signals)
 
+# ===== 7. 回测 =====
+
+FEATURES_BT = [
+    'ret_1d', 'ret_5d', 'ret_10d', 'ret_20d',
+    'ma5_dist', 'ma20_dist', 'ma_cross',
+    'rsi14', 'macd', 'macd_signal', 'macd_hist',
+    'atr_ratio', 'boll_pos', 'cci20', 'vol_ratio',
+]
+
+def _bt_predict_at(df: pd.DataFrame, model, scaler, idx: int) -> float | None:
+    """在历史位置 idx 处做一次预测（只用 idx 之前的数据）。"""
+    if idx < 30:  # 需要至少 30 行数据做特征
+        return None
+    window = df.iloc[:idx + 1].copy()
+    window_feat = compute_features(window)
+    row = window_feat[FEATURES_BT].iloc[-1:].dropna()
+    if row.empty:
+        return None
+    try:
+        X = scaler.transform(row.values)
+        return model.predict_proba(X)[0][1]  # 上涨概率
+    except Exception:
+        return None
+
+
+def cmd_backtest() -> int:
+    """回测模式：用历史数据验证模型预测准确率。"""
+    print(f"{'='*55}")
+    print(f"🧬  lynx 量化信号 — 回测模式")
+    print(f"    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{'='*55}")
+
+    all_results: list[dict] = []
+    for code in STOCK_CODES:
+        model_path = os.path.join(MODEL_DIR, f"{code}_model.pkl")
+        scaler_path = os.path.join(MODEL_DIR, f"{code}_scaler.pkl")
+        if not os.path.exists(model_path):
+            print(f"⏭️  {code} 无训练模型，跳过")
+            continue
+
+        try:
+            model = joblib.load(model_path)
+            scaler = joblib.load(scaler_path)
+        except Exception as e:
+            print(f"❌  {code} 模型加载失败: {e}")
+            continue
+
+        df = fetch_daily_bars(code)
+        if df is None or len(df) < 60:
+            print(f"⏭️  {code} 数据不足，跳过")
+            continue
+
+        print(f"\n📡  {code} ({STOCK_NAMES.get(code, code)})...", end=" ")
+        results = []
+        # 从第 60 行开始逐日回测（需要足够历史数据做特征）
+        for i in range(60, len(df) - 1):
+            prob_up = _bt_predict_at(df, model, scaler, i)
+            if prob_up is None:
+                continue
+
+            pred_dir = 1 if prob_up >= 0.5 else -1  # 预测方向
+            actual_ret = df.iloc[i + 1].get("涨跌幅", 0)
+            if actual_ret == 0 and len(df) > i + 2:
+                prev_close = float(df.iloc[i].get("收盘", 0))
+                curr_close = float(df.iloc[i + 1].get("收盘", 0))
+                if prev_close > 0:
+                    actual_ret = (curr_close - prev_close) / prev_close * 100
+            actual_dir = 1 if actual_ret > 0 else (-1 if actual_ret < 0 else 0)
+            correct = 1 if pred_dir == actual_dir else (0 if actual_dir != 0 else None)
+
+            results.append({
+                "code": code, "date": str(df.iloc[i].get("日期", "")),
+                "prob_up": round(prob_up * 100, 1),
+                "pred_dir": pred_dir, "actual_ret": round(actual_ret, 2),
+                "actual_dir": actual_dir, "correct": correct,
+            })
+
+        if results:
+            total = len(results)
+            correct_count = sum(1 for r in results if r["correct"] == 1)
+            wrong_count = sum(1 for r in results if r["correct"] == 0)
+            eval_count = correct_count + wrong_count
+            accuracy = correct_count / eval_count * 100 if eval_count > 0 else 0
+
+            # 按置信度分组
+            high_conf = [r for r in results if r["prob_up"] >= 65 or r["prob_up"] <= 35]
+            high_correct = sum(1 for r in high_conf if r["correct"] == 1)
+            high_total = len(high_conf)
+
+            print(f"准确率 {accuracy:.1f}% ({correct_count}/{eval_count})"
+                  f" | 高置信 {high_correct}/{high_total} ({high_correct/high_total*100:.1f}%"
+                  f" )" if high_total > 0 else f"准确率 {accuracy:.1f}% ({correct_count}/{eval_count})")
+
+            all_results.append({
+                "code": code, "name": STOCK_NAMES.get(code, code),
+                "results": results, "accuracy": accuracy,
+                "total": eval_count, "correct": correct_count,
+                "high_conf_correct": high_correct, "high_conf_total": high_total,
+            })
+        else:
+            print("无有效回测结果")
+
+    # ── 输出汇总 ──
+    if not all_results:
+        print("\n❌ 无回测结果")
+        return 1
+
+    print(f"\n{'='*55}")
+    print(f"📊 回测结果汇总")
+    print(f"{'='*55}")
+    correct_total = sum(r["correct"] for r in all_results)
+    total_total = sum(r["total"] for r in all_results)
+    overall_acc = correct_total / total_total * 100 if total_total > 0 else 0
+    print(f"\n  总体准确率: {correct_total}/{total_total} ({overall_acc:.1f}%)")
+    print(f"\n  个股准确率:")
+    all_results.sort(key=lambda r: -r["accuracy"])
+    for r in all_results:
+        bar = "█" * int(r["accuracy"] / 5) + "░" * (20 - int(r["accuracy"] / 5))
+        print(f"    {r['code']} {r['name']:8s}: {r['accuracy']:.1f}% "
+              f"({r['correct']}/{r['total']}) {bar}")
+        if r["high_conf_total"] > 0:
+            print(f"     高置信: {r['high_conf_correct']}/{r['high_conf_total']} "
+                  f"({r['high_conf_correct']/r['high_conf_total']*100:.1f}%)")
+
+    print(f"\n{'='*55}")
+    print(f"  回测完成")
+    print(f"{'='*55}")
+    return 0
+
+
 def _parse_args() -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description="lynx_vnpy 量化信号系统")
@@ -410,6 +540,8 @@ def _parse_args() -> argparse.Namespace:
                         help="定时模式，每日指定时间自动执行")
     parser.add_argument("--time", type=str, default="15:50",
                         help="定时执行时间，格式 HH:MM（默认 15:50）")
+    parser.add_argument("--backtest", action="store_true",
+                        help="回测模式：用历史数据验证模型预测准确率")
     return parser.parse_args()
 
 
@@ -446,4 +578,6 @@ if __name__ == "__main__":
     args = _parse_args()
     if args.schedule:
         exit(_schedule_loop(args.time))
+    if args.backtest:
+        exit(cmd_backtest())
     exit(run())
