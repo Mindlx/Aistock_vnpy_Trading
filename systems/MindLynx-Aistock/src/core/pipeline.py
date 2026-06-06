@@ -2080,6 +2080,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             "news_content": news_content,
             "realtime_quote_raw": self._safe_to_dict(realtime_quote),
             "chip_distribution_raw": self._safe_to_dict(chip_data),
+            "factor_zscores": getattr(self, "_factor_zscores", {}),
         }
         if self.analysis_skills is not None:
             snapshot["skills"] = list(self.analysis_skills)
@@ -2326,6 +2327,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
         # === 量化因子 + Regime 预计算 ===
         self._factor_profiles: dict[str, str] = {}
         self._factor_scores: dict[str, float] = {}
+        self._factor_zscores: dict[str, dict[str, float]] = {}
         self._factor_distributions: dict[str, dict] = {}
         self._ood_warnings: dict[str, str] = {}
         self._regime_prompt: str = ""
@@ -2432,6 +2434,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             for r in all_results:
                 self._factor_profiles[r.code] = engine.build_factor_profile(r)
                 self._factor_scores[r.code] = r.composite_score
+                self._factor_zscores[r.code] = r.z_scores
             # F6 fix: add computation timestamp to factor profiles
             from datetime import datetime as _dt
             _ts = _dt.now().strftime("%Y-%m-%d %H:%M")
