@@ -8,9 +8,13 @@
 """
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Dict, Optional
 
 from src.normalizer import SignalNormalizer
+
+logger = logging.getLogger(__name__)
 
 
 class ReliabilityConfig:
@@ -28,15 +32,95 @@ class ReliabilityConfig:
       - at:  0.30  — 默认高度怀疑
     """
 
-    BASE_ALPHA = {"lynx_vnpy": 0.75, "mindlynx": 0.55, "tradingagent": 0.40}
+    BASE_ALPHA = {"lynx_vnpy": 0.75, "mindlynx": 0.65, "tradingagent": 0.40}
     DEFAULT_H = {"lynx_vnpy": 0.0, "mindlynx": 0.15, "tradingagent": 0.30}
     PROBABILITY_K = 1.0  # sigmoid 陡度，v3.0 适配 [-3,+3] 宽范围
 
     LY_VETO_THRESHOLD = 0.30  # |P_ly - 0.50| > 0.30 触发数学否决权
 
+    # Per-stock ML alpha overrides (static fallback, updated monthly by calibrate_alphas.py)
+    STOCK_ALPHA_OVERRIDE: dict[str, float] = {
+        "000592": 0.8,
+        "300652": 0.3,
+        "600372": 0.8,
+        "603189": 0.8,
+        "603557": 0.3,
+        "605368": 0.4,
+        "688202": 0.3,
+    }
+
+    # Dynamic alpha: cache for DB query results (TTL=3600s=1h)
+    _alpha_cache: dict[str, tuple[float | None, float]] = {}  # stock_code -> (alpha, cached_at)
+
     @classmethod
-    def alpha(cls, system: str) -> float:
-        return cls.BASE_ALPHA.get(system, 0.50)
+    def _alpha_from_db(cls, stock_code: str) -> float | None:
+        """Query backtest_summaries for per-stock sentiment accuracy, return alpha.
+
+        Uses DB from ML subsystem (stock_analysis.db). Falls back silently.
+        Cache TTL=3600s to avoid repeated queries during fusion loops.
+        """
+        # Check cache
+        now = time.time()
+        cached = cls._alpha_cache.get(stock_code)
+        if cached and (now - cached[1]) < 3600:
+            return cached[0]
+
+        try:
+            import sqlite3
+            from pathlib import Path
+
+            db_path = Path(__file__).resolve().parent.parent / "systems" / "MindLynx-Aistock" / "data" / "stock_analysis.db"
+            if not db_path.exists():
+                return None
+
+            conn = sqlite3.connect(str(db_path))
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT sentiment_direction_accuracy_pct
+                FROM backtest_summaries
+                WHERE scope = 'stock' AND code = ? AND eval_window_days = 5
+                  AND sentiment_direction_accuracy_pct IS NOT NULL
+                ORDER BY computed_at DESC
+                LIMIT 1
+            """, (stock_code,))
+            row = cur.fetchone()
+            conn.close()
+
+            if row and row[0] is not None:
+                acc = float(row[0])
+                # Map accuracy to alpha (same logic as calibrate_alphas.py)
+                if acc >= 65.0:
+                    alpha = 0.80
+                elif acc >= 50.0:
+                    alpha = 0.65
+                elif acc >= 25.0:
+                    alpha = 0.40
+                else:
+                    alpha = 0.30
+                cls._alpha_cache[stock_code] = (alpha, now)
+                return alpha
+        except Exception as exc:
+            logger.debug(f"[Reliability] DB alpha query failed for {stock_code}: {exc}")
+
+        cls._alpha_cache[stock_code] = (None, now)  # cache negative
+        return None
+
+    @classmethod
+    def alpha(cls, system: str, stock_code: str | None = None) -> float:
+        """Get base reliability for a system, optionally overridden per stock.
+
+        Resolution order (mindlynx only):
+          1. DB query (dynamic, from backtest_summaries)
+          2. STOCK_ALPHA_OVERRIDE (static fallback)
+          3. BASE_ALPHA[system] (default)
+        """
+        base = cls.BASE_ALPHA.get(system, 0.50)
+        if system == "mindlynx" and stock_code is not None:
+            db_alpha = cls._alpha_from_db(stock_code)
+            if db_alpha is not None:
+                return db_alpha
+            return cls.STOCK_ALPHA_OVERRIDE.get(stock_code, base)
+        return base
 
     @classmethod
     def default_h(cls, system: str) -> float:

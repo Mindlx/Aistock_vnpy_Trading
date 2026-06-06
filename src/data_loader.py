@@ -348,6 +348,22 @@ class MindLynxDataLoader:
                 battle = dashboard.get("battle_plan", {})
                 sniper = battle.get("sniper_points", {}) if battle else {}
 
+                # Compute factor_baseline from context_snapshot factor_zscores
+                factor_baseline: float | None = None
+                try:
+                    ctx_parsed = json.loads(ctx) if isinstance(ctx, str) else {}
+                    if isinstance(ctx_parsed, dict):
+                        fz = ctx_parsed.get("factor_zscores", {}) or {}
+                        stock_z = fz.get(code, {}) if isinstance(fz, dict) else {}
+                        if stock_z and isinstance(stock_z, dict):
+                            z_vals = [v for v in stock_z.values() if isinstance(v, (int, float))]
+                            if z_vals:
+                                avg_z = sum(z_vals) / len(z_vals)
+                                # Map z-score [-3,+3] to [0,100]
+                                factor_baseline = round(50.0 + avg_z * 50.0 / 3.0, 1)
+                except (json.JSONDecodeError, Exception):
+                    pass
+
                 signals[code] = {
                     "code": code,
                     "name": row["name"] or "",
@@ -361,6 +377,8 @@ class MindLynxDataLoader:
                     "ideal_buy": row["ideal_buy"],
                     "stop_loss": row["stop_loss"],
                     "take_profit": row["take_profit"],
+                    # Factor baseline for hallucination detection
+                    "factor_baseline": factor_baseline,
                     # Dashboard-extracted fields
                     "ml_trend_score": ts.get("trend_score"),
                     "ml_support_level": pp.get("support_level"),
@@ -929,6 +947,7 @@ class UnifiedDataLoader:
                     "mindlynx_valid": bool(mindlynx_advice),
                     "mindlynx_trend": mindlynx.get("trend", ""),
                     "mindlynx_sentiment": mindlynx.get("sentiment_score"),
+                    "mindlynx_factor_baseline": mindlynx.get("factor_baseline"),
                     "mindlynx_operation": mindlynx.get("operation_advice", mindlynx_advice),
                     "mindlynx_analysis": mindlynx.get("analysis_summary", ""),
                     "mindlynx_ideal_buy": mindlynx.get("ideal_buy"),

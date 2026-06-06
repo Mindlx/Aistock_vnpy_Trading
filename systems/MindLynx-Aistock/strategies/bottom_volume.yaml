@@ -3,7 +3,7 @@
 
 name: bottom_volume
 display_name: 底部放量
-description: 检测长期下跌后底部放量信号，潜在趋势反转信号。
+description: 基于威科夫量价分析（Wyckoff Method）的底部放量反转策略，检测吸筹阶段信号。
 category: reversal
 core_rules: [2, 5]
 required_tools:
@@ -14,7 +14,7 @@ default_priority: 60
 market_regimes: [trending_down]
 
 instructions: |
-  **底部放量（Bottom Volume Surge Strategy）**
+  **底部放量 — 基于威科夫吸筹模型（Wyckoff Accumulation）**
 
   反转判定标准：
 

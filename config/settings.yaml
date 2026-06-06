@@ -17,6 +17,16 @@ weights:
 # dual:     同时输出两种结果供 A/B 对比
 fusion_mode: "dual"
 
+# sentiment_score 方向映射阈值（2026-06-07 校准）
+# bull: score >= 此值 → 看多
+# bear: score <= 此值 → 看空
+# score 在 (bear, bull) 之间 → flat（中性，额外降权 0.5）
+# 52/49: 74.6% acc, 98% coverage (balanced 73.2)
+# 60/40: 73.5% acc, 57% coverage (balanced 42.0)
+sentiment_threshold:
+  bull: 52
+  bear: 49
+
 reliability:
   # 各系统基础可靠度（由系统本质决定，非日常调优参数）
   base_alpha:

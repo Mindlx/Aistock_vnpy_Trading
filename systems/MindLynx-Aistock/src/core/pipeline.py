@@ -1430,6 +1430,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     initial_context["stock_name"] = resolved_stock_name
                     # P2+P3: inject factor_profile and regime_prompt into context_snapshot
                     initial_context["factor_profile"] = self._factor_profiles.get(code, "")
+                    initial_context["factor_zscores"] = self._factor_zscores.get(code, {})
                     initial_context["regime_prompt"] = getattr(self, "_regime_prompt", "")
                     self.db.save_analysis_history(
                         result=result,

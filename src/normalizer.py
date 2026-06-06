@@ -229,6 +229,10 @@ class SignalNormalizer:
         - "买入" → base=3.0 (v3.1), 评分越高越强
         - "卖出" → base=-2.06 (v3.1), 评分越低越弱
 
+        Flat 降权 (2026-06-07):
+        sentiment_score 在 41-59 (flat zone) 时，LLM 方向信号弱(1.8% acc)。
+        整体系数乘 0.5 降低其对融合得分的影响。
+
         参数:
             operation_advice: 操作建议
             sentiment_score: LLM 评分 0-100
@@ -241,9 +245,39 @@ class SignalNormalizer:
         factor = cls.ML_SENTIMENT_FACTOR.get(operation_advice, 0.3)
         modulation = factor * (sentiment_score - 50.0) / 50.0
         score = base + modulation
+        # Flat zone 降权: score 41-59 时 LLM 方向信号弱
+        if 41 <= sentiment_score <= 59:
+            score *= 0.5
         return max(-3.0, min(3.0, score))
 
     # ────────── at: 离散评级归一化 ──────────
+
+    @classmethod
+    def normalize_mindlynx_score(cls, sentiment_score: int, threshold_bull: int = 52, threshold_bear: int = 49) -> float:
+        """
+        sentiment_score 直接映射到 L7（不依赖 operation_advice 文本）。
+
+        Backtest 验证 (2026-06-07, 785 samples):
+          52/49 threshold: 74.6% accuracy, 98% coverage (balanced 73.2)
+          60/40: 73.5% accuracy, 57% coverage (balanced 42.0)
+
+        Flat zone: score 在 (threshold_bear, threshold_bull) 之间 → 0.0
+        Score >= threshold_bull → +1.5; <= threshold_bear → -1.5
+
+        Args:
+            sentiment_score: LLM score 0-100
+            threshold_bull: score >= this → bullish (default 52)
+            threshold_bear: score <= this → bearish (default 49)
+
+        返回: L7 得分 (-3 ~ +3)
+        """
+        if sentiment_score >= threshold_bull:
+            base = 1.5
+        elif sentiment_score <= threshold_bear:
+            base = -1.5
+        else:
+            base = 0.0
+        return base
 
     @classmethod
     def normalize_tradingagent(cls, rating: str, debate_state: Optional[Dict[str, Any]] = None) -> float:

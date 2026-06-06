@@ -67,6 +67,11 @@ class FusionEngine:
         # 系统名称列表（用于权重迭代）
         self.systems = ["lynx_vnpy", "mindlynx", "tradingagent"]
 
+        # sentiment_score 方向阈值（从 config 读取，默认 52/49）
+        st = self.config.get("sentiment_threshold", {})
+        self.sentiment_threshold_bull = st.get("bull", 52)
+        self.sentiment_threshold_bear = st.get("bear", 49)
+
     # ──────── 决策映射（7 级 L7 空间，从 normalizer 导入） ────────
 
     def _get_final_decision(self, score: float, disagreement: bool = False) -> Dict[str, Any]:
@@ -214,6 +219,7 @@ class FusionEngine:
         mindlynx_score: int = 50,
         mindlynx_trend: Optional[str] = None,
         mindlynx_valid: bool = True,
+        mindlynx_factor_baseline: Optional[float] = None,
         tradingagent_rating: str = "Hold",
         tradingagent_valid: bool = True,
         ta_is_stale: bool = False,
@@ -237,6 +243,13 @@ class FusionEngine:
         mindlynx_normalized = self.normalizer.normalize_mindlynx(
             mindlynx_advice, mindlynx_score, mindlynx_trend
         )
+        # HP3: sentiment_score 独立信号路径（不依赖 op_advice）
+        mindlynx_score_normalized = self.normalizer.normalize_mindlynx_score(
+            mindlynx_score,
+            threshold_bull=self.sentiment_threshold_bull,
+            threshold_bear=self.sentiment_threshold_bear,
+        )
+        mindlynx_normalized = (mindlynx_normalized + mindlynx_score_normalized) / 2.0
         tradingagent_normalized = self.normalizer.normalize_tradingagent(
             tradingagent_rating, debate_state=ta_debate_state
         )
@@ -249,6 +262,7 @@ class FusionEngine:
         h_ly = HallucinationDetector.detect_ly()
         h_ml = HallucinationDetector.detect_ml(
             sentiment_score=mindlynx_score,
+            factor_baseline=mindlynx_factor_baseline,
             operation_advice=mindlynx_advice,
             trend_prediction=mindlynx_trend,
         )
@@ -263,7 +277,7 @@ class FusionEngine:
 
         # Step 4: 有效权重
         w_ly = ReliabilityConfig.alpha("lynx_vnpy") * c_ly * (1.0 - h_ly)
-        w_ml = ReliabilityConfig.alpha("mindlynx") * c_ml * (1.0 - h_ml)
+        w_ml = ReliabilityConfig.alpha("mindlynx", stock_code=stock_code) * c_ml * (1.0 - h_ml)
         w_at = ReliabilityConfig.alpha("tradingagent") * c_at * (1.0 - h_at)
 
         # ⚡ TA 数据过期处理：降低有效权重（与 linear 模式一致）
@@ -367,6 +381,7 @@ class FusionEngine:
         mindlynx_score: int = 50,
         mindlynx_trend: Optional[str] = None,
         mindlynx_valid: bool = True,
+        mindlynx_factor_baseline: Optional[float] = None,
         tradingagent_rating: str = "Hold",
         tradingagent_valid: bool = True,
         ta_is_stale: bool = False,
@@ -391,6 +406,7 @@ class FusionEngine:
                 mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
                 mindlynx_trend=mindlynx_trend,
                 mindlynx_valid=mindlynx_valid,
+                mindlynx_factor_baseline=mindlynx_factor_baseline,
                 tradingagent_rating=tradingagent_rating,
                 tradingagent_valid=tradingagent_valid,
                 ta_debate_state=ta_debate_state,
@@ -414,6 +430,7 @@ class FusionEngine:
                 mindlynx_advice=mindlynx_advice, mindlynx_score=mindlynx_score,
                 mindlynx_trend=mindlynx_trend,
                 mindlynx_valid=mindlynx_valid,
+                mindlynx_factor_baseline=mindlynx_factor_baseline,
                 tradingagent_rating=tradingagent_rating,
                 tradingagent_valid=tradingagent_valid,
                 ta_debate_state=ta_debate_state,
@@ -486,6 +503,13 @@ class FusionEngine:
         mindlynx_normalized = self.normalizer.normalize_mindlynx(
             mindlynx_advice, mindlynx_score, mindlynx_trend
         )
+        # HP3: sentiment_score 独立信号路径（不依赖 op_advice）
+        mindlynx_score_normalized = self.normalizer.normalize_mindlynx_score(
+            mindlynx_score,
+            threshold_bull=self.sentiment_threshold_bull,
+            threshold_bear=self.sentiment_threshold_bear,
+        )
+        mindlynx_normalized = (mindlynx_normalized + mindlynx_score_normalized) / 2.0
         tradingagent_normalized = self.normalizer.normalize_tradingagent(
             tradingagent_rating, debate_state=ta_debate_state
         )
