@@ -671,6 +671,120 @@ def _bar(pct: float, width: int = 20) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+# ── 模拟交易 ─────────────────────────────────────────
+
+def cmd_simulate() -> None:
+    """基于融合信号模拟交易，输出收益曲线和风险指标。"""
+    conn = _get_db()
+
+    # 读取所有已匹配的预测，按日期排序
+    rows = conn.execute("""
+        SELECT date, stock_code, stock_name,
+               fusion_dir, next_pct_chg, next_close, fusion_correct
+        FROM bt_predictions
+        WHERE fusion_dir IS NOT NULL AND next_pct_chg IS NOT NULL
+        ORDER BY date ASC, stock_code ASC
+    """).fetchall()
+
+    if not rows:
+        print("❌ 没有可用的匹配数据，请先运行 backtest.py check")
+        conn.close()
+        return
+
+    # 按日期分组，每天的投资组合
+    from collections import OrderedDict
+    daily_portfolios: dict[str, list] = OrderedDict()
+    for r in rows:
+        daily_portfolios.setdefault(r["date"], []).append(r)
+
+    INITIAL_CAPITAL = 100_000.0
+    cash = INITIAL_CAPITAL
+    position_value = 0.0
+    trade_count = 0
+    win_count = 0
+    loss_count = 0
+    nav_curve: list[tuple[str, float]] = []
+    daily_returns: list[float] = []
+
+    for date, stocks in daily_portfolios.items():
+        day_pnl = 0.0
+        day_trades = 0
+        for r in stocks:
+            if r["fusion_dir"] == 1:  # 看多 → 买入
+                ret = (r["next_pct_chg"] or 0) / 100.0
+                # 假设等权重分配资金：每只股票分配 cash / N 的资金
+                capital_per_stock = cash / len(stocks)
+                pnl = capital_per_stock * ret
+                day_pnl += pnl
+                trade_count += 1
+                day_trades += 1
+                if ret > 0:
+                    win_count += 1
+                elif ret < 0:
+                    loss_count += 1
+
+        total_value = cash + day_pnl
+        daily_ret = (total_value - cash - position_value) / (cash + position_value) if (cash + position_value) > 0 else 0
+        cash = total_value
+        nav_curve.append((date, cash))
+
+    conn.close()
+
+    total_value = cash if nav_curve else INITIAL_CAPITAL
+    total_return = (total_value - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
+    win_rate = win_count / (win_count + loss_count) * 100 if (win_count + loss_count) > 0 else 0
+
+    # 计算夏普比率 (假设无风险利率 0)
+    daily_rets = []
+    for i in range(1, len(nav_curve)):
+        prev_nav = nav_curve[i - 1][1]
+        curr_nav = nav_curve[i][1]
+        if prev_nav > 0:
+            daily_rets.append((curr_nav - prev_nav) / prev_nav)
+
+    import statistics, math
+    avg_ret = statistics.mean(daily_rets) if daily_rets else 0
+    std_ret = statistics.stdev(daily_rets) if len(daily_rets) > 1 else 1
+    sharpe = (avg_ret / std_ret) * math.sqrt(252) if std_ret > 0 else 0
+
+    # 最大回撤
+    peak = INITIAL_CAPITAL
+    max_dd = 0.0
+    for _, nav in nav_curve:
+        if nav > peak:
+            peak = nav
+        dd = (peak - nav) / peak * 100
+        max_dd = max(max_dd, dd)
+
+    # 输出
+    print(f"\n{'='*55}")
+    print(f"  融合系统模拟交易报告")
+    print(f"{'='*55}")
+    print(f"\n  📊 基本参数")
+    print(f"     初始资金: ¥{INITIAL_CAPITAL:,.0f}")
+    print(f"     最终净值: ¥{total_value:,.0f}")
+    print(f"     总收益率: {total_return:+.2f}%")
+    print(f"     交易次数: {trade_count}")
+    print(f"     回测天数: {len(nav_curve)} 天")
+    print(f"\n  📈 绩效指标")
+    print(f"     年化夏普比率: {sharpe:.2f}")
+    print(f"     最大回撤: {max_dd:.2f}%")
+    print(f"     胜率: {win_rate:.1f}% ({win_count}/{win_count + loss_count})")
+    print(f"     日均收益: {avg_ret*100:.3f}%")
+    print(f"     收益波动率: {std_ret*100:.3f}%")
+
+    print(f"\n  📅 净值曲线 (每日)")
+    for date, nav in nav_curve:
+        pct = (nav - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
+        bar_len = max(1, int(abs(pct)))
+        bar = "█" * min(bar_len, 30) if pct >= 0 else "░" * min(bar_len, 30)
+        print(f"     {date}  ¥{nav:>8,.0f}  {pct:+.1f}%  {bar}")
+
+    print(f"\n{'='*55}")
+    print(f"  模拟交易完成")
+    print(f"{'='*55}")
+
+
 # ── 历史数据回填 ─────────────────────────────────────────
 
 def cmd_backfill() -> int:
@@ -733,6 +847,7 @@ def main() -> None:
     p_report.add_argument("--detail", action="store_true",
                           help="显示个股明细")
     p_backfill = sub.add_parser("backfill", help="扫描历史CSV回填数据库(首次部署用)")
+    p_simulate = sub.add_parser("simulate", help="模拟交易：基于融合信号计算累计收益曲线")
 
     args = parser.parse_args()
 
@@ -748,6 +863,8 @@ def main() -> None:
         cmd_report(detail=args.detail)
     elif args.command == "backfill":
         cmd_backfill()
+    elif args.command == "simulate":
+        cmd_simulate()
 
 
 if __name__ == "__main__":
