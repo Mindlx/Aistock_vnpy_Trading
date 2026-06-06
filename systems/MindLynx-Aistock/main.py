@@ -467,6 +467,44 @@ def _score_weekend_importance(title: str, snippet: str = "") -> int:
     return min(score, 10)
 
 
+def _push_highlights(
+    notifier: Any,
+    highlights: list[dict],
+    *,
+    title_text: str,
+    footer_text: str,
+    dedup_key_prefix: str,
+    log_label: str,
+    title_max: int = 45,
+) -> None:
+    """通用推送函数：将 highlights 按股票分组后推送。"""
+    import hashlib
+    import re as _re
+
+    lines = [f"📰 {title_text}"]
+    grouped: dict[str, dict] = {}
+    for h in sorted(highlights, key=lambda x: -x["importance"]):
+        code = h.get("code", "")
+        title = _re.sub(r"<[^>]+>", "", h.get("title", ""))[:title_max]
+        sentiment = _score_sentiment(title, h.get("snippet", ""))
+        if code not in grouped:
+            imp = h.get("importance", 0)
+            imp_icon = get_importance_emoji(imp)
+            name = _STOCK_NAME_MAP.get(code, code)
+            grouped[code] = {"icon": imp_icon, "name": name, "items": [], "max_importance": imp}
+        grouped[code]["items"].append(f"{title}-{sentiment}")
+
+    for code, entry in grouped.items():
+        summaries = " | ".join(entry["items"])
+        lines.append(f"{entry['icon']} {entry['name']}({code}) | {summaries}")
+    lines.append(f"📊 {len(highlights)}条 | {footer_text}")
+
+    content = "\n".join(lines)
+    content_hash = hashlib.sha256(content.encode()).hexdigest()
+    notifier.send(content, route_type="alert", dedup_key=f"{dedup_key_prefix}:{content_hash}")
+    logger.info("%s: 已推送 %d 条", log_label, len(highlights))
+
+
 def _push_weekend_highlights(config: Config, highlights: list[dict], mode_label: str, is_refresh: bool = False) -> None:
     """Push high-importance weekend events via notification alert channels.
 
@@ -502,34 +540,14 @@ def _push_weekend_highlights(config: Config, highlights: list[dict], mode_label:
             except Exception as e:
                 logger.debug("周末情报补量去重查询失败，按原始列表推送: %s", e)
 
-        # Build mobile-friendly compact digest, grouped by stock
-        lines = [f"📰 周末要闻 | {mode_label}"]
-        import re as _re
-
-        # Group by code: merge summaries per stock
-        grouped: dict[str, dict] = {}
-        for h in sorted(highlights, key=lambda x: -x["importance"]):
-            code = h.get("code", "")
-            title = _re.sub(r"<[^>]+>", "", h.get("title", ""))[:50]
-            sentiment = _score_sentiment(title, h.get("snippet", ""))
-            if code not in grouped:
-                imp = h.get("importance", 0)
-                imp_icon = get_importance_emoji(imp)
-                name = _STOCK_NAME_MAP.get(code, code)
-                grouped[code] = {"icon": imp_icon, "name": name, "items": [], "max_importance": imp}
-            grouped[code]["items"].append(f"{title}-{sentiment}")
-            grouped[code]["max_importance"] = max(grouped[code]["max_importance"], h.get("importance", 0))
-
-        for code, entry in grouped.items():
-            summaries = " | ".join(entry["items"])
-            lines.append(f"{entry['icon']} {entry['name']}({code}) | {summaries}")
-        lines.append(f"📊 {len(highlights)}条 | 完整分析下个交易日推送")
-
-        content = "\n".join(lines)
-        import hashlib
-        content_hash = hashlib.sha256(content.encode()).hexdigest()
-        notifier.send(content, route_type="alert", dedup_key=f"weekend:{content_hash}")
-        logger.info("周末情报: 已推送 %d 条重要事件", len(highlights))
+        _push_highlights(
+            notifier, highlights,
+            title_text=f"周末要闻 | {mode_label}",
+            footer_text="完整分析下个交易日推送",
+            dedup_key_prefix="weekend",
+            log_label="周末情报",
+            title_max=50,
+        )
     except Exception as e:
         logger.warning("周末情报: 推送失败: %s", e)
 
@@ -714,31 +732,13 @@ def _push_daily_highlights(config: Config, highlights: list[dict], label: str) -
         if not notifier.is_available():
             return
 
-        lines = [f"📰 每日要闻 | {label}"]
-        import re as _re
-        grouped: dict[str, dict] = {}
-        for h in sorted(highlights, key=lambda x: -x["importance"]):
-            code = h.get("code", "")
-            title = _re.sub(r"<[^>]+>", "", h.get("title", ""))[:45]
-            sentiment = _score_sentiment(title, h.get("snippet", ""))
-            if code not in grouped:
-                imp = h.get("importance", 0)
-                imp_icon = get_importance_emoji(imp)
-                name = _STOCK_NAME_MAP.get(code, code)
-                grouped[code] = {"icon": imp_icon, "name": name, "items": [], "max_importance": imp}
-            grouped[code]["items"].append(f"{title}-{sentiment}")
-            grouped[code]["max_importance"] = max(grouped[code]["max_importance"], h.get("importance", 0))
-
-        for code, entry in grouped.items():
-            summaries = " | ".join(entry["items"])
-            lines.append(f"{entry['icon']} {entry['name']}({code}) | {summaries}")
-        lines.append(f"📊 {len(highlights)}条 | 下个交易时段分析将自动注入")
-
-        import hashlib
-        content = "\n".join(lines)
-        content_hash = hashlib.sha256(content.encode()).hexdigest()
-        notifier.send(content, route_type="alert", dedup_key=f"daily:{label}:{content_hash}")
-        logger.info("每日情报 (%s): 已推送 %d 条", label, len(highlights))
+        _push_highlights(
+            notifier, highlights,
+            title_text=f"每日要闻 | {label}",
+            footer_text="下个交易时段分析将自动注入",
+            dedup_key_prefix=f"daily:{label}",
+            log_label=f"每日情报 ({label})",
+        )
     except Exception as e:
         logger.warning("每日情报 (%s): 推送失败: %s", label, e)
 

@@ -456,15 +456,16 @@ def main():
 
     # 企业微信推送
     if not args.dry_run and config.get("wecom", {}).get("enabled", False):
-        wecom_webhook = config["wecom"].get("webhook_url", "")
+        # 优先读取环境变量（项目根 .env），兼容旧版 yaml 配置
+        wecom_webhook = os.getenv("WECOM_WEBHOOK_URL") or config["wecom"].get("webhook_url", "")
         if wecom_webhook and wecom_webhook != "YOUR_KEY_HERE":
             notifier = WeComNotifier(wecom_webhook, enabled=True)
 
             # 收集可选功能附加推送（零侵入，失败不影响主流程）
             extra_sections = []
+            fc = config.get("features", {})
             try:
-                from src.feature_bridge import run_dragon_tiger, run_xueqiu_sentiment
-                fc = config.get("features", {})
+                from src.feature_bridge import run_dragon_tiger
 
                 if fc.get("dragon_tiger", {}).get("enabled"):
                     codes = [s["code"] for s in stock_pool]
@@ -473,14 +474,21 @@ def main():
                         extra_sections.append(f"🐉 龙虎榜 ({today})\n{dt}")
 
                 if fc.get("xueqiu", {}).get("enabled"):
-                    codes = [s["code"] for s in stock_pool]
-                    xq = run_xueqiu_sentiment(codes)
-                    if xq:
-                        extra_sections.append(xq)
+                    extra_sections.append("💰 **东方财富自选股评级报告已生成** 📎 完整报告见附件PDF")
             except Exception:
                 pass
 
             notifier.push_daily_decision(results, today, extra_sections=extra_sections or None)
+
+            # ── 东方财富评级 PDF 报告（独立推送，直接在 MindLynx venv 中执行）──
+            if fc.get("xueqiu", {}).get("enabled") and not args.dry_run:
+                _root = Path(__file__).resolve().parent.parent
+                _venv = _root / "systems/MindLynx-Aistock/.venv/bin/python"
+                _script = _root / "systems/MindLynx-Aistock/scripts/generate_rating_report.py"
+                try:
+                    subprocess.run([str(_venv), str(_script)], timeout=300)
+                except Exception as e:
+                    print(f"  ⚠️ 东方财富评级 PDF 推送异常: {e}")
         else:
             print("\n⚠️  企业微信 webhook 未配置，请先更新 config/settings.yaml")
     else:

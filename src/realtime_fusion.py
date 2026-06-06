@@ -16,7 +16,7 @@ import math
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -97,8 +97,10 @@ class RealtimeFusion:
                 import yaml
                 cfg = yaml.safe_load(open("config/settings.yaml"))
                 wc = cfg.get("wecom", {})
+                # 优先读取环境变量（项目根 .env），兼容旧版 yaml 配置
+                webhook_url = os.getenv("WECOM_WEBHOOK_URL") or wc.get("webhook_url", "")
                 self._notifier = WeComNotifier(
-                    wc.get("webhook_url", ""),
+                    webhook_url,
                     enabled=wc.get("enabled", False),
                 )
             except Exception:
@@ -215,7 +217,7 @@ class RealtimeFusion:
         if not changes:
             return
         now = datetime.now().strftime("%H:%M")
-        lines = [f"🛟{now}融合速报", ""]
+        lines = [f"🛟 {now} 融合速报", ""]
         for c in changes:
             name = self._stock_names.get(c['code'], c['code'])
             signal = c['signal']
@@ -235,10 +237,42 @@ class RealtimeFusion:
             self.push_changes(changes)
         return changes
 
+    @staticmethod
+    def _is_trading_day(d: datetime | None = None) -> bool:
+        """检查是否为交易日（跳过周六日）。"""
+        if d is None:
+            d = datetime.now()
+        return d.isoweekday() <= 5  # 1=Mon ... 5=Fri
+
+    @staticmethod
+    def _seconds_until_next_trading_day(resume_hour: int = 9, resume_min: int = 33) -> float:
+        """计算到下一个交易日 resume_hour:resume_min 的秒数。"""
+        now = datetime.now()
+        current_weekday = now.isoweekday()
+        # 周六 → +2 天到周一; 周日 → +1 天到周一
+        days_ahead = {6: 2, 7: 1}.get(current_weekday, 0)
+        if days_ahead > 0 or (current_weekday == 5 and now.hour >= resume_hour):
+            # 周五收盘后 → +3 天到下周一
+            if current_weekday == 5:
+                days_ahead = 3
+            next_day = (now + timedelta(days=days_ahead)).replace(
+                hour=resume_hour, minute=resume_min, second=0, microsecond=0,
+            )
+            return (next_day - now).total_seconds()
+        return 0.0
+
     def run_daemon(self, interval: int = 300):
-        """守护模式"""
+        """守护模式 — 仅在交易日运行，周末自动跳过。"""
         print(f"[realtime-fusion] daemon started, interval={interval}s", flush=True)
         while True:
+            # 非交易日跳过
+            if not self._is_trading_day():
+                wait = self._seconds_until_next_trading_day()
+                next_label = (datetime.now() + timedelta(seconds=wait)).strftime("%a %m-%d %H:%M")
+                print(f"[realtime-fusion] 非交易日，休眠 {wait/3600:.1f}h 到 {next_label}", flush=True)
+                time.sleep(wait)
+                continue
+
             try:
                 changes = self.run_once()
                 if changes:

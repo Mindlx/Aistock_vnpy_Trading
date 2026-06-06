@@ -682,7 +682,7 @@ class NotificationService(
 
         # 标题
         report_lines = [
-            f"👾{datetime.now().strftime('%H:%M')}分析报告",
+            f"👾 {datetime.now().strftime('%H:%M')} 分析报告",
             "",
             f"> {labels['analyzed_prefix']} **{len(results)}** {labels['stock_unit']} ｜ "
             f"{labels['generated_at_label']}：{datetime.now().strftime('%H:%M:%S')}",
@@ -1019,7 +1019,7 @@ class NotificationService(
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
 
         report_lines = [
-            f"👾{datetime.now().strftime('%H:%M')}决策仪表盘",
+            f"👾 {datetime.now().strftime('%H:%M')} 决策仪表盘",
             "",
             f"> {labels['analyzed_prefix']} **{len(results)}** {labels['stock_unit']} ｜ "
             f"🟢{labels['buy_label']}:{buy_count} 🟡{labels['watch_label']}:{hold_count} 🔴{labels['sell_label']}:{sell_count}",
@@ -1407,7 +1407,7 @@ class NotificationService(
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
 
         lines = [
-            f"👾{datetime.now().strftime('%H:%M')}盘中报告",
+            f"👾 {datetime.now().strftime('%H:%M')} 盘中报告",
             f"共{len(results)}｜🟢买{buy_count} 🟡持{hold_count} 🔴卖{sell_count}",
             "",
         ]
@@ -1446,6 +1446,9 @@ class NotificationService(
                     # market_snapshot中实时量比不可用时，fallback到volume_ratio_5d
                     if vr_raw in (0, None, "", "N/A"):
                         vr_raw = getattr(result, "volume_ratio_5d", 0)
+                    import logging; logging.getLogger(__name__).debug(
+                        f"[vol_ratio] {getattr(result,'code','?')} snapshot={snapshot.get('volume_ratio','?')} "
+                        f"vr5d={getattr(result,'volume_ratio_5d','?')} final={vr_raw}")
                     try:
                         vr = float(vr_raw) if vr_raw not in (None, "", "N/A") else 0
                     except (ValueError, TypeError):
@@ -1583,7 +1586,7 @@ class NotificationService(
         avg_score = sum(r.sentiment_score for r in results) / len(results) if results else 0
 
         lines = [
-            f"👾{datetime.now().strftime('%H:%M')}分析报告",
+            f"👾 {datetime.now().strftime('%H:%M')} 分析报告",
             "",
             f"> {labels['analyzed_prefix']} **{len(results)}** {labels['stock_unit_compact']} ｜ "
             f"🟢{labels['buy_label']}:{buy_count} 🟡{labels['watch_label']}:{hold_count} 🔴{labels['sell_label']}:{sell_count} ｜ "
@@ -1680,7 +1683,7 @@ class NotificationService(
         sell_count = sum(1 for r in results if getattr(r, "decision_type", "") == "sell")
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
         lines = [
-            f"👾{datetime.now().strftime('%H:%M')}决策简报",
+            f"👾 {datetime.now().strftime('%H:%M')} 决策简报",
             "",
             f"> {len(results)} {labels['stock_unit_compact']} ｜ 🟢{buy_count} 🟡{hold_count} 🔴{sell_count}",
             "",

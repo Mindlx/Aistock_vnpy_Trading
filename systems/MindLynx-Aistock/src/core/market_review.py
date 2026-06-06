@@ -79,7 +79,7 @@ def _extract_summary_text(content: str, pdf_ok: bool = False, session_label: str
 
     # Build header: 🎯HH:MM大盘复盘（午盘/全天）
     now_str = datetime.now().strftime("%H:%M")
-    header = f"🎯{now_str}大盘复盘（{session_label}）"
+    header = f"🎯 {now_str} 大盘复盘（{session_label}）"
 
     # Overview paragraph — 从 一、盘面总览 第一段提取
     overview_para = _first_para(sections.get("一、盘面总览", []))
@@ -222,7 +222,7 @@ def run_market_review(
         date_str = datetime.now().strftime("%Y%m%d")
         date_str_display = datetime.now().strftime("%Y-%m-%d")
         review_text['root_title'] = f"# 🎯 {date_str_display} 大盘复盘（{session_label}）"
-        review_text['push_title'] = f"👾{datetime.now().strftime('%H:%M')}大盘复盘"
+        review_text['push_title'] = f"👾 {datetime.now().strftime('%H:%M')} 大盘复盘"
 
         # 午盘复盘：明日交易计划 → 午后交易计划
         if review_report and session_label == "午盘":

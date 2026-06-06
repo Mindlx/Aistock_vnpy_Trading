@@ -43,8 +43,10 @@ schedule:
   timezone: "Asia/Shanghai"
 
 wecom:
-  webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=2eb957ab-bc5b-4f99-8db9-b0fcb20ad44f"
-  enabled: true             # 企业微信推送已启用
+  # webhook_url 已迁移到项目根 .env（环境变量 WECOM_WEBHOOK_URL）
+  # 代码中优先读取 env var，此处留空作为后备/占位
+  webhook_url: ""
+  enabled: true             # 企业微信推送已启用（需同时配置 .env 中的 WECOM_WEBHOOK_URL）
 
 data_paths:
   lynx_root: "systems/lynx_vnpy"                     # lynx_vnpy 项目根目录

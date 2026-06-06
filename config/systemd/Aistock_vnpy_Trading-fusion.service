@@ -7,6 +7,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+EnvironmentFile=/home/bluekuma/workspace/Aistock_vnpy_Trading/.env
 ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/run_daily.py --run-ta
 StandardOutput=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/fusion-cron.log
 StandardError=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/fusion-cron.log

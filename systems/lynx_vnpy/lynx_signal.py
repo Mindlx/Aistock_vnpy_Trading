@@ -6,17 +6,25 @@
     python lynx_signal.py --schedule --time 15:30
 """
 import argparse
-import os
 import json
+import os
+import sys
+import time
 import warnings
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
 import requests
-import time
-from datetime import datetime, timedelta
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-import joblib
+
+# 确保项目根目录在路径中（WeComNotifier 所需）
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 warnings.filterwarnings("ignore")
 
@@ -307,13 +315,23 @@ def _l7_emoji(score: float) -> str:
 
 # ===== 5. 推送 =====
 def push_wecom(signals: list[dict]):
-    """推送到企业微信"""
+    """推送到企业微信（使用统一的 WeComNotifier）。"""
     if not WECOM_WEBHOOK:
         print("⚠️  未配置 WECOM_WEBHOOK_URL，跳过推送")
         return
 
+    # 优先使用统一的 WeComNotifier，fallback 到独立 requests.post
+    try:
+        from src.wecom_notifier import WeComNotifier
+        _send = lambda t: WeComNotifier(WECOM_WEBHOOK, enabled=True).send_markdown(t)
+    except ImportError:
+        import requests
+        _send = lambda t: requests.post(WECOM_WEBHOOK, json={
+            "msgtype": "markdown", "markdown": {"content": t},
+        }, timeout=10)
+
     now = datetime.now()
-    lines = [f"🧬{now.strftime('%H:%M')}量化信号"]
+    lines = [f"🧬 {now.strftime('%H:%M')} ly量化信号"]
     for s in signals:
         _sig = s['signal']
         _emoji = _sig.split()[0] if ' ' in _sig else '⚪'
@@ -337,14 +355,11 @@ def push_wecom(signals: list[dict]):
     lines.append("> 模型: RandomForest")
     text = "\n".join(lines)
 
-    try:
-        resp = requests.post(WECOM_WEBHOOK, json={
-            "msgtype": "markdown",
-            "markdown": {"content": text},
-        }, timeout=10)
-        print(f"  ✅ 推送结果: {resp.json()}")
-    except Exception as e:
-        print(f"  ❌ 推送失败: {e}")
+    result = _send(text)
+    if result is not None and (isinstance(result, dict) and result.get("errcode") == 0 or not isinstance(result, dict)):
+        print("  ✅ 推送成功")
+    else:
+        print("  ❌ 推送失败")
 
 # ===== 6. 主流程 =====
 def run():
