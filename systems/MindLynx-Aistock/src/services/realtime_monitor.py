@@ -85,7 +85,7 @@ class StockIntradayState:
     score: int = 0
 
     # --- 去重 ---
-    last_atr_alert_time: float = 0.0
+    last_atr_alert_times: dict[float, float] = field(default_factory=dict)
     last_cross_alert_time_per_ma: dict[str, float] = field(
         default_factory=lambda: {
             "ma5": 0.0,
@@ -765,10 +765,6 @@ class RealtimeMonitorService:
         if state.atr14 <= 0:
             return
 
-        # 冷却检查
-        if now - state.last_atr_alert_time < self._atr_cooldown:
-            return
-
         # 三级止损 [2.0, 2.5, 3.0]
         stop_levels = [
             (2.0, state.stop_loss_2x),
@@ -780,12 +776,15 @@ class RealtimeMonitorService:
         trigger_price: float | None = None
 
         for mult, stop_price in stop_levels:
+            # 每级别独立冷却，更严重级别不受较轻级别冷却影响
             if stop_price > 0 and price <= stop_price:
+                if now - state.last_atr_alert_times.get(mult, 0.0) < self._atr_cooldown:
+                    continue
                 trigger_level = mult
                 trigger_price = stop_price
 
         if trigger_level is not None and trigger_price is not None:
-            state.last_atr_alert_time = now
+            state.last_atr_alert_times[trigger_level] = now
             name = state.name or code
             text = _build_atr_alert_text(code, name, price, change_pct, trigger_price, trigger_level, state.score)
             text = self._append_alert_context(text, state, price, 0, "")
