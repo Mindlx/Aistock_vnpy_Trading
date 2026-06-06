@@ -333,6 +333,21 @@ class MindLynxDataLoader:
                 code = row["code"]
                 raw = row["raw_result"] or ""
                 ctx = row["context_snapshot"] or ""
+            try:
+                import json
+                raw = row["raw_result"] or "{}"
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                dashboard = parsed.get("dashboard", {}) if isinstance(parsed, dict) else {}
+
+                # Extract dashboard numeric fields
+                dp = dashboard.get("data_perspective", {})
+                ts = dp.get("trend_status", {})
+                pp = dp.get("price_position", {})
+                va = dp.get("volume_analysis", {})
+                intel = dashboard.get("intelligence", {})
+                battle = dashboard.get("battle_plan", {})
+                sniper = battle.get("sniper_points", {}) if battle else {}
+
                 signals[code] = {
                     "code": code,
                     "name": row["name"] or "",
@@ -343,8 +358,31 @@ class MindLynxDataLoader:
                     "trend_prediction": row["trend_prediction"] or "",
                     "operation_advice": row["operation_advice"] or "观望",
                     "analysis_summary": row["analysis_summary"] or "",
-                    "raw_result": raw,
-                    "context_snapshot": ctx,
+                    "ideal_buy": row["ideal_buy"],
+                    "stop_loss": row["stop_loss"],
+                    "take_profit": row["take_profit"],
+                    # Dashboard-extracted fields
+                    "ml_trend_score": ts.get("trend_score"),
+                    "ml_support_level": pp.get("support_level"),
+                    "ml_resistance_level": pp.get("resistance_level"),
+                    "ml_volume_ratio_dash": va.get("volume_ratio"),
+                    "ml_turnover_rate": va.get("turnover_rate"),
+                    "ml_risk_alert_count": len(intel.get("risk_alerts", [])),
+                    "ml_catalyst_count": len(intel.get("positive_catalysts", [])),
+                    "source": "analysis_db",
+                }
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                # Fallback: simple fields without dashboard
+                signals[code] = {
+                    "code": code,
+                    "name": row["name"] or "",
+                    "signal": row["operation_advice"] or "观望",
+                    "score": row["sentiment_score"] or 50,
+                    "trend": row["trend_prediction"] or "",
+                    "sentiment_score": row["sentiment_score"],
+                    "trend_prediction": row["trend_prediction"] or "",
+                    "operation_advice": row["operation_advice"] or "观望",
+                    "analysis_summary": row["analysis_summary"] or "",
                     "ideal_buy": row["ideal_buy"],
                     "stop_loss": row["stop_loss"],
                     "take_profit": row["take_profit"],

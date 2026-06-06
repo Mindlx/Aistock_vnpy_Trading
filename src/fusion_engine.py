@@ -637,7 +637,10 @@ class FusionEngine:
             for k in ("price", "pct_chg", "volume_ratio", "ma5", "ma10", "ma20",
                       "mindlynx_trend", "mindlynx_sentiment", "mindlynx_operation",
                       "mindlynx_analysis", "mindlynx_ideal_buy", "mindlynx_stop_loss",
-                      "mindlynx_take_profit"):
+                      "mindlynx_take_profit",
+                      "ml_trend_score", "ml_support_level", "ml_resistance_level",
+                      "ml_volume_ratio_dash", "ml_turnover_rate",
+                      "ml_risk_alert_count", "ml_catalyst_count"):
                 if k in item:
                     result[k] = item[k]
             results.append(result)

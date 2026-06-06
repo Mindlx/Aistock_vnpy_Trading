@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS bt_predictions (
     ml_sentiment INTEGER,               -- ML 原始评分 0-100
     ml_trend    TEXT,                    -- ML 趋势预测
     ml_operation TEXT,                   -- ML 操作建议
+    ml_trend_score INTEGER,             -- ML dashboard 趋势分 0-100
+    ml_risk_alert_count INTEGER DEFAULT 0, -- ML 风险告警数
     signal      TEXT,                   -- "cautious_bearish" / "neutral" / 等
     has_disagreement INTEGER DEFAULT 0,
     is_degraded     INTEGER DEFAULT 0,
@@ -166,6 +168,8 @@ def cmd_record(target_date: Optional[str] = None) -> int:
                     "ml_sentiment": _parse_float(row.get("mindlynx_sentiment")),
                     "ml_trend": row.get("mindlynx_trend", "").strip(),
                     "ml_operation": row.get("mindlynx_operation", "").strip(),
+                    "ml_trend_score": _parse_float(row.get("ml_trend_score")),
+                    "ml_risk_alert_count": int(row["ml_risk_alert_count"]) if row.get("ml_risk_alert_count", "").strip() else 0,
                     "signal": row.get("signal", "").strip(),
                     "has_disagreement": 1 if row.get("has_disagreement", "").strip() == "True" else 0,
                     "is_degraded": 1 if row.get("is_degraded", "").strip() == "True" else 0,
@@ -194,14 +198,16 @@ def cmd_record(target_date: Optional[str] = None) -> int:
                  fusion_score, ly_score, ml_score, at_score,
                  ly_valid, ml_valid, at_valid, ta_is_stale,
                  ml_sentiment, ml_trend, ml_operation,
+                 ml_trend_score, ml_risk_alert_count,
                  signal, has_disagreement, is_degraded,
                  fusion_dir, ly_dir, ml_dir, at_dir)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 rec["date"], rec["stock_code"], rec["stock_name"],
                 rec["fusion_score"], rec["ly_score"], rec["ml_score"], rec["at_score"],
                 rec["ly_valid"], rec["ml_valid"], rec["at_valid"], rec["ta_is_stale"],
                 rec["ml_sentiment"], rec["ml_trend"], rec["ml_operation"],
+                rec["ml_trend_score"], rec["ml_risk_alert_count"],
                 rec["signal"], rec["has_disagreement"], rec["is_degraded"],
                 rec["fusion_dir"], rec["ly_dir"], rec["ml_dir"], rec["at_dir"],
             ))
