@@ -35,6 +35,7 @@ from lynx_vnpy.alpha.dataset.datasets.alpha_101 import Alpha101
 from lynx_vnpy.alpha.dataset.processor import process_drop_na, process_cs_norm
 from lynx_vnpy.alpha.model.models.lgb_model import LgbModel
 from lynx_vnpy.alpha.model.models.lasso_model import LassoModel
+from lynx_vnpy.alpha.model.models.mlp_model import MlpModel
 from lynx_vnpy.trader.constant import Interval
 
 LAB_PATH = str(_PROJECT_ROOT / "data/vnpy_lab")
@@ -296,7 +297,24 @@ def train_models(
     except Exception as e:
         print(f"  ⚠️ Lasso训练跳过: {e}")
 
-    return {"lgb": lgb_acc, "lasso": lasso_acc}
+    # ---- MLP（神经网络）----
+    mlp_acc = 0.0
+    try:
+        from lynx_vnpy.alpha.model.models.mlp_model import MlpModel, _HAS_TORCH
+        print(f"\n  ── MLP Model ──")
+        if not _HAS_TORCH:
+            print(f"  ⚠️ 需要PyTorch,跳过")
+        else:
+            mlp = MlpModel(input_size=935, hidden_sizes=(64, 32), lr=0.001, n_epochs=100,
+                           batch_size=64, early_stop_rounds=20, weight_decay=0.01, seed=42)
+            mlp.fit(dataset)
+            pred_mlp = mlp.predict(dataset, Segment.VALID)
+            mlp_acc = _calc_accuracy(pred_mlp, dataset, Segment.VALID)
+            print(f"  MLP验证准确率: {mlp_acc:.1f}%")
+    except Exception as e:
+        print(f"  ⚠️ MLP训练跳过: {e}")
+
+    return {"lgb": lgb_acc, "lasso": lasso_acc, "mlp": mlp_acc}
 
 
 def _calc_accuracy(
