@@ -31,6 +31,7 @@ sys.path.insert(0, str(_SCRIPT_DIR.parent.parent / "lynx_vnpy"))
 from lynx_vnpy.alpha.lab import AlphaLab
 from lynx_vnpy.alpha.dataset import AlphaDataset, Segment
 from lynx_vnpy.alpha.dataset.datasets.alpha_158 import Alpha158
+from lynx_vnpy.alpha.dataset.datasets.alpha_101 import Alpha101
 from lynx_vnpy.alpha.dataset.processor import process_drop_na, process_cs_norm
 from lynx_vnpy.alpha.model.models.lgb_model import LgbModel
 from lynx_vnpy.alpha.model.models.lasso_model import LassoModel
@@ -349,15 +350,50 @@ def main() -> None:
     print(f"  测试: {valid_end} ~ {test_end}")
 
     # Alpha158因子计算
-    dataset = compute_alpha158(
+    dataset_158 = compute_alpha158(
         df,
         train_period=(start, train_end),
         valid_period=(train_end, valid_end),
         test_period=(valid_end, test_end),
     )
 
+    # Alpha101因子计算（WorldQuant 101个数学表达式因子）
+    print(f"\n  Alpha101因子...")
+    dataset_101 = Alpha101(
+        df,
+        train_period=(start, train_end),
+        valid_period=(train_end, valid_end),
+        test_period=(valid_end, test_end),
+    )
+    dataset_101.prepare_data()
+    print(f"  完成")
+
+    # 合并两套因子
+    import polars as pl
+    _skip = {'datetime','vt_symbol','label','open','high','low','close','volume','turnover','vwap','open_interest'}
+    factors_158 = [c for c in dataset_158.result_df.columns if c not in _skip]
+    factors_101 = [c for c in dataset_101.result_df.columns if c not in _skip]
+    combined_factors = list(set(factors_158) | set(factors_101))
+    print(f"  Alpha158: {len(factors_158)}因子, Alpha101: {len(factors_101)}因子, 合计: {len(combined_factors)}")
+
+    # 用dataset_158为基础,合并Alpha101的因子列
+    df_combined = dataset_158.result_df.select(['datetime','vt_symbol'] + factors_158)
+    df_101_cols = dataset_101.result_df.select(['datetime','vt_symbol'] + factors_101)
+    merged = df_combined.join(df_101_cols, on=['datetime','vt_symbol'], how='outer')
+
+    # 重建dataset用于后续处理(直接用merged dataframe)
+    dataset_158.result_df = merged
+    # 同步更新learn_df: 合并Alpha158+Alpha101所有因子列
+    df_158_learn = dataset_158.result_df.select(['datetime','vt_symbol'] + factors_158)
+    df_101_learn = dataset_101.result_df.select(['datetime','vt_symbol'] + factors_101)
+    _label = dataset_158.learn_df.select(['datetime','vt_symbol','label'])
+    dataset_158.learn_df = _label.join(df_158_learn, on=['datetime','vt_symbol'], how='left')
+    dataset_158.learn_df = dataset_158.learn_df.join(df_101_learn, on=['datetime','vt_symbol'], how='left')
+    n_factors = dataset_158.learn_df.shape[1] - 3  # minus datetime, vt_symbol, label
+    print(f"  learn_df已更新: {n_factors}因子")
+
     # IC分析
-    ic_results = analyze_ic(dataset)
+    ic_results = analyze_ic(dataset_158)
 
     # 保存IC结果
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -369,15 +405,26 @@ def main() -> None:
         pass  # 继续执行
 
     if args.train_model or run_all:
-        # 因子筛选
-        selected = select_factors(ic_results, min_abs_ic=0.01, max_factors=30)
-        with open(REPORT_DIR / "selected_factors.json", "w") as f:
-            json.dump(selected, f, ensure_ascii=False, indent=2)
+        # LassoCV自动特征筛选(从240因子中精选)
+        print(f"\n{'='*55}")
+        print(f"  LassoCV特征筛选 (240→?)")
+        print(f"{'='*55}")
+        from sklearn.linear_model import Lasso
+        train_df = dataset_158.fetch_learn(Segment.TRAIN).to_pandas()
+        train_df = train_df.fillna(0.0).select_dtypes(include=['number'])
+        y = train_df['label'].values
+        X = train_df.drop(columns=['label'], errors='ignore').values
+        lasso = Lasso(alpha=0.005, max_iter=2000, random_state=42).fit(X, y)
+        n_selected = np.sum(lasso.coef_ != 0)
+        print(f"  选中: {n_selected}/{X.shape[1]} 因子")
+        print(f"  选中: {n_selected}/{X.shape[1]} 因子")
+        selected_indices = np.where(lasso.coef_ != 0)[0]
+        factor_names = [c for c in train_df.columns if c not in {'datetime','vt_symbol','label'}]
+        selected_factors = [factor_names[i] for i in selected_indices]
+        with open(REPORT_DIR / "lasso_selected_factors.json", "w") as f:
+            json.dump(selected_factors, f, ensure_ascii=False, indent=2)
 
-        # 构建精选因子数据集（需要在AlphaDataset上做特征筛选）
-        # 注意: AlphaDataset不支持动态特征筛选，需要新构建
-        # 这里简化处理：用全部因子训练，让LGB/Lasso自行选择
-        accs = train_models(dataset, selected)
+        accs = train_models(dataset_158, selected_factors)
 
         with open(REPORT_DIR / "model_accuracy.json", "w") as f:
             json.dump(accs, f, ensure_ascii=False, indent=2)
