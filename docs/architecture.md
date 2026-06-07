@@ -264,6 +264,23 @@ Mon 07:30 ─ scheduler ─ 周末情报补量
 
 **判定**: ✅ 正确的设计。两个子系统各自使用更适合自身消费方式的因子集，通过融合引擎对不同信号投票——这正是三系统融合架构的核心优势：互补独立，各取所长。
 
+### D9: 15个TA指标的来源与理论基础
+
+**决策时间**: 2026-06-07
+**说明**: ly子系统中RF模型使用的15个TA指标全部手写在 `lynx_signal.py` 的 `compute_features()` 中，不是来自vnpy库或任何上游项目。但每个指标都有深厚的理论来源：
+
+| 指标 | 来源 | 首次提出 | 验证 |
+|------|------|---------|------|
+| ret_1d/5d/10d/20d | 动量因子 (Fama-French, Jegadeesh-Titman) | 1993 | 学术引用10000+ |
+| ma5_dist/ma20_dist/ma_cross | 道氏理论 (Charles Dow) | 1880s | 技术分析始祖 |
+| rsi14 / atr_ratio | Welles Wilder | 1978 | 公认经典 |
+| macd/macd_signal/macd_hist | Gerald Appel | 1970s | 趋势跟踪核心 |
+| boll_pos | John Bollinger | 1980s | 波动率通道标准 |
+| cci20 | Donald Lambert | 1980 | 超买超卖指标 |
+| vol_ratio | 量价分析传统 | 1900s | 基础分析工具 |
+
+**与58Alpha158的关系**: 不是"手写 vs 权威"，而是"经典技术分析 vs 体系化数学表达"。两者在ly内部由RF和LGB分别消费，互补参与融合决策。
+
 ### D5: 为什么不从 0 重建？
 
 **决策时间**: 2026-06-06
