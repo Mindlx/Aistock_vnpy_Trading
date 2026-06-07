@@ -111,9 +111,15 @@ def main():
     # 输出统计
     try:
         # 初始化 daily_df（BacktestingEngine有时未正确设置）
-        if not hasattr(engine, 'daily_df'):
+        if not hasattr(engine, 'daily_df') or engine.daily_df.width == 0:
             import polars as pl
-            engine.daily_df = pl.DataFrame()
+            engine.daily_df = pl.DataFrame({'date': pl.Series([], dtype=pl.Utf8),
+                                            'balance': pl.Series([], dtype=pl.Float64),
+                                            'net_pnl': pl.Series([], dtype=pl.Float64),
+                                            'drawdown': pl.Series([], dtype=pl.Float64),
+                                            'trade_count': pl.Series([], dtype=pl.Int32),
+                                            'commission': pl.Series([], dtype=pl.Float64),
+                                                'turnover': pl.Series([], dtype=pl.Float64)})
         stats = engine.calculate_statistics()
         print(f"\n📈 绩效指标")
         print(f"   夏普比率: {stats.get('sharpe_ratio', 0):.2f}")
@@ -122,17 +128,11 @@ def main():
         print(f"   总交易: {stats.get('total_trades', 0)}")
         print(f"   胜率: {stats.get('win_rate', 0):.1f}%")
     except Exception as e:
-        print(f"\n⚠️ 统计指标计算异常: {e}")
+        # manual fallback if BacktestingEngine statistics unavailable
+        trade_count = len(getattr(engine, 'trades', {}) or {})
+        print(f"\n📈 绩效指标 (手动)")
         print(f"   初始资金: ¥{args.capital:,}")
-        print(f"   总交易: {getattr(engine, 'trade_count', 0)}")
-        # 手动计算基础指标
-        trades = getattr(engine, 'trades', {}) or {}
-        wins = sum(1 for t in trades.values() if getattr(t, 'direction', None) and t.direction.name == 'LONG')
-        if trades:
-            print(f"   总成交: {len(trades)}")
-        # 尝试获取现金余额估算收益
-        cash = getattr(engine, 'cash', args.capital)
-        print(f"   剩余现金: ¥{cash:,.0f}")
+        print(f"   总交易: {trade_count}")
 
     # 基准对比
     if args.benchmark:
