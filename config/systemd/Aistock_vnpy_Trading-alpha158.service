@@ -1,0 +1,11 @@
+[Unit]
+Description=Alpha158 因子层实时服务 (每300秒)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/workspace/Aistock_vnpy_Trading/.venv/bin/python3 services/alpha158_service.py --daemon
+WorkingDirectory=%h/workspace/Aistock_vnpy_Trading
+Restart=on-failure
+RestartSec=10

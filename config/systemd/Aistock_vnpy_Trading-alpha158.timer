@@ -1,0 +1,10 @@
+[Unit]
+Description=Alpha158 因子层服务 (工作日每300秒, 09:33~15:00)
+After=network-online.target
+
+[Timer]
+OnCalendar=Mon..Fri 09:33:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
