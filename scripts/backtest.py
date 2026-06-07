@@ -29,6 +29,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
+
 # ── 路径常量 ──────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FUSION_OUTPUT_DIR = PROJECT_ROOT / "data" / "fusion_output"
@@ -540,6 +542,38 @@ def _compute_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
         LIMIT 14
     """).fetchall()
 
+    # 盈亏比（基于模拟交易数据：平均盈利/平均亏损）
+    win_loss = conn.execute("""
+        SELECT
+            AVG(CASE WHEN next_pct_chg > 0 THEN next_pct_chg ELSE NULL END) as avg_win,
+            AVG(CASE WHEN next_pct_chg < 0 THEN ABS(next_pct_chg) ELSE NULL END) as avg_loss
+        FROM bt_predictions
+        WHERE fusion_dir IS NOT NULL AND next_pct_chg IS NOT NULL
+          AND fusion_dir = CASE WHEN next_pct_chg > 0 THEN 1 ELSE -1 END
+    """).fetchone()
+    stats["avg_win_pct"] = round(win_loss[0], 2) if win_loss and win_loss[0] else 0.0
+    stats["avg_loss_pct"] = round(win_loss[1], 2) if win_loss and win_loss[1] else 0.0
+    stats["win_loss_ratio"] = (
+        round(stats["avg_win_pct"] / stats["avg_loss_pct"], 2)
+        if stats["avg_loss_pct"] > 0 else 0.0
+    )
+
+    # 最大连续亏损（基于融合方向判断）
+    stats["max_consecutive_losses"] = 0
+    con_sec = conn.execute("""
+        SELECT fusion_correct FROM bt_predictions
+        WHERE fusion_correct IS NOT NULL
+        ORDER BY date ASC, stock_code ASC
+    """).fetchall()
+    if con_sec:
+        cur_streak = 0
+        for row in con_sec:
+            if row[0] == 0:  # 判断错误
+                cur_streak += 1
+                stats["max_consecutive_losses"] = max(stats["max_consecutive_losses"], cur_streak)
+            else:
+                cur_streak = 0
+
     # 个股统计
     stats["per_stock"] = conn.execute("""
         SELECT stock_code, stock_name,
@@ -649,6 +683,14 @@ def cmd_report(detail: bool = False) -> None:
     print(f"\n  💡 关键指标")
     has_enough_data = stats["total_matched"] >= 30
     print(f"     样本充足: {'✅' if has_enough_data else '❌'} ({stats['total_matched']}/30)")
+    if stats["avg_win_pct"] > 0 or stats["avg_loss_pct"] > 0:
+        wl = stats["win_loss_ratio"]
+        wl_flag = "✅" if wl > 1.5 else ("⚠️" if wl > 1.0 else "❌")
+        print(f"     盈亏比: {wl_flag} {wl:.2f} (平均盈利{stats['avg_win_pct']:.2f}% / 平均亏损{stats['avg_loss_pct']:.2f}%)")
+    if stats["max_consecutive_losses"] > 0:
+        mcl = stats["max_consecutive_losses"]
+        mcl_flag = "✅" if mcl <= 5 else ("⚠️" if mcl <= 7 else "❌")
+        print(f"     最大连续亏损: {mcl_flag} {mcl} 次")
 
     print(f"\n  🔌 子系统数据可用率 (有数据天数/总天数)")
     for name, field in [("Lynx", "ly"), ("MindLynx", "ml"), ("TradingAgent", "at")]:
@@ -825,6 +867,211 @@ def cmd_backfill() -> int:
     return total
 
 
+# ── WalkForward验证 ───────────────────────────────────────────
+
+def cmd_walkforward(
+    train_window: int = 20,
+    test_window: int = 10,
+    step: int = 5,
+) -> None:
+    """
+    WalkForward验证：滑动窗口检验融合准确率的样本外稳定性。
+
+    将回测数据按日期排序，用滑动窗口分割为训练集和测试集，
+    分别计算样本内(IS)和样本外(OOS)准确率，通过衰减比判断是否过拟合。
+
+    Args:
+        train_window: 训练窗口（交易日数）
+        test_window:  验证窗口（交易日数）
+        step:         滑动步长
+    """
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT date, fusion_correct FROM bt_predictions "
+        "WHERE fusion_correct IS NOT NULL ORDER BY date"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        print("⚠️  没有足够的回测数据（需要至少1条有T+1结果的记录）")
+        return
+
+    # 按日期分组计算每日准确率
+    from collections import OrderedDict
+    daily: dict[str, list[int]] = OrderedDict()
+    for r in rows:
+        daily.setdefault(r["date"], []).append(r["fusion_correct"])
+
+    dates = list(daily.keys())
+    n = len(dates)
+
+    if n < train_window + test_window:
+        print(f"⚠️  数据不足: 需要至少 {train_window + test_window} 个交易日"
+              f"（当前 {n} 天）")
+        return
+
+    print(f"\n{'='*60}")
+    print(f"  WalkForward 验证")
+    print(f"{'='*60}")
+    print(f"  回测区间: {dates[0]} ~ {dates[-1]} ({n} 交易日)")
+    print(f"  训练窗口: {train_window}天 | 验证窗口: {test_window}天 | 步长: {step}天\n")
+
+    windows = []
+    for start in range(0, n - train_window - test_window + 1, step):
+        train_dates = dates[start:start + train_window]
+        test_dates = dates[start + train_window:start + train_window + test_window]
+
+        train_correct = sum(daily[d].count(1) for d in train_dates)
+        train_total = sum(len(daily[d]) for d in train_dates)
+        test_correct = sum(daily[d].count(1) for d in test_dates)
+        test_total = sum(len(daily[d]) for d in test_dates)
+
+        is_acc = train_correct / train_total * 100 if train_total > 0 else 0
+        oos_acc = test_correct / test_total * 100 if test_total > 0 else 0
+        windows.append({
+            "train": f"{train_dates[0]}~{train_dates[-1]}",
+            "test": f"{test_dates[0]}~{test_dates[-1]}",
+            "is_acc": is_acc,
+            "oos_acc": oos_acc,
+            "oos_positive": oos_acc > 50,
+            "train_n": train_total,
+            "test_n": test_total,
+        })
+
+    if not windows:
+        print("⚠️  无法构建有效的滑动窗口")
+        return
+
+    is_accs = [w["is_acc"] for w in windows]
+    oos_accs = [w["oos_acc"] for w in windows]
+    mean_is = sum(is_accs) / len(is_accs)
+    mean_oos = sum(oos_accs) / len(oos_accs)
+    oos_pos_ratio = sum(1 for w in windows if w["oos_positive"]) / len(windows)
+    decay = (mean_is - mean_oos) / mean_is if mean_is > 0.01 else 0.0
+
+    is_robust = decay < 0.4 and mean_oos > 50
+
+    if is_robust and mean_oos > 55:
+        verdict = "✅ 策略稳健 — OOS准确率>55%且衰减可控"
+    elif is_robust:
+        verdict = "⚠️ 可接受 — 衰减在合理范围内，但OOS准确率偏低"
+    elif decay >= 0.4:
+        verdict = "❌ 严重过拟合 — OOS衰减>{:.0%}".format(decay)
+    else:
+        verdict = "❌ 策略无效 — OOS无正向准确率"
+
+    print(f"  ── 各窗口结果 ──")
+    print(f"  {'窗口':<40} {'IS准确率':<10} {'OOS准确率':<10} {'样本数':<10}")
+    print(f"  {'-'*40} {'-'*10} {'-'*10} {'-'*10}")
+    for w in windows:
+        mark = " ✓" if w["oos_positive"] else ""
+        print(f"  {w['train']}~{w['test']:<12} {w['is_acc']:>5.1f}%{'':<4} "
+              f"{w['oos_acc']:>5.1f}%{'':<4} {w['train_n']+w['test_n']}{mark}")
+
+    print(f"\n  ── WalkForward 结论 ──")
+    print(f"  平均IS准确率: {mean_is:.1f}%")
+    print(f"  平均OOS准确率: {mean_oos:.1f}%")
+    print(f"  OOS正向窗口占比: {oos_pos_ratio:.0%}")
+    print(f"  准确率衰减: {decay:.1%}")
+    print(f"  {verdict}")
+    print()
+
+
+# ── 权重网格扫描 ──────────────────────────────────────────────
+
+def cmd_weight_sweep() -> None:
+    """
+    网格搜索权重组合，输出各组合准确率曲面。
+
+    从 settings.yaml 读取 weight_search_range 配置，
+    对 bt_predictions 中已有T+1结果的记录，枚举所有权重组合重算融合准确率。
+    """
+    cfg_path = os.path.join(PROJECT_ROOT, "config", "settings.yaml")
+    if not os.path.exists(cfg_path):
+        print("⚠️  config/settings.yaml 不存在")
+        return
+    with open(cfg_path, "r") as f:
+        cfg = yaml.safe_load(f)
+    ranges = cfg.get("backtest", {}).get("weight_search_range", {})
+    ly_values = ranges.get("lynx_vnpy", [0.30])
+    ml_values = ranges.get("mindlynx", [0.40])
+    at_values = ranges.get("tradingagent", [0.30])
+
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT ly_score, ml_score, at_score, next_pct_chg, fusion_correct "
+        "FROM bt_predictions WHERE fusion_correct IS NOT NULL"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        print("⚠️  没有足够的历史回测数据（需要至少1条有T+1结果的记录）")
+        return
+
+    print(f"\n{'='*60}")
+    print(f"  权重网格扫描 — {len(rows)} 条历史记录")
+    print(f"{'='*60}")
+    print(f"  ly: {ly_values}")
+    print(f"  ml: {ml_values}")
+    print(f"  at: {at_values}")
+    n_combo = len(ly_values) * len(ml_values) * len(at_values)
+    print(f"  共 {n_combo} 种组合\n")
+
+    results = []
+    for lw in ly_values:
+        for mw in ml_values:
+            for aw in at_values:
+                total = len(rows)
+                correct = 0
+                for row in rows:
+                    ly_s = row[0] or 0.0
+                    ml_s = row[1] or 0.0
+                    at_s = row[2] or 0.0
+                    fusion = ly_s * lw + ml_s * mw + at_s * aw
+                    pred_dir = 1 if fusion > 0.1 else (-1 if fusion < -0.1 else 0)
+                    if pred_dir == 0:
+                        total -= 1
+                        continue
+                    actual_dir = 1 if (row[3] or 0) > 0 else -1
+                    if pred_dir == actual_dir:
+                        correct += 1
+                acc = correct / total * 100 if total > 0 else 0.0
+                results.append(((lw, mw, aw), acc, correct, total))
+
+    results.sort(key=lambda x: x[1], reverse=True)
+
+    print(f"  {'权重(l,m,a)':<25} {'准确率':<10} {'正确/总数':<15}")
+    print(f"  {'-'*25} {'-'*10} {'-'*15}")
+    for i, ((lw, mw, aw), acc, cor, tot) in enumerate(results[:10]):
+        curr = "(0.30, 0.40, 0.30)"
+        tag = " ★ 当前" if (lw, mw, aw) == eval(curr) else ""
+        print(f"  ({lw:.2f},{mw:.2f},{aw:.2f}){'':<11} {acc:>5.1f}%{'':<5} {cor}/{tot}{tag}")
+
+    print(f"\n  ── 维度敏感度 ──")
+    for dim_name in ("ly", "ml", "at"):
+        dim_key = {"ly":"lynx_vnpy", "ml":"mindlynx", "at":"tradingagent"}[dim_name]
+        dim_values = ranges.get(dim_key, [])
+        if len(dim_values) < 2:
+            continue
+        accs = []
+        for dv in dim_values:
+            idx = {"ly":0, "ml":1, "at":2}[dim_name]
+            subset = [r for r in results if r[0][idx] == dv]
+            if subset:
+                avg_acc = sum(r[1] for r in subset) / len(subset)
+                accs.append((dv, avg_acc))
+        if not accs:
+            continue
+        spread = max(a[1] for a in accs) - min(a[1] for a in accs)
+        print(f"    {dim_name}: {spread:.1f}% 敏感度")
+        for dv, avg in accs:
+            mark = " ← 当前" if dim_name == "ly" and dv == 0.30 or dim_name == "ml" and dv == 0.40 or dim_name == "at" and dv == 0.30 else ""
+            print(f"      {dim_name}={dv:.2f}: {avg:.1f}%{mark}")
+
+    best = results[0]
+    print(f"\n  ✅ 最优: ({best[0][0]:.2f}, {best[0][1]:.2f}, {best[0][2]:.2f}) → {best[1]:.1f}%")
+
+
 # ── CLI ───────────────────────────────────────────────────
 
 def main() -> None:
@@ -848,6 +1095,11 @@ def main() -> None:
                           help="显示个股明细")
     p_backfill = sub.add_parser("backfill", help="扫描历史CSV回填数据库(首次部署用)")
     p_simulate = sub.add_parser("simulate", help="模拟交易：基于融合信号计算累计收益曲线")
+    p_weightsweep = sub.add_parser("weight-sweep", help="网格搜索权重组合，输出准确率曲面与敏感度分析")
+    p_walkforward = sub.add_parser("walkforward", help="WalkForward验证：滑动窗口检验样本外准确率稳定性")
+    p_walkforward.add_argument("--train", type=int, default=20, help="训练窗口天数(默认20)")
+    p_walkforward.add_argument("--test", type=int, default=10, help="验证窗口天数(默认10)")
+    p_walkforward.add_argument("--step", type=int, default=5, help="滑动步长(默认5)")
 
     args = parser.parse_args()
 
@@ -865,6 +1117,10 @@ def main() -> None:
         cmd_backfill()
     elif args.command == "simulate":
         cmd_simulate()
+    elif args.command == "weight-sweep":
+        cmd_weight_sweep()
+    elif args.command == "walkforward":
+        cmd_walkforward(train_window=args.train, test_window=args.test, step=args.step)
 
 
 if __name__ == "__main__":

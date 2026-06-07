@@ -866,9 +866,11 @@ class UnifiedDataLoader:
             # MindLynx: signal/score 来自报告解析
             mindlynx_advice = mindlynx.get("signal", "")
             mindlynx_score = mindlynx.get("score", 50)
+            mindlynx_has_data = bool(mindlynx)  # 子系统是否真正有数据（非空dict）
 
             # TradingAgent: rating 来自日志
             ta_rating = ta.get("rating", "")
+            ta_has_data = bool(ta)  # 子系统是否真正有数据（非空dict）
 
             # 至少有一个系统有真实数据才加入
             has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating)
@@ -944,7 +946,7 @@ class UnifiedDataLoader:
                     "lynx_prob_up": float(lynx_prob_up) if lynx_prob_up else 50.0,
                     "mindlynx_advice": mindlynx_advice if mindlynx_advice else "观望",
                     "mindlynx_score": int(mindlynx_score) if mindlynx_score else 50,
-                    "mindlynx_valid": bool(mindlynx_advice),
+                    "mindlynx_valid": mindlynx_has_data,
                     "mindlynx_trend": mindlynx.get("trend", ""),
                     "mindlynx_sentiment": mindlynx.get("sentiment_score"),
                     "mindlynx_factor_baseline": mindlynx.get("factor_baseline"),
@@ -954,7 +956,7 @@ class UnifiedDataLoader:
                     "mindlynx_stop_loss": mindlynx.get("stop_loss"),
                     "mindlynx_take_profit": mindlynx.get("take_profit"),
                     "tradingagent_rating": ta_rating if ta_rating else "Hold",
-                    "tradingagent_valid": bool(ta_rating),
+                    "tradingagent_valid": ta_has_data,
                     "ta_debate_state": ta.get("debate_state", {}),
                     "mindlynx_trend": mindlynx.get("trend", ""),
                 })

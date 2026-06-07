@@ -2640,6 +2640,13 @@ class GeminiAnalyzer:
         if not stock_name or stock_name == f"股票{code}":
             stock_name = STOCK_NAME_MAP.get(code, f"股票{code}")
 
+        # LLM prompt脱敏：替换真实代码和名称为匿名ID
+        _cfg = self._get_runtime_config()
+        if getattr(_cfg, "prompt_anonymize", False):
+            import hashlib
+            code = f"STOCK_{hashlib.md5(code.encode()).hexdigest()[:8].upper()}"
+            stock_name = "目标公司"
+
         today = context.get("today", {})
         unknown_text = get_unknown_text(report_language)
         no_data_text = get_no_data_text(report_language)

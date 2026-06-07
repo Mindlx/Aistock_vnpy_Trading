@@ -37,6 +37,36 @@ class FactorDefinition:
     weight: float = 0.0  # composite weight
 
 
+# ────────── MAD-based winsorization (去极值) ──────────
+
+def winsorize_mad(
+    values: np.ndarray,
+    threshold: float = 5.0,
+) -> np.ndarray:
+    """MAD-based winsorization: cap extreme values at median ± threshold × MAD.
+
+    MAD (Median Absolute Deviation) is more robust to outliers than standard
+    deviation because the median is unaffected by extreme values.
+
+    For a Gaussian distribution: 5 MAD ≈ 3.35σ, capturing ~99.96% of data.
+    threshold=5.0 is conservative — only extreme outliers (>3.35σ) are capped.
+
+    Args:
+        values: 1-D array of raw factor values.
+        threshold: MAD倍数，越大越宽松（默认5.0 ≈ 3.35σ）
+
+    Returns:
+        Winsorized array (same shape).
+    """
+    median = float(np.median(values))
+    mad = float(np.median(np.abs(values - median)))
+    if mad < 1e-8:
+        return values
+    lower = median - threshold * mad
+    upper = median + threshold * mad
+    return np.clip(values, lower, upper)
+
+
 # Core 5 factors targeting A-share strongest signals
 # Weights calibrated from 1658-sample Spearman test (2026-05-20):
 #   momentum_reversal t=-6.6, momentum_spread t=-6.2 (reversal dominant in A-shares)
@@ -571,6 +601,8 @@ class FactorEngine:
                 if len(hist_vals) < min_samples:
                     continue
 
+                # 时序标准化前做MAD去极值
+                hist_vals = winsorize_mad(np.array(hist_vals)).tolist()
                 mean = float(np.mean(hist_vals))
                 std = float(np.std(hist_vals))
                 if std < 1e-8:
@@ -638,6 +670,8 @@ class FactorEngine:
         for fd in self.factors:
             name = fd.name
             raw_vals = [r.raw_factors.get(name, 0.0) for r in results]
+            # 截面标准化前做MAD去极值
+            raw_vals = winsorize_mad(np.array(raw_vals)).tolist()
             mean = np.mean(raw_vals)
             std = np.std(raw_vals)
             if std < 1e-8:

@@ -218,10 +218,10 @@ class FusionEngine:
         mindlynx_advice: str = "观望",
         mindlynx_score: int = 50,
         mindlynx_trend: Optional[str] = None,
-        mindlynx_valid: bool = True,
+        mindlynx_valid: bool = False,
         mindlynx_factor_baseline: Optional[float] = None,
         tradingagent_rating: str = "Hold",
-        tradingagent_valid: bool = True,
+        tradingagent_valid: bool = False,
         ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -482,9 +482,9 @@ class FusionEngine:
         mindlynx_advice: str = "观望",
         mindlynx_score: int = 50,
         mindlynx_trend: Optional[str] = None,
-        mindlynx_valid: bool = True,
+        mindlynx_valid: bool = False,
         tradingagent_rating: str = "Hold",
-        tradingagent_valid: bool = True,
+        tradingagent_valid: bool = False,
         ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -500,21 +500,31 @@ class FusionEngine:
         lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
             lynx_signal, lynx_prob_up
         )
-        mindlynx_normalized = self.normalizer.normalize_mindlynx(
-            mindlynx_advice, mindlynx_score, mindlynx_trend
-        )
-        # HP3: sentiment_score 独立信号路径（不依赖 op_advice）
-        mindlynx_score_normalized = self.normalizer.normalize_mindlynx_score(
-            mindlynx_score,
-            threshold_bull=self.sentiment_threshold_bull,
-            threshold_bear=self.sentiment_threshold_bear,
-        )
-        mindlynx_normalized = (mindlynx_normalized + mindlynx_score_normalized) / 2.0
-        tradingagent_normalized = self.normalizer.normalize_tradingagent(
-            tradingagent_rating, debate_state=ta_debate_state
-        )
 
-        # 子系统有效性（来自 data_loader，不再硬编码 True）
+        # 防御性守卫：无效系统强制中性，防止下游遗漏处理
+        if not mindlynx_valid:
+            mindlynx_normalized = 0.0
+            mindlynx_score_normalized = 0.0
+        else:
+            mindlynx_normalized = self.normalizer.normalize_mindlynx(
+                mindlynx_advice, mindlynx_score, mindlynx_trend
+            )
+            # HP3: sentiment_score 独立信号路径（不依赖 op_advice）
+            mindlynx_score_normalized = self.normalizer.normalize_mindlynx_score(
+                mindlynx_score,
+                threshold_bull=self.sentiment_threshold_bull,
+                threshold_bear=self.sentiment_threshold_bear,
+            )
+        mindlynx_normalized = (mindlynx_normalized + mindlynx_score_normalized) / 2.0
+
+        if not tradingagent_valid:
+            tradingagent_normalized = 0.0
+        else:
+            tradingagent_normalized = self.normalizer.normalize_tradingagent(
+                tradingagent_rating, debate_state=ta_debate_state
+            )
+
+        # 子系统有效性（来自 data_loader，不依赖默认参数）
 
 
         # ⚡ TA 数据过期处理：降权 30%，权重重新分配

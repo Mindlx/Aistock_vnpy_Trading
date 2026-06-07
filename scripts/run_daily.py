@@ -34,6 +34,8 @@ from typing import Any, Dict, List, Optional
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+STAGING_DIR = Path("data/staging")
+
 import yaml
 
 from src.data_loader import UnifiedDataLoader
@@ -87,6 +89,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output", type=str, default=None,
         help="输出目录（覆盖配置文件中的 fusion_output 路径）",
+    )
+    parser.add_argument(
+        "--review-mode", action="store_true",
+        help="审核模式：保存融合结果到staging，等待手工确认后再推送",
+    )
+    parser.add_argument(
+        "--confirm", action="store_true",
+        help="确认staging中的融合结果并推送（需配合--date或自动读取最新staging）",
     )
     return parser.parse_args()
 
@@ -439,6 +449,35 @@ def main():
         "fusion_output", "data/fusion_output"
     )
     save_fusion_output(results, today, output_dir, config)
+
+    # ── 审核模式：保存到staging + 等待确认 ──
+    if args.review_mode:
+        STAGING_DIR.mkdir(parents=True, exist_ok=True)
+        staging_file = STAGING_DIR / f"fusion_{today}.json"
+        flag_file = STAGING_DIR / f"fusion_{today}.flag"
+        with open(staging_file, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, default=str, indent=2)
+        flag_file.write_text("pending")
+        print(f"\n⏸  审核模式: 结果已保存至 {staging_file}")
+        print(f"   运行 'python scripts/run_daily.py --confirm --date {today}' 确认后推送")
+        return
+
+    # ── 确认模式：从staging读取结果 ──
+    if args.confirm:
+        STAGING_DIR.mkdir(parents=True, exist_ok=True)
+        staging_file = STAGING_DIR / f"fusion_{today}.json"
+        flag_file = STAGING_DIR / f"fusion_{today}.flag"
+        if not staging_file.exists():
+            print(f"❌ staging 文件不存在: {staging_file}")
+            return
+        flag = flag_file.read_text().strip() if flag_file.exists() else "unknown"
+        if flag == "confirmed":
+            print(f"ℹ️  {today} 已确认过，跳过重复推送")
+            return
+        with open(staging_file, "r", encoding="utf-8") as f:
+            results = json.load(f)
+        flag_file.write_text("confirmed")
+        print(f"✅ 已确认: {today} 融合结果，准备推送")
 
     # 回测: 记录预测到回测数据库 (融合完成后自动执行)
     if not args.dry_run:
