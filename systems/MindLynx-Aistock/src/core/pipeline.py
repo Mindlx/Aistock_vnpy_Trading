@@ -1840,6 +1840,21 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     trend_result,
                     report_language,
                 )
+            else:
+                # 校验LLM生成的止损价合理性：止损应在当前价的10%~95%之间
+                raw_sl = sniper_points.get("stop_loss")
+                current_price = getattr(result, "current_price", None)
+                if current_price and isinstance(raw_sl, (int, float)):
+                    ratio = float(raw_sl) / current_price
+                    if ratio <= 0.1 or ratio >= 0.95:
+                        logger.warning(
+                            "[%s] LLM止损价不合理: %.2f (现价%.2f, 比例%.2f) → 回退到趋势支撑",
+                            result.code, raw_sl, current_price, ratio,
+                        )
+                        sniper_points["stop_loss"] = self._stop_loss_fallback_from_trend(
+                            trend_result,
+                            report_language,
+                        )
 
             # --- ideal_buy fallback ---
             raw_ideal = sniper_points.get("ideal_buy")

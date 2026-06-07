@@ -137,6 +137,13 @@ def check_content_integrity(result: "AnalysisResult") -> tuple[bool, list[str]]:
             return True
         if isinstance(value, str):
             return not value.strip()
+        # 数值合理性：必须为正数
+        try:
+            num = float(value)
+            if num <= 0 or math.isnan(num) or math.isinf(num):
+                return True
+        except (ValueError, TypeError):
+            return True
         return False
 
     if result.sentiment_score is None:
@@ -187,6 +194,13 @@ def apply_placeholder_fill(result: "AnalysisResult", missing_fields: list[str]) 
             return True
         if isinstance(value, str):
             return not value.strip()
+        # 数值合理性：必须为正数
+        try:
+            num = float(value)
+            if num <= 0 or math.isnan(num) or math.isinf(num):
+                return True
+        except (ValueError, TypeError):
+            return True
         return False
 
     placeholder = get_placeholder_text(getattr(result, "report_language", "zh"))

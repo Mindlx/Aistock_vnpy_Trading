@@ -95,7 +95,17 @@ class WeComNotifier:
             resist = max(ma10, ma20)
             sup_str = f"支撑{support:.2f} 压力{resist:.2f}"
 
-        extras = [x for x in [vr_str, sup_str] if x]
+        # 止损价（仅在看多/持有信号时展示）
+        stop_str = ""
+        stop_loss = r.get("mindlynx_stop_loss")
+        if stop_loss and price and float(stop_loss) > 0:
+            stop_price = float(stop_loss)
+            dist = (price - stop_price) / price * 100
+            if dist > 0:
+                urgency = "🛑" if dist < 3 else ("⚠️" if dist < 7 else "")
+                stop_str = f"{urgency}止{stop_price:.2f}({dist:.1f}%)"
+
+        extras = [x for x in [vr_str, sup_str, stop_str] if x]
         extra_str = f"｜{' '.join(extras)}" if extras else ""
 
         return (
@@ -129,6 +139,27 @@ class WeComNotifier:
             lines.append("**⚡ 系统分歧**")
             for r in disagree:
                 lines.append(self._stock_line(r))
+            lines.append("")
+
+        # ── 止损关注（所有信号为正但距止损<7%的股票）──
+        stop_alerts = []
+        for r in valid:
+            stop_loss = r.get("mindlynx_stop_loss")
+            price = r.get("price", 0)
+            if stop_loss and price and float(stop_loss) > 0:
+                dist = (price - float(stop_loss)) / price * 100
+                if 0 < dist < 7:
+                    stop_alerts.append((dist, r))
+        if stop_alerts:
+            stop_alerts.sort()
+            lines.append("**🛑 止损关注**")
+            for dist, r in stop_alerts:
+                name = r.get('stock_name', '')
+                code = r['stock_code']
+                sl = float(r.get("mindlynx_stop_loss", 0))
+                lines.append(
+                    f"- **{name}({code})** 距止损¥{sl:.2f}仅{dist:.1f}%"
+                )
             lines.append("")
 
         # ── 按信号强度分组 ──

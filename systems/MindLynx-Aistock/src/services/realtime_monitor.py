@@ -61,6 +61,7 @@ class StockIntradayState:
     stop_loss_2_5x: float = 0.0
     stop_loss_3x: float = 0.0
     pre_close: float = 0.0
+    trailing_high: float = 0.0  # 追踪最高价（用于上移止损，永不下降）
 
     # --- Phase 3: 均线 ---
     ma5: float = 0.0
@@ -587,9 +588,20 @@ class RealtimeMonitorService:
                 state.atr14 = atr_val
                 if atr_val > 0 and closes:
                     last_close = closes[-1]
-                    state.stop_loss_2x = last_close - 2.0 * atr_val
-                    state.stop_loss_2_5x = last_close - 2.5 * atr_val
-                    state.stop_loss_3x = last_close - 3.0 * atr_val
+                    # 追踪最高价：取历史最高和本次收盘价的最大值
+                    if state.trailing_high <= 0:
+                        state.trailing_high = last_close
+                    else:
+                        state.trailing_high = max(state.trailing_high, last_close)
+                    # 止损基于trailing_high计算，倍数从self._atr_multipliers读取
+                    # 固定字段名保证向后兼容
+                    _stop_fields = ["stop_loss_2x", "stop_loss_2_5x", "stop_loss_3x"]
+                    for i, mult in enumerate(self._atr_multipliers[:3]):
+                        if i >= len(_stop_fields):
+                            break
+                        new_price = state.trailing_high - mult * atr_val
+                        old = getattr(state, _stop_fields[i], 0.0)
+                        setattr(state, _stop_fields[i], max(old, new_price) if old > 0 else new_price)
 
                 # MA
                 if len(closes) >= 5:
@@ -765,12 +777,14 @@ class RealtimeMonitorService:
         if state.atr14 <= 0:
             return
 
-        # 三级止损 [2.0, 2.5, 3.0]
-        stop_levels = [
-            (2.0, state.stop_loss_2x),
-            (2.5, state.stop_loss_2_5x),
-            (3.0, state.stop_loss_3x),
-        ]
+        # 从self._atr_multipliers动态读取止损级别
+        _stop_fields = ["stop_loss_2x", "stop_loss_2_5x", "stop_loss_3x"]
+        stop_levels = []
+        for i, mult in enumerate(self._atr_multipliers[:3]):
+            if i >= len(_stop_fields):
+                break
+            stop_price = getattr(state, _stop_fields[i], 0.0)
+            stop_levels.append((mult, stop_price))
 
         trigger_level: float | None = None
         trigger_price: float | None = None
