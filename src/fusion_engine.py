@@ -386,7 +386,6 @@ class FusionEngine:
         tradingagent_valid: bool = True,
         ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
-        ml_factor_l7: Optional[float] = None,
         alpha158_l7: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
@@ -425,7 +424,6 @@ class FusionEngine:
                 tradingagent_valid=tradingagent_valid,
                 ta_is_stale=ta_is_stale,
                 ta_debate_state=ta_debate_state,
-                ml_factor_l7=ml_factor_l7,
                 alpha158_l7=alpha158_l7,
             )
             bayesian_result = self._fuse_bayesian(
@@ -473,7 +471,6 @@ class FusionEngine:
             tradingagent_valid=tradingagent_valid,
             ta_is_stale=ta_is_stale,
             ta_debate_state=ta_debate_state,
-            ml_factor_l7=ml_factor_l7,
             alpha158_l7=alpha158_l7,
         )
 
@@ -493,7 +490,6 @@ class FusionEngine:
         tradingagent_valid: bool = False,
         ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
-        ml_factor_l7: Optional[float] = None,
         alpha158_l7: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
@@ -503,21 +499,14 @@ class FusionEngine:
           ⚡ 分歧检测 + 不确定性惩罚
           ⚡ 置信度调制（lynx prob_up 自然调制，mindlynx 评分细分）
           ⚡ 缺失系统自动重分配权重
-          ⚡ ml_factor: 12因子纯数学信号增强ly（同源OHLCV，不独立投票）
           ⚡ alpha158: 58因子+LGB信号增强ly（同源OHLCV，不独立投票）
         """
-        # ── Step 1: 归一化各系统 + ml_factor增强ly ──
+        # ── Step 1: 归一化各系统 + alpha158增强ly ──
         lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
             lynx_signal, lynx_prob_up
         )
 
-        # ml_factor 因子信号增强ly（同源OHLCV，非独立系统）
-        if ml_factor_l7 is not None and lynx_valid:
-            blend = 0.15
-            lynx_normalized = lynx_normalized * (1 - blend) + float(ml_factor_l7) * blend
-            self.logger.info(f"[{stock_code}] ml_factor增强ly: ml={float(ml_factor_l7):.2f} ly→{lynx_normalized:.2f}")
-
-        # alpha158 因子信号增强ly（独立因子通道，同源OHLCV）
+        # alpha158 因子信号增强ly（独立因子通道）
         if alpha158_l7 is not None and lynx_valid:
             blend = 0.10
             lynx_normalized = lynx_normalized * (1 - blend) + float(alpha158_l7) * blend
@@ -688,7 +677,6 @@ class FusionEngine:
                 tradingagent_valid=item.get("tradingagent_valid", True),
                 ta_is_stale=ta_is_stale,
                 ta_debate_state=item.get("ta_debate_state", {}),
-                ml_factor_l7=item.get("ml_factor_l7"),
                 alpha158_l7=item.get("alpha158_l7"),
             )
             # 补充行情数据和子系统原始数据（从输入透传到结果）
