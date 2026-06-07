@@ -387,6 +387,7 @@ class FusionEngine:
         ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
         ml_factor_l7: Optional[float] = None,
+        alpha158_l7: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         对单只股票进行融合分析。
@@ -425,6 +426,7 @@ class FusionEngine:
                 ta_is_stale=ta_is_stale,
                 ta_debate_state=ta_debate_state,
                 ml_factor_l7=ml_factor_l7,
+                alpha158_l7=alpha158_l7,
             )
             bayesian_result = self._fuse_bayesian(
                 stock_code=stock_code, stock_name=stock_name,
@@ -472,6 +474,7 @@ class FusionEngine:
             ta_is_stale=ta_is_stale,
             ta_debate_state=ta_debate_state,
             ml_factor_l7=ml_factor_l7,
+            alpha158_l7=alpha158_l7,
         )
 
     # ──────── 原始线性融合逻辑（重命名自 fuse_single_stock） ────────
@@ -491,6 +494,7 @@ class FusionEngine:
         ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
         ml_factor_l7: Optional[float] = None,
+        alpha158_l7: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         线性加权融合（原始逻辑）。
@@ -500,6 +504,7 @@ class FusionEngine:
           ⚡ 置信度调制（lynx prob_up 自然调制，mindlynx 评分细分）
           ⚡ 缺失系统自动重分配权重
           ⚡ ml_factor: 12因子纯数学信号增强ly（同源OHLCV，不独立投票）
+          ⚡ alpha158: 58因子+LGB信号增强ly（同源OHLCV，不独立投票）
         """
         # ── Step 1: 归一化各系统 + ml_factor增强ly ──
         lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
@@ -511,6 +516,12 @@ class FusionEngine:
             blend = 0.15
             lynx_normalized = lynx_normalized * (1 - blend) + float(ml_factor_l7) * blend
             self.logger.info(f"[{stock_code}] ml_factor增强ly: ml={float(ml_factor_l7):.2f} ly→{lynx_normalized:.2f}")
+
+        # alpha158 因子信号增强ly（独立因子通道，同源OHLCV）
+        if alpha158_l7 is not None and lynx_valid:
+            blend = 0.10
+            lynx_normalized = lynx_normalized * (1 - blend) + float(alpha158_l7) * blend
+            self.logger.info(f"[{stock_code}] alpha158增强ly: a158={float(alpha158_l7):.2f} ly→{lynx_normalized:.2f}")
 
         # 防御性守卫：无效系统强制中性，防止下游遗漏处理
         if not mindlynx_valid:
@@ -678,6 +689,7 @@ class FusionEngine:
                 ta_is_stale=ta_is_stale,
                 ta_debate_state=item.get("ta_debate_state", {}),
                 ml_factor_l7=item.get("ml_factor_l7"),
+                alpha158_l7=item.get("alpha158_l7"),
             )
             # 补充行情数据和子系统原始数据（从输入透传到结果）
             for k in ("price", "pct_chg", "volume_ratio", "ma5", "ma10", "ma20",

@@ -814,6 +814,35 @@ class MLFactorLoader:
             return {}
 
 
+class Alpha158Loader:
+    """Alpha158 因子层信号加载器 — 读取 alpha158_signal.json"""
+
+    def __init__(self, signal_path: str = "data/realtime/alpha158_signal.json"):
+        self.signal_path = Path(signal_path)
+
+    def load_by_date(self, date_str: str | None = None) -> Dict[str, Dict[str, Any]]:
+        if not self.signal_path.exists():
+            logger.debug(f"alpha158_signal.json 不存在: {self.signal_path}")
+            return {}
+        try:
+            with open(self.signal_path, "r") as f:
+                data = json.load(f)
+            stocks_data = data.get("stocks", {})
+            results = {}
+            for code, info in stocks_data.items():
+                l7 = info.get("l7_score")
+                if l7 is not None:
+                    results[code] = {
+                        "alpha158_l7": float(l7),
+                        "alpha158_prob_up": float(info.get("prob_up", 0)),
+                    }
+            logger.debug(f"alpha158: {len(results)} 只股票")
+            return results
+        except Exception as e:
+            logger.debug(f"alpha158 加载失败: {e}")
+            return {}
+
+
 class UnifiedDataLoader:
     """
     统一数据加载器 — 按股票池组织四个系统的数据（ly/ml/at/ml_factor）。
@@ -842,11 +871,12 @@ class UnifiedDataLoader:
         self.mindlynx = MindLynxDataLoader(mindlynx_reports)
         self.tradingagent = TradingAgentDataLoader(tradingagent_logs)
         self.ml_factor = MLFactorLoader()
+        self.alpha158 = Alpha158Loader()
         self.stock_pool = self._load_stock_pool(stock_pool_path)
 
         logger.info(
             f"UnifiedDataLoader: 股票池 {len(self.stock_pool)} 只, "
-            f"系统: lynx/√ mindlynx/√ tradingagent/√ ml_factor/√"
+            f"系统: lynx/√ mindlynx/√ tradingagent/√ ml_factor/√ alpha158/√"
         )
 
     @staticmethod
@@ -884,10 +914,11 @@ class UnifiedDataLoader:
         mindlynx_signals = self.mindlynx.load_by_date(date_str)
         ta_signals = self.tradingagent.load_all_by_date(date_str)
         ml_factor_signals = self.ml_factor.load_by_date(date_str)
+        alpha158_signals = self.alpha158.load_by_date(date_str)
 
         logger.info(
             f"数据就绪: lynx={len(lynx_signals)} mindlynx={len(mindlynx_signals)} "
-            f"tradingagent={len(ta_signals)} ml_factor={len(ml_factor_signals)}"
+            f"tradingagent={len(ta_signals)} ml_factor={len(ml_factor_signals)} alpha158={len(alpha158_signals)}"
         )
 
         # 按股票池组织
@@ -911,13 +942,18 @@ class UnifiedDataLoader:
             ta_rating = ta.get("rating", "")
             ta_has_data = bool(ta)  # 子系统是否真正有数据（非空dict）
 
-            # ml_factor 因子层信号（纯数学，无LLM）
+            # ml_factor 因子层信号
             ml_factor = ml_factor_signals.get(code, {})
             ml_factor_l7 = ml_factor.get("ml_factor_l7")
             ml_factor_has_data = ml_factor_l7 is not None
 
+            # alpha158 因子层信号
+            alpha158 = alpha158_signals.get(code, {})
+            alpha158_l7 = alpha158.get("alpha158_l7")
+            alpha158_has_data = alpha158_l7 is not None
+
             # 至少有一个系统有真实数据才加入
-            has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating) or ml_factor_has_data
+            has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating) or ml_factor_has_data or alpha158_has_data
 
             # 获取最新股价和涨跌幅（直接调 Sina 实时行情 API，不依赖缓存）
             price = 0.0
@@ -1007,6 +1043,9 @@ class UnifiedDataLoader:
                     "ml_factor_l7": ml_factor_l7,
                     "ml_factor_valid": ml_factor_has_data,
                     "ml_factor_label": ml_factor.get("ml_factor_label", ""),
+                    # alpha158 因子信号
+                    "alpha158_l7": alpha158_l7,
+                    "alpha158_valid": alpha158_has_data,
                 })
 
         logger.info(f"UnifiedDataLoader: 组织完成 {len(stock_signals)} 只股票")
