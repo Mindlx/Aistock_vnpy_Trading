@@ -1,7 +1,7 @@
 # Aistock_vnpy_Trading 系统架构文档
 
-> 最后更新: 2026-06-06
-> 基于完整三轮审计：推送配置统一 → 定时触发链分析 → c1skill 反方论证
+> 最后更新: 2026-06-07
+> 覆盖: 三系统融合 + ly双模型集成 + alpha158独立因子通道 + 设计决策D8
 
 ---
 
@@ -28,6 +28,7 @@
 │         │    │  ly_signal.json        │       │                 │
 │         │    │  ml_signal.json        │       │                 │
 │         │    │  at_signal.json        │       │                 │
+│         │    │  alpha158_signal.json  │       │                 │
 │         │    └───────────┬────────────┘       │                 │
 │         │                │                    │                 │
 │         ▼                ▼                    ▼                 │
@@ -53,8 +54,8 @@
 
 | 子系统 | 方法 | 频率 | 核心输出 | 独立性 |
 |--------|------|------|---------|--------|
-| **ly** (lynx_vnpy) | RandomForest 量化模型 + 15 技术指标 | 日频 (15:15) | 上涨概率 + L7 信号 | 独立 venv, 独立推送 |
-| **ml** (MindLynx-Aistock) | 因子+策略+LLM 推理 | 日频/实时 | 综合评分 0-100 | 独立 venv, 独立推送 |
+| **ly** (lynx_vnpy) | RandomForest+LGB 双模型集成 + 15TA+58Alpha158因子 | 日频/准实时 | 上涨概率 + L7 信号 | 独立推送 |
+| **ml** (MindLynx-Aistock) | 12因子+15策略+LLM 推理 | 日频/实时 | 综合评分 0-100 | 独立 venv, 独立推送 |
 | **at** (mind_TradingAgent) | 多智能体辩论 (LangGraph) | 盘后 (09:31/13:00) | 5 级评级 | 独立 venv |
 
 ### 核心原则
@@ -83,9 +84,10 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 **准实时融合的价值评估**
 
 文件交换区三信号的更新频率：
-- ly_signal.json: 每日一次 (15:15) — RF模型预测T+1，盘中固定不变
-- ml_signal.json: 每5分钟 — 因子层读stock_daily DB，有新数据就变
+- ly_signal.json: 每日一次 (15:15) — RF+LGB双模型集成，盘中固定
+- ml_signal.json: 每5分钟 — 12因子层读stock_daily DB，有新数据就变
 - at_signal.json: 每日两次 (09:31/13:00) — LLM辩论跑完即固定
+- alpha158_signal.json: 每5分钟 — 58Alpha158因子+LGB推理，纯数学无LLM
 
 所以盘中真正频繁变化的只有ml因子信号。那准实时融合的价值不在于"更快发现行情变化"（这事ML实时预警已经做到了），而在于**把ml因子信号放到三系统坐标系中做上下文解读**：
 
@@ -133,7 +135,8 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 |------|------|------|------|---------|------|
 | `scheduler.service` | 常驻 daemon | MindLynx | ~75MB | ❌ 智能跳过 | 内部调度 10 个定时任务 |
 | `monitor.service` | 常驻 daemon | MindLynx | ~13MB | ❌ 智能跳过 | WebSocket 盘中监控 |
-| `ml-factor.service` | 常驻 daemon | Fusion | ~15MB | ⚠️ 运行但无操作 | 因子计算 daemon |
+| `ml-factor.service` | 常驻 daemon | Fusion | ~15MB | ⚠️ 运行但无操作 | 12因子计算 daemon |
+| `alpha158-service.service` | 常驻 daemon | Fusion | ~15MB | ⚠️ 运行但无操作 | 58Alpha158因子+LGB daemon |
 | `realtime-fusion.service` | 常驻 daemon | Fusion | ~15MB | ❌ 周末跳过 | 文件交换区扫描 (v2 新增) |
 | `fusion.service` | oneshot | Fusion | - | ❌ 仅工作日 | 19:00 日终融合 |
 | `lynx-signal.service` | oneshot | Fusion | - | ❌ 仅工作日 | 15:15 量化信号 |
@@ -248,6 +251,19 @@ Mon 07:30 ─ scheduler ─ 周末情报补量
 **修复**: 改为 `WeComNotifier.send_markdown()`，与 Fusion 其他推送共享相同的发送逻辑。
 **判定**: ✅ 已修复。
 
+### D8: 12因子 vs 58Alpha158 — 为什么ml和ly用不同的因子集？
+
+**决策时间**: 2026-06-07
+**原因**: 
+- **ml的12因子**由因子专家手工精选，每个概念一个（illiquidity/Amihud非流动性、max_effect/极端收益、volume_trend/量价相关性、volatility_ratio/波动率结构等）。ml子系统通过LLM消费这些因子进行综合决策。
+- **ly的58Alpha158因子**来自vnpy库(Qlib方法论)，体系化覆盖：K线形态(kmid/klen/kup/klow/ksft)、多窗口滚动统计(MA/STD/MAX/MIN/RSV，5个窗口×每个)、涨跌统计(cntp/cntn/cntd)等。ly子系统通过LGB模型消费这些因子进行概率预测。
+
+**两者不是超集/子集关系**，而是互补关系：
+- 12因子中有8个概念(volume_trend/illiquidity/max_effect/volatility_ratio等)是58因子没有的
+- 58因子中K线形态/多窗口/分位数等体系化覆盖是12因子没有的
+
+**判定**: ✅ 正确的设计。两个子系统各自使用更适合自身消费方式的因子集，通过融合引擎对不同信号投票——这正是三系统融合架构的核心优势：互补独立，各取所长。
+
 ### D5: 为什么不从 0 重建？
 
 **决策时间**: 2026-06-06
@@ -282,6 +298,10 @@ Aistock_vnpy_Trading/
 │   ├── backtest.py             # 回测
 │   └── deploy-systemd.sh       # systemd 部署脚本
 │
+├── services/
+│   ├── ml_factor_service.py     # 12因子纯数学信号 (每5分钟)
+│   └── alpha158_service.py      # 58Alpha158因子+LGB信号 (每5分钟)
+│
 ├── config/
 │   ├── settings.yaml           # 融合配置
 │   ├── stock_pool.csv          # 10 只股票池
@@ -292,7 +312,13 @@ Aistock_vnpy_Trading/
 │
 ├── systems/                    # 三个深度定制子系统
 │   ├── lynx_vnpy/              # ly: RandomForest 量化
-│   │   └── lynx_signal.py      #    量化信号主程序
+│   │   └── lynx_signal.py      #    量化信号主程序 (RF+LGB双模型)
+│   │   ├── models/              #    RF+LGB模型pkl
+│   │   ├── vnpy_bridge/         #    Alpha158因子管线
+│   │   │   ├── data_converter.py    # DB→Parquet数据桥接
+│   │   │   ├── run_alpha_pipeline.py# Alpha158+LGB+IC管线
+│   │   │   ├── alpha_predictor.py   # 58因子+LGB推理模块
+│   │   │   └── ly_backtest.py       # 独立策略回测
 │   ├── MindLynx-Aistock/       # ml: AI 分析
 │   │   ├── main.py             #    主入口 (调度器/监控)
 │   │   ├── src/
@@ -311,7 +337,11 @@ Aistock_vnpy_Trading/
 │               └── xueqiu.py   # 雪球/东方财富数据源
 │
 ├── data/
-│   ├── realtime/               # 文件交换区 (ly/ml/at 信号)
+│   ├── realtime/               # 文件交换区 (ly/ml/at/alpha158 信号)
+│   │   ├── ly_signal.json
+│   │   ├── ml_signal.json
+│   │   ├── at_signal.json
+│   │   └── alpha158_signal.json
 │   └── unified_cache/          # SQLite 共享缓存
 │
 ├── docs/
@@ -369,6 +399,7 @@ systemctl --user list-units --all | grep aistock
 | ly | lynx_vnpy | RandomForest 量化信号系统 |
 | ml | MindLynx-Aistock | 因子+LLM AI 分析系统 |
 | at | mind_TradingAgent | 多智能体辩论交易系统 |
+| alpha158 | Alpha158因子服务 | 58因子+LGB纯数学因子信号通道 |
 | L7 | 7 级决策空间 | [-3, +3] 范围，7 级信号映射 |
 | Fusion | Aistock_vnpy_Trading | 三系统融合引擎 |
 | scheduler | ML scheduler | MindLynx 内部定时调度器 |

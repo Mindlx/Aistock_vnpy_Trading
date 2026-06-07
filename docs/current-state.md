@@ -1,0 +1,447 @@
+# 当前项目状态快照
+
+> 最后更新: 2026-06-07 (周日)
+> 范围: 代码架构 + 运行时状态 + 关键配置 + 近期变更 + 待办
+> 覆盖: src/、scripts/、services/、config/systemd/、docs/
+
+---
+
+## 一、系统全景
+
+Aistock_vnpy_Trading 是三系统信号融合决策平台（无执行层，输出仅为决策信号和仓位建议）。
+
+**重要区分：实时 vs 准实时**
+
+系统中有两种"实时"能力，不要混淆：
+
+| 层级 | 触发方式 | 延迟 | 推送内容 | 组件 |
+|------|---------|------|---------|------|
+| **ML实时预警** | WebSocket事件驱动 | 秒级 | 个股ATR止损/均线突破/量价异动 | monitor.service → realtime_monitor.py |
+| **Fusion准实时融合** | 文件轮询(300s) | 分钟级 | 三系统融合综合得分变化 | realtime-fusion.service → realtime_fusion.py |
+
+ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是否有止损触发、均线突破、量价异动，有则立即推送。Fusion准实时融合是**轮询驱动的近实时**：每5分钟扫一次文件交换区的三个json文件，计算融合得分变化，超过阈值才推送。两者各自独立运行，解决不同问题。
+
+**准实时融合的价值评估**
+
+文件交换区三信号的更新频率：
+- ly_signal.json: 每日一次 (15:15) — RF模型预测T+1，盘中固定
+- ml_signal.json: 每5分钟 — 因子层读DB计算，有新数据就变
+- at_signal.json: 每日两次 (09:31/13:00) — LLM辩论跑完固定
+
+盘中真正频繁变化的只有ml因子信号。准实时融合的价值不在于"更快发现行情变化"（ML实时预警已做到），而在于**把ml因子信号放到三系统坐标系中做上下文解读**：
+1. 共识漂移监测：ml因子变化在ly已是+2的背景下只是确认；在ly为-1.5时则是分歧加剧
+2. 分歧跟踪：ML预警看不到系统方向矛盾，准实时融合能看到"ly看空、ml转多、at中立"
+3. 仓位建议联动：ML预警说"止损触发了"，准实时融合说"综合得分从+1.2降到-0.3"
+
+**局限**：信号源变化不频繁，经常5分钟扫描无变化就跳过。定位应该是"盘中融合坐标系下的共识漂移监测"，不是"更快发现行情"。
+
+### 1.1 三个子系统
+
+| 缩写 | 系统 | 方法 | 频率 | 核心输出 |
+|------|------|------|------|---------|
+| ly | lynx_vnpy | RandomForest + 15技术指标 | 日频 15:15 | 上涨概率 + 信号等级 |
+| ml | MindLynx-Aistock | 12因子 + 15策略 + LLM推理 | 日频/实时 | 综合评分 0-100 + 操作建议 |
+| at | mind_TradingAgent | 多智能体辩论 (LangGraph) | 09:31/13:00 | 5级评级 (Buy~Sell) |
+
+### 1.2 两条融合路径
+
+```
+                 日终融合 (19:00)                        准实时融合 (09:33+)
+                 ───────────────                        ────────────────
+                 run_daily.py                           realtime_fusion.py
+                 (oneshot, systemd timer)               (daemon, 每300s扫描)
+                      │                                       │
+                      ▼                                       ▼
+     ┌──────────────────────────────────────┐    ┌──────────────────────────┐
+     │ data_loader.py 零侵入读取三系统输出     │    │ data/realtime/ 文件交换区  │
+     │ ├─ LynxDataLoader: import lynx_signal │    │ ├─ ly_signal.json (T+1)  │
+     │ ├─ MindLynx: 读 reports/ 报告文件      │    │ ├─ ml_signal.json (因子) │
+     │ └─ TradingAgent: 读 logs/ JSON        │    │ └─ at_signal.json (辩论) │
+     └──────────────────────────────────────┘    └──────────┬───────────────┘
+                      │                                       │
+                      ▼                                       ▼
+     ┌──────────────────────────────────────┐    ┌──────────────────────────┐
+     │ fusion_engine.py                     │    │ realtime_fusion.py       │
+     │ ├─ normalizer 归一化 (L7 映射)        │    │ ├─ 读文件交换区三json    │
+     │ ├─ 分歧检测 + 不确定性惩罚             │    │ ├─ 加权融合 (同权重)     │
+     │ ├─ 缺失系统权重重分配                 │    │ ├─ 分歧检测 + 惩罚      │
+     │ └─ 决策映射 → 仓位建议                │    │ └─ 变化超阈值才推送     │
+     └──────────────────────────────────────┘    └──────────────────────────┘
+                      │                                       │
+                      ▼                                       ▼
+     ┌──────────────────────────────────────┐    ┌──────────────────────────┐
+     │ wecom_notifier.py 企业微信推送         │    │ wecom_notifier.py        │
+     │ (Markdown, L7分组, 三层结构)           │    │ (Markdown, 仅变化推送)   │
+     └──────────────────────────────────────┘    └──────────────────────────┘
+```
+
+### 1.3 ml 因子层独立服务
+
+```
+     ml_factor_service.py (daemon, 每300s)
+     ─────────────────────────────────────
+     读取 stock_daily DB → FactorEngine 计算 12 因子
+     → 横截面归一化 → tanh映射到L7 → 写 ml_signal.json
+     完全绕过 LLM 层，纯数学计算。
+```
+
+---
+
+## 二、运行时状态
+
+### 2.1 systemd 服务
+
+| 服务 | Type | 内存 | 当前状态 | 负责 |
+|------|------|------|---------|------|
+| scheduler | daemon | ~75MB | ✅ running | ML内部调度(10个定时任务) |
+| monitor | daemon | ~13MB | ✅ running | WebSocket盘中监控 |
+| ml-factor | daemon | ~15MB | ✅ running | 因子层纯数学计算(300s) |
+| realtime-fusion | daemon | ~15MB | ⏸️ inactive(周末跳过) | 文件交换区扫描(300s) |
+| fusion | oneshot | - | inactive(等待19:00) | 日终融合 |
+| lynx-signal | oneshot | - | inactive(等待15:15) | 量化信号+推送 |
+| TA | oneshot | - | inactive(等待09:31) | TradingAgent辩论 |
+
+**常驻内存合计**: ~118MB（4个守护进程）
+
+### 2.2 timer 触发时间线
+
+```
+08:30 ─ scheduler ─── 日间情报(盘前)推送
+10:00 ─ scheduler ─── 整点全量分析
+11:00 ─ scheduler ─── 整点全量分析
+11:45 ─ scheduler ─── 大盘复盘(文字+PDF)
+13:00 ─ TA.timer ──── 第二轮TA深度分析
+14:00 ─ scheduler ─── 整点全量分析
+15:00 ─ scheduler ─── 整点全量分析
+15:15 ─ lynx-signal ─ 量化信号建模+推送
+15:45 ─ scheduler ─── 大盘复盘(文字+PDF)
+
+# 准实时融合 09:33~15:00 每5分钟扫描(仅工作日)
+# 因子计算 持续每5分钟扫描(仅工作日)
+
+19:00 ─ fusion.timer ── 日终融合+龙虎榜+评级PDF
+Sun 20:00 ─ scheduler ─ 周末情报推送
+Mon 07:30 ─ scheduler ─ 周末情报补量
+```
+
+### 2.3 文件交换区
+
+```
+data/realtime/
+├── ly_signal.json    ← lynx_signal.py (write_ly_signal.py) 写入
+├── ml_signal.json    ← ml_factor_service.py 写入 (因子层，非LLM)
+└── at_signal.json    ← mind_TradingAgent 写入
+```
+
+---
+
+## 三、关键配置
+
+### 3.1 权重 (settings.yaml)
+
+| 系统 | 权重 | 说明 |
+|------|------|------|
+| ly (lynx_vnpy) | 0.30 | RF量化模型，基线信号 |
+| ml (MindLynx) | 0.40 | 因子层实时模型，盘中填补 |
+| at (TradingAgent) | 0.30 | 多智能体辩论，主观判断 |
+
+fusion_mode: "dual"（同时输出linear+bayesian，CSV暴露linear层字段）
+
+### 3.2 ML阈值校准 (2026-06-07)
+
+| 参数 | 旧值 | 新值 | 效果 |
+|------|------|------|------|
+| sentiment_threshold.bull | 60 | 52 | 准确率74.6%, 覆盖率98% |
+| sentiment_threshold.bear | 40 | 49 | balanced score 73.2 vs旧42.0 |
+
+Flat zone (41-59): LLM方向信号弱(1.8% acc), 整体系数乘0.5。
+
+### 3.3 贝叶斯融合参数 (reliability.py)
+
+| 系统 | base_alpha | default_h | 说明 |
+|------|-----------|----------|------|
+| ly | 0.75 | 0.0 | sklearn predict_proba, 100%可重复 |
+| ml | 0.55~0.65 | 0.15 | ~40%因子+~60%LLM, per-stock差异 |
+| at | 0.40 | 0.30 | 纯LLM角色扮演, prompt敏感 |
+
+**per-stock alpha覆盖**: 000592=0.8, 300652=0.3, 600372=0.8, 603189=0.8, 603557=0.3, 605368=0.4, 688202=0.3。其余用BASE_ALPHA默认值0.65。DB动态alpha优先级高于静态覆盖。
+
+**数学否决权**: |P_ly - 0.50| > 0.30 时触发，根据其他系统方向决定覆盖强度 (0.4~0.8)。
+
+### 3.4 L7 7级决策映射 (v3.1)
+
+| L7 | 得分范围 | 信号 | 仓位 | emoji |
+|----|---------|------|------|-------|
+| +3 | [2.5, 3.0] | 强烈看多 | 2-3成 | 🔴 |
+| +2 | [1.5, 2.5) | 看多 | 1-2成 | 🔴 |
+| +1 | [0.5, 1.5) | 谨慎看多 | 0.5-1成 | 🟠 |
+| 0 | (-0.5, 0.5) | 中性/持有 | 0成 | ⚪ |
+| -1 | (-1.5, -0.5] | 谨慎看空 | 减至0.5成 | 🟡 |
+| -2 | (-2.5, -1.5] | 看空 | 大幅减仓 | 🟢 |
+| -3 | [-3.0, -2.5] | 强烈看空 | 清仓 | 🟢 |
+
+**关键修正**: "持有"映射到 L7=0（中性），不再是弱看多信号。
+
+### 3.5 ly 概率映射 (分段线性)
+
+```
+prob_up  0% → L7 -3.00   (钳位下限)
+prob_up 25% → L7 -2.06   (S6 看空)
+prob_up 35% → L7 -1.13   (S5 谨慎看空)
+prob_up 45% → L7  0.00   (S4 中性下界)
+prob_up 55% → L7  0.00   (S4 中性上界, flat zone)
+prob_up 65% → L7 +2.06   (S2 看多)
+prob_up 75% → L7 +3.00   (S1 强烈看多)
+prob_up 100%→ L7 +3.00   (钳位上限)
+```
+
+---
+
+## 四、推送架构
+
+### 4.1 两套引擎对比
+
+| 引擎 | venv | 类 | 能力 | 负责推送 |
+|------|------|-----|------|---------|
+| Fusion Engine | .venv (Python 3.10) | WeComNotifier | Markdown | 融合决策、准实时速报、量化信号 |
+| MindLynx | systems/.../.venv (Python 3.12) | WechatSender | Markdown/Text/Image/File | 个股分析、大盘复盘PDF、评级PDF |
+
+### 4.2 推送消息类型
+
+| 类型 | 引擎 | 时间 | 说明 |
+|------|------|------|------|
+| 融合决策 | Fusion | 19:00 | L7分组，三层结构 |
+| 准实时速报 | Fusion | 09:33+每5min | 仅变化超阈值推送 |
+| 量化信号 | Fusion | 15:15 | 单行每只 |
+| 大盘复盘 | MindLynx | 11:45/15:45 | 文字摘要+PDF |
+| 个股分析 | MindLynx | 整点(10/11/14/15) | Markdown仪表盘 |
+| 盘中告警 | MindLynx | 盘中触发 | ATR止损/均线突破 |
+| 周末要闻 | MindLynx | 周日20:00 | 按股分组 |
+
+### 4.3 最新推送格式 (2026-06-07 重构)
+
+三层结构：
+1. 一句话总结: 今日立场+看多/空分布+建议总仓位
+2. 风险提醒: 止损预警+系统分歧+降级合并为统一⚠区块
+3. 信号分组: 按L7等级分组展示，每只带三系统得分+仓位+止损
+
+(wecom_notifier.py v3.0, commit 5734845)
+
+### 4.4 推送配置
+
+webhook 在项目根 `.env` 单点维护（`WECOM_WEBHOOK_URL`）。更换只需改一个文件。
+
+---
+
+## 五、回测系统
+
+### 5.1 基础架构
+
+```
+fusion_engine.py → fusion_{date}.csv
+    ↓
+backtest.py record → bt_predictions 表 (SQLite)
+    ↓
+backtest.py check → unified_cache.ohlcv_cache.db (T+1行情)
+    ↓
+backtest.py report → 准确率报告
+```
+
+DB: `data/backtest/bt_results.db`，60列schema覆盖子系统有效性、ML dashboard字段。
+当前数据量: 60条预测(6交易日×10股)，40条已匹配行情。
+
+### 5.2 子命令
+
+| 命令 | 功能 |
+|------|------|
+| init | 初始化回测DB |
+| record | 从fusion CSV写入预测 |
+| check | 匹配次日行情 |
+| update | record+check (每日一次) |
+| report | 累计报告 |
+| report --detail | 含个股明细 |
+| backfill | 扫描历史CSV回填 |
+| simulate | 融合模拟交易 |
+| walkforward | 滑动窗口验证 (train=20, test=10, step=5) |
+| weight_sweep | 网格扫描权重组合 |
+
+### 5.3 WalkForward结果 (ly子系统)
+
+- In-sample: 88.9% (可能过拟合信号)
+- Out-of-sample: 46.7% (接近随机)
+- WalkForward融合回测: 已实现，待积累足够窗口数据
+
+### 5.4 因子研究核心发现 (docs/research/factor-research-report.md)
+
+| 结论 | 数据 |
+|------|------|
+| ICIR权重组合优于静态权重 | 日均IC 0.0340 vs 0.0035 |
+| 最佳因子 | size_factor (IC=+5.58%, ICIR=+0.17) |
+| 最差因子 | volume_trend (IC=-3.62%, ICIR=-0.12) |
+| 中性化效果有限 | 12因子中仅2个改善，3个恶化 |
+
+---
+
+## 六、代码模块职责速查
+
+### 6.1 src/ (Fusion venv)
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| fusion_engine.py | 709 | 融合核心：linear/bayesian/dual 三种模式 |
+| normalizer.py | 390 | L7映射 v3.1 + 概率空间工具 |
+| reliability.py | 285 | 贝叶斯α/c/h参数 + 幻觉检测 + 置信度校准 |
+| data_loader.py | 965 | 零侵入三系统读取 + UnifiedCache集成 |
+| realtime_fusion.py | 307 | 文件交换区扫描daemon |
+| wecom_notifier.py | 294 | 企业微信推送 v3.0 |
+| feature_bridge.py | 156 | 可选功能：龙虎榜/东方财富评级 |
+| logger.py | (内联) | CSV/JSON持久化 |
+| unified_cache.py | (内联) | SQLite共享OHLCV缓存 |
+| mind_agent_wrapper.py | (内联) | TradingAgent封装 |
+| mind_stock_config.py | (内联) | A股代码映射 |
+
+### 6.2 services/ (Fusion venv)
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| ml_factor_service.py | 189 | 因子层纯数学计算(无LLM)，写ml_signal.json |
+
+### 6.3 scripts/
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| run_daily.py | 575 | 日终融合入口 |
+| backtest.py | 1127 | 完整回测框架 |
+| write_ly_signal.py | - | ly信号写入文件交换区 |
+
+---
+
+## 七、近一周主要变更 (2026-06-03 ~ 06-07)
+
+按时间顺序:
+
+**6/3** — 基础建设
+- realtime_fusion集成测试全覆盖 (84cc3c1)
+- requirements.txt补全8个缺失依赖 (609f50d)
+
+**6/5** — 推送重构
+- 推送格式统一：大盘复盘+自选股+龙虎榜+雪球+量比+融合图标 (0b48af0)
+
+**6/6** — 密集功能期
+
+| 变更 | 描述 | 重要性 |
+|------|------|--------|
+| 推送架构重构 | 推送统一+文档化 (477756f) | 架构级 |
+| c1skill audit 6bug修复 | 含ATR层级冷却独立计时 (41c56a2) | 运行安全 |
+| ATR止损冷却修复 | 各倍率独立计时 (a611ea4) | bugfix |
+| 回测DB扩展 | 子系统有效性跟踪 (7857b43) | 回测基建 |
+| ML数据接入融合 | factor_z_score + trend_score + risk_alerts (9756f0c/ffeca81) | 信号路径 |
+| ly独立回测 | --backtest标志 (06373c7) | 回测基建 |
+| ly WalkForward | OOS=46.7% (f051f79) | 验证 |
+| 融合模拟交易 | backtest.py simulate (5e6492b) | 回测基建 |
+| operation_advice对齐 | 与sentiment_score提示词对齐 (bf04a70) | bugfix |
+| ML子系统校准 | 60/40→52/49阈值, per-stock alpha, 提示词calibration (c6aa739) | **最重要** |
+| 路线图文档 | ml_roadway/ml_backtest/ml_prompt (c6aa739) | 文档 |
+
+**6/7** — ly能力启动期 (12 commits)
+
+| 变更 | 描述 | commit |
+|------|------|--------|
+| 止损专项改进 | trailing_high上移止损 + 推送展示 + LLM校验 | 3b6f695 |
+| c1skill建议 | WalkForward/去极值/参数敏感性/P0 bug/审核模式/LLM脱敏 | ad4aefa |
+| 因子研究 | 中性化+ICIR衰减对比 | 9af52e7 |
+| 融合推送重组 | 一句话总结+风险聚合区块 | 5734845 |
+| vnpy依赖安装+数据桥接 | polars/lightgbm/plotly/talib, DB→Parquet | 0b7f83d |
+| Pipeline管线 | Alpha158计算+LGB训练+IC分析 | 0b7f83d |
+| Alpha158+LGB生产集成 | lynx_signal.py --alpha, 58因子predictor | 7f44621 |
+| 双模型集成(默认) | RF+LGB并行, predict_ensemble() | 36dca84 |
+| ml_factor融合接入 | 12因子15% blend进ly | f4b09da |
+| vnpy独立回测 | BacktestingEngine集成 | 890f7b6 |
+| alpha158独立服务 | 58因子+LGB每5分钟, 10% blend | 0a01127 |
+| ml_factor清理 | 移除冗余blend, alpha158为唯一ly增强 | d2ffdc9 |
+| 架构文档更新 | D8决策, ly全景更新 | 当前 |
+
+**关键架构决策**: 12因子(mL)和58Alpha158因子(ly)是两套互补独立的因子体系,不是超集子集关系。
+ml的12因子有独特信号(illiquidity/max_effect/volume_trend等),能覆盖58因子没有的维度。
+ly的58因子提供体系化覆盖(K线形态/多窗口统计/分位数等)。
+两者互补独立,通过融合引擎各自投票——这是三系统融合架构的核心优势。
+
+---
+
+## 八、待办与优先级
+
+### P0 — 积累数据 (现在开始，被动等待)
+
+| 任务 | 条件 | 预计完成 |
+|------|------|---------|
+| post-HP3融合记录 ≥200条 | 正常交易日5-10天 | ~6/15 |
+| at评估所需5d forward数据 | 需~2周 | ~6/15 |
+| backtest --force回数据恢复 | EastMoney等API可用 | 不确定 |
+
+### P1 — AT价值评估 (forward数据就绪后)
+
+评估TradingAgent是否有统计显著预测能力。at当前alpha=0.40。
+关键未知：at 40.5% strong_bearish是信号还是噪音？
+
+### P2 — Backtest --force 重算 (API恢复后)
+
+用52/49阈值+HP3双路径重新评估全部历史记录，更新per-stock alpha。
+
+### P3 — L7_THRESHOLDS 校准
+
+等待条件（全部满足）:
+- post-HP3记录 ≥200条 (~6/15)
+- AT评估完成
+- backtest --force成功运行
+
+c1skill论证结论: **现在不改L7 flat zone**。原因: ①98.2%的pre-HP3数据落在flat zone ②at 40.5% strong_bearish可能是噪音 ③AT评估未完成。
+
+### P2-c1skill 已实现的改进
+
+✅ WalkForward融合回测 (train=20, test=10, step=5)
+✅ MAD去极值 (factor_engine.py winsorize_mad, 阈值5.0≈3.35σ)
+✅ 参数敏感性测试 (cmd_weight_sweep 网格扫描)
+✅ ml/at valid默认值False + 防御性归一化守卫
+✅ --review-mode + --confirm 审核模式
+✅ LLM prompt脱敏 (prompt_anonymize配置)
+✅ 回测报告增强 (盈亏比+最大连续亏损)
+
+---
+
+## 九、已知陷阱（运维注意）
+
+### 9.1 双副本同步
+
+`systems/MindLynx-Aistock/` 是独立文件副本（非子模块/符号链接）。
+修改MindLynx源码后，必须手动cp到副本目录并重启相关进程。
+受影响: scheduler, monitor (均运行在副本路径下)。
+
+同步前检查 `git log --oneline --follow <file>` 确认副本是否有本地独有优化。
+
+### 9.2 推送格式陷阱
+
+- `--single-notify` 模式走不同代码路径 (format1不是format2)，修改 `generate_wechat_dashboard()` 后需验证日志含 `[format2]` 标记。
+- LLM返回数据可能含markdown语法，`_clean_md()` 需在截断前调用。
+- ideal_buy截断陷阱: 先清洗再截断，factor_summary截断从80字改为120字。
+
+### 9.3 周末空转
+
+realtime-fusion和ml-factor服务已加入 `_is_trading_day()` 检测，非工作日睡眠到下一交易日09:33。
+
+---
+
+## 十、数据源与依赖
+
+| 源 | 优先级 | 用途 | 稳定性 |
+|----|--------|------|--------|
+| Sina API (hq.sinajs.cn) | 最高 | 实时行情 | 稳定 |
+| EastMoney | 中 | 龙虎榜/基本面 | 不稳定，常触发重试 |
+| akshare | 后备 | 补充数据 | 版本依赖敏感 |
+| stock_daily DB (sqlite) | 日终 | 因子引擎计算 | 由ML scheduler写入 |
+| unified_cache (sqlite) | 缓存 | 共享OHLCV | TTL 24h |
+
+---
+
+## 十一、股票池
+
+10只A股: 001390古麒绒材(SZ), 300652雷迪克(SZ), 600372中航机载(SH), 605368蓝天燃气(SH), 000592平潭发展(SZ), 603189*ST网达(SH), 603557*ST起步(SH), 688202美迪西(SH), 601801皖新传媒(SH), 300676华大基因(SZ)
