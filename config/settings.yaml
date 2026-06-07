@@ -3,8 +3,9 @@
 
 weights:
   lynx_vnpy: 0.30          # ly: RandomForest 量化模型 (T+1, 复杂模型)
-  mindlynx: 0.40           # ml: 因子层实时模型 (盘中实时, 12因子)
-  tradingagent: 0.30       # at: 多智能体辩论 (盘前/午盘/收盘, 主观判断)
+  mindlynx: 0.40           # ml: 因子层实时模型 + LLM推理 (盘中实时, 12因子+策略)
+  tradingagent: 0.25       # at: 多智能体辩论 (盘前/午盘/收盘, 主观判断)
+  ml_factor: 0.05          # mf: 纯因子层信号 (12因子数学加权, 无LLM, 每5分钟更新)
 
 # 7 级 L7 阈值已内置于 normalizer.py 的 L7_THRESHOLDS 中
 # 如需自定义，取消注释并在 fusion_engine.py 中改为从 config 读取

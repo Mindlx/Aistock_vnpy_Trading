@@ -781,9 +781,42 @@ class TradingAgentDataLoader:
 # 统一加载器: 按股票池组织三系统数据
 # ══════════════════════════════════════════════
 
+class MLFactorLoader:
+    """ml_factor 因子层信号加载器 — 读取 ml_signal.json"""
+
+    def __init__(self, signal_path: str = "data/realtime/ml_signal.json"):
+        self.signal_path = Path(signal_path)
+
+    def load_by_date(self, date_str: str | None = None) -> Dict[str, Dict[str, Any]]:
+        """读取 ml_signal.json，返回 {code: {l7_score, composite_score, composite_label}}"""
+        if not self.signal_path.exists():
+            logger.debug(f"ml_signal.json 不存在: {self.signal_path}")
+            return {}
+
+        try:
+            with open(self.signal_path, "r") as f:
+                data = json.load(f)
+            stocks_data = data.get("stocks", {})
+
+            results = {}
+            for code, info in stocks_data.items():
+                l7 = info.get("l7_score")
+                if l7 is not None:
+                    results[code] = {
+                        "ml_factor_l7": float(l7),
+                        "ml_factor_score": float(info.get("composite_score", 0)),
+                        "ml_factor_label": info.get("composite_label", ""),
+                    }
+            logger.debug(f"ml_factor: {len(results)} 只股票")
+            return results
+        except Exception as e:
+            logger.debug(f"ml_factor 加载失败: {e}")
+            return {}
+
+
 class UnifiedDataLoader:
     """
-    统一数据加载器 — 按股票池组织三个系统的数据。
+    统一数据加载器 — 按股票池组织四个系统的数据（ly/ml/at/ml_factor）。
 
     每个系统独立加载，互不影响。
     提供 single_source_of_truth 方法：为每只股票生成融合引擎所需的输入。
@@ -794,7 +827,8 @@ class UnifiedDataLoader:
         # 返回: [{"code": "601801", "name": "皖新传媒",
         #          "lynx_signal": "...", "lynx_prob_up": ...,
         #          "mindlynx_advice": "...", "mindlynx_score": ...,
-        #          "tradingagent_rating": "..."}, ...]
+        #          "tradingagent_rating": "...",
+        #          "ml_factor_l7": ..., "ml_factor_valid": ...}, ...]
     """
 
     def __init__(
@@ -807,11 +841,12 @@ class UnifiedDataLoader:
         self.lynx = LynxDataLoader(lynx_root)
         self.mindlynx = MindLynxDataLoader(mindlynx_reports)
         self.tradingagent = TradingAgentDataLoader(tradingagent_logs)
+        self.ml_factor = MLFactorLoader()
         self.stock_pool = self._load_stock_pool(stock_pool_path)
 
         logger.info(
             f"UnifiedDataLoader: 股票池 {len(self.stock_pool)} 只, "
-            f"系统: lynx/√ mindlynx/√ tradingagent/√"
+            f"系统: lynx/√ mindlynx/√ tradingagent/√ ml_factor/√"
         )
 
     @staticmethod
@@ -848,10 +883,11 @@ class UnifiedDataLoader:
         lynx_signals = self.lynx.load_by_date(date_str)
         mindlynx_signals = self.mindlynx.load_by_date(date_str)
         ta_signals = self.tradingagent.load_all_by_date(date_str)
+        ml_factor_signals = self.ml_factor.load_by_date(date_str)
 
         logger.info(
             f"数据就绪: lynx={len(lynx_signals)} mindlynx={len(mindlynx_signals)} "
-            f"tradingagent={len(ta_signals)}"
+            f"tradingagent={len(ta_signals)} ml_factor={len(ml_factor_signals)}"
         )
 
         # 按股票池组织
@@ -875,8 +911,13 @@ class UnifiedDataLoader:
             ta_rating = ta.get("rating", "")
             ta_has_data = bool(ta)  # 子系统是否真正有数据（非空dict）
 
+            # ml_factor 因子层信号（纯数学，无LLM）
+            ml_factor = ml_factor_signals.get(code, {})
+            ml_factor_l7 = ml_factor.get("ml_factor_l7")
+            ml_factor_has_data = ml_factor_l7 is not None
+
             # 至少有一个系统有真实数据才加入
-            has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating)
+            has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating) or ml_factor_has_data
 
             # 获取最新股价和涨跌幅（直接调 Sina 实时行情 API，不依赖缓存）
             price = 0.0
@@ -962,6 +1003,10 @@ class UnifiedDataLoader:
                     "tradingagent_valid": ta_has_data,
                     "ta_debate_state": ta.get("debate_state", {}),
                     "mindlynx_trend": mindlynx.get("trend", ""),
+                    # ml_factor 因子层信号
+                    "ml_factor_l7": ml_factor_l7,
+                    "ml_factor_valid": ml_factor_has_data,
+                    "ml_factor_label": ml_factor.get("ml_factor_label", ""),
                 })
 
         logger.info(f"UnifiedDataLoader: 组织完成 {len(stock_signals)} 只股票")
