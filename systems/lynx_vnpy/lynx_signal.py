@@ -364,11 +364,55 @@ def push_wecom(signals: list[dict]):
             ok = getattr(result, "status_code", 0) == 200
     print("  ✅ 推送成功" if ok else "  ❌ 推送失败")
 
+# ===== 5.5 Alpha158+LGB路径 =====
+
+def _predict_alpha(df: pd.DataFrame, code: str, name: str) -> dict | None:
+    """使用Alpha158+LGB模型预测"""
+    try:
+        from vnpy_bridge.alpha_predictor import alpha_predict
+        prob = alpha_predict(df, code)
+    except Exception:
+        return None
+    if prob is None:
+        return None
+
+    prob_pct = round(prob * 100, 1)
+    score = _l7_score(prob)
+    label = _l7_label(score)
+    emoji = _l7_emoji(score)
+    signal = f"{emoji} {label}"
+
+    strength = "强" if prob >= 0.65 else ("弱" if prob <= 0.35 else "中")
+
+    # 获取最新价
+    closes = df.get("收盘", df.get("close", []))
+    price = float(closes.iloc[-1]) if hasattr(closes, 'iloc') else 0
+    change = 0.0
+    if len(closes) >= 2:
+        change = round((closes.iloc[-1] - closes.iloc[-2]) / closes.iloc[-2] * 100, 2)
+
+    return {
+        "code": code, "name": name,
+        "prob_up": prob_pct, "signal": signal,
+        "l7_score": round(score, 2),
+        "price": price, "pct_chg": change,
+        "strength": strength,
+    }
+
+
 # ===== 6. 主流程 =====
-def run():
+def run(use_alpha: bool = False):
+    """
+    主运行函数
+
+    Args:
+        use_alpha: 使用Alpha158+LGB替代RF+15TA
+    """
     print(f"{'='*55}")
     print(f"🧬  lynx_vnpy ML 量化信号系统")
     print(f"    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if use_alpha:
+        print(f"    🔬 模型: Alpha158+LGB (58因子)")
     print(f"{'='*55}")
 
     all_signals = []
@@ -381,9 +425,12 @@ def run():
             continue
 
         name = STOCK_NAMES.get(code, code)
-        df_feat = compute_features(df)
 
-        sig = predict_signal(df_feat, code, name)
+        if use_alpha:
+            sig = _predict_alpha(df, code, name)
+        else:
+            df_feat = compute_features(df)
+            sig = predict_signal(df_feat, code, name)
         if sig:
             print(f"{sig['signal']} 置信 {sig['prob_up']}%")
             all_signals.append(sig)
@@ -558,10 +605,12 @@ def _parse_args() -> argparse.Namespace:
                         help="定时执行时间，格式 HH:MM（默认 15:50）")
     parser.add_argument("--backtest", action="store_true",
                         help="回测模式：用历史数据验证模型预测准确率")
+    parser.add_argument("--alpha", action="store_true",
+                        help="使用Alpha158+LGB模型（替代RF+15TA）")
     return parser.parse_args()
 
 
-def _schedule_loop(schedule_time: str):
+def _schedule_loop(schedule_time: str, use_alpha: bool = False):
     """定时调度模式：工作日每天 schedule_time 执行一次 run()"""
     try:
         import schedule
@@ -569,11 +618,11 @@ def _schedule_loop(schedule_time: str):
         print("❌ 请安装 schedule 库: pip install schedule")
         return 1
 
-    schedule.every().monday.at(schedule_time).do(run)
-    schedule.every().tuesday.at(schedule_time).do(run)
-    schedule.every().wednesday.at(schedule_time).do(run)
-    schedule.every().thursday.at(schedule_time).do(run)
-    schedule.every().friday.at(schedule_time).do(run)
+    schedule.every().monday.at(schedule_time).do(run, use_alpha=use_alpha)
+    schedule.every().tuesday.at(schedule_time).do(run, use_alpha=use_alpha)
+    schedule.every().wednesday.at(schedule_time).do(run, use_alpha=use_alpha)
+    schedule.every().thursday.at(schedule_time).do(run, use_alpha=use_alpha)
+    schedule.every().friday.at(schedule_time).do(run, use_alpha=use_alpha)
 
     next_run = schedule.next_run()
     print(f"⏰ lynx 量化信号 — 定时模式已启动")
@@ -593,7 +642,7 @@ def _schedule_loop(schedule_time: str):
 if __name__ == "__main__":
     args = _parse_args()
     if args.schedule:
-        exit(_schedule_loop(args.time))
+        exit(_schedule_loop(args.time, use_alpha=args.alpha))
     if args.backtest:
         exit(cmd_backtest())
-    exit(run())
+    exit(run(use_alpha=args.alpha))
