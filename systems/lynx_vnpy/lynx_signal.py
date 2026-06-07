@@ -364,6 +364,29 @@ def push_wecom(signals: list[dict]):
             ok = getattr(result, "status_code", 0) == 200
     print("  ✅ 推送成功" if ok else "  ❌ 推送失败")
 
+# ===== 5.5 双模型集成 =====
+
+def predict_ensemble(df: pd.DataFrame, code: str, name: str) -> dict | None:
+    """同时跑RF和LGB，返回集成信号（供data_loader.py使用）"""
+    df_feat = compute_features(df)
+    sig_rf = predict_signal(df_feat, code, name)
+    sig_lgb = _predict_alpha(df, code, name)
+
+    if sig_rf and sig_lgb:
+        prob_avg = (sig_rf['prob_up'] + sig_lgb['prob_up']) / 2.0
+        score = _l7_score(prob_avg / 100.0)
+        label = _l7_label(score)
+        emoji = _l7_emoji(score)
+        return {
+            **sig_rf,
+            "prob_up": round(prob_avg, 1),
+            "l7_score": score,
+            "signal": f"{emoji} {label}",
+            "prob_up_alpha": sig_lgb['prob_up'],
+        }
+    return sig_rf or sig_lgb
+
+
 # ===== 5.5 Alpha158+LGB路径 =====
 
 def _predict_alpha(df: pd.DataFrame, code: str, name: str) -> dict | None:
@@ -406,13 +429,13 @@ def run(use_alpha: bool = False):
     主运行函数
 
     Args:
-        use_alpha: 使用Alpha158+LGB替代RF+15TA
+        use_alpha: 仅用Alpha158+LGB（--alpha标志），默认双模型集成
     """
     print(f"{'='*55}")
     print(f"🧬  lynx_vnpy ML 量化信号系统")
     print(f"    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    if use_alpha:
-        print(f"    🔬 模型: Alpha158+LGB (58因子)")
+    model_str = "RF+LGB集成" if not use_alpha else "Alpha158+LGB"
+    print(f"    🔬 模型: {model_str}")
     print(f"{'='*55}")
 
     all_signals = []
@@ -427,15 +450,43 @@ def run(use_alpha: bool = False):
         name = STOCK_NAMES.get(code, code)
 
         if use_alpha:
+            # 仅LGB
             sig = _predict_alpha(df, code, name)
+            if sig:
+                print(f"LGB {sig['signal']} 置信 {sig['prob_up']}%")
+                all_signals.append(sig)
         else:
+            # 双模型并行 + 集成
             df_feat = compute_features(df)
-            sig = predict_signal(df_feat, code, name)
-        if sig:
-            print(f"{sig['signal']} 置信 {sig['prob_up']}%")
-            all_signals.append(sig)
-        else:
-            print("⚠️  信号不足")
+            sig_rf = predict_signal(df_feat, code, name)
+            sig_lgb = _predict_alpha(df, code, name)
+
+            if sig_rf and sig_lgb:
+                # 集成: 平均prob_up
+                prob_avg = (sig_rf['prob_up'] + sig_lgb['prob_up']) / 2.0
+                prob_avg_pct = prob_avg / 100.0
+                score = _l7_score(prob_avg_pct)
+                label = _l7_label(score)
+                emoji = _l7_emoji(score)
+                signal = f"{emoji} {label}"
+                sig = {
+                    **sig_rf,
+                    "prob_up": round(prob_avg, 1),
+                    "l7_score": score,
+                    "signal": signal,
+                    "prob_up_rf": sig_rf['prob_up'],
+                    "prob_up_lgb": sig_lgb['prob_up'],
+                }
+                print(f"集成 {label} prob={prob_avg:.1f}% (RF={sig_rf['prob_up']:.1f}% LGB={sig_lgb['prob_up']:.1f}%)")
+                all_signals.append(sig)
+            elif sig_rf:
+                print(f"RF {sig_rf['signal']} 置信 {sig_rf['prob_up']}% (LGB失败)")
+                all_signals.append(sig_rf)
+            elif sig_lgb:
+                print(f"LGB {sig_lgb['signal']} 置信 {sig_lgb['prob_up']}% (RF失败)")
+                all_signals.append(sig_lgb)
+            else:
+                print("⚠️  信号不足")
 
     # 排序：L7 得分降序
     all_signals.sort(key=lambda s: s.get('l7_score', 0), reverse=True)

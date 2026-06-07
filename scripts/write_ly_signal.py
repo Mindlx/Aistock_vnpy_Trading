@@ -45,40 +45,47 @@ def main():
         print("[write_ly_signal] 无股票代码")
         return 1
 
-    results = {}
+    results_rf = {}
+    results_lgb = {}
     for code in stock_codes:
         try:
             df = lynx_signal.fetch_daily_bars(code)
             if df is None or len(df) < 20:
                 continue
             name = str(df.iloc[-1].get("股票名称", code))
+
+            # RF模型
             df_feat = lynx_signal.compute_features(df)
             sig = lynx_signal.predict_signal(df_feat, code, name)
             if sig:
                 prob_up = float(sig.get("prob_up", 50))
                 signal_text = sig.get("signal", "")
-                score, valid = SignalNormalizer.normalize_lynx(signal_text, prob_up)
-                results[code] = {
-                    "score": round(score, 3),
-                    "signal": signal_text,
-                }
+                score, _ = SignalNormalizer.normalize_lynx(signal_text, prob_up)
+                results_rf[code] = {"score": round(score, 3), "signal": signal_text, "prob_up": prob_up}
+
+            # LGB模型（Alpha158）
+            from vnpy_bridge.alpha_predictor import alpha_predict
+            prob_lgb = alpha_predict(df, code)
+            if prob_lgb is not None:
+                prob_pct = prob_lgb * 100
+                score_lgb, _ = SignalNormalizer.normalize_lynx("", prob_pct)
+                results_lgb[code] = {"score": round(score_lgb, 3), "prob_up": round(prob_pct, 1)}
         except Exception as e:
             print(f"[write_ly_signal] {code}: {e}")
-        time.sleep(1)  # API 限流
+        time.sleep(1)
 
-    ly_data = {
-        "stocks": results,
-        "updated_at": datetime.now().strftime("%Y-%m-%d"),
-        "source": "lynx_raw",
-    }
-
-    # 原子写入
+    # 写入 RF 信号
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    tmp = str(OUTPUT) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(ly_data, f, ensure_ascii=False)
-    os.rename(tmp, str(OUTPUT))
-    print(f"[write_ly_signal] {len(results)}/{len(stock_codes)} stocks → ly_signal.json")
+    for prefix, results in [("ly_signal", results_rf), ("ly_alpha_signal", results_lgb)]:
+        data = {"stocks": results, "updated_at": datetime.now().strftime("%Y-%m-%d"), "source": prefix}
+        path = OUTPUT.parent / f"{prefix}.json"
+        tmp = str(path) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.rename(tmp, str(path))
+
+    print(f"[write_ly_signal] RF {len(results_rf)}/{len(stock_codes)} → ly_signal.json")
+    print(f"[write_ly_signal] LGB {len(results_lgb)}/{len(stock_codes)} → ly_alpha_signal.json")
     return 0
 
 

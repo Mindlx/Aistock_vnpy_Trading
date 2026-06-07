@@ -204,12 +204,15 @@ class LynxDataLoader:
                     time.sleep(2)
                     continue
 
-                # 2. 计算特征
+                # 2. 计算特征 + 双模型集成预测
                 name = df.iloc[-1].get('股票名称', code)
-                df_feat = lynx.compute_features(df)
 
-                # 3. 预测信号（模型自动训练/加载）
-                sig = lynx.predict_signal(df_feat, code, name)
+                # 双模型集成（RF+LGB），回退到RF-only
+                if hasattr(lynx, 'predict_ensemble'):
+                    sig = lynx.predict_ensemble(df, code, name)
+                else:
+                    df_feat = lynx.compute_features(df)
+                    sig = lynx.predict_signal(df_feat, code, name)
                 if sig:
                     results[code] = sig
                     logger.debug(f"lynx_vnpy [{code}]: {sig['signal']} 置信 {sig['prob_up']}%")
