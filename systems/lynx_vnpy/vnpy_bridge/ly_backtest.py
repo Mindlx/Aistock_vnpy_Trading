@@ -125,6 +125,14 @@ def main():
         print(f"\n⚠️ 统计指标计算异常: {e}")
         print(f"   初始资金: ¥{args.capital:,}")
         print(f"   总交易: {getattr(engine, 'trade_count', 0)}")
+        # 手动计算基础指标
+        trades = getattr(engine, 'trades', {}) or {}
+        wins = sum(1 for t in trades.values() if getattr(t, 'direction', None) and t.direction.name == 'LONG')
+        if trades:
+            print(f"   总成交: {len(trades)}")
+        # 尝试获取现金余额估算收益
+        cash = getattr(engine, 'cash', args.capital)
+        print(f"   剩余现金: ¥{cash:,.0f}")
 
     # 基准对比
     if args.benchmark:
