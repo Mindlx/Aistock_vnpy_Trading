@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 from scipy.stats import spearmanr
+from sklearn.preprocessing import StandardScaler
 
 # ──paths──────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -250,12 +251,36 @@ def train_models(
 
     # ---- LGB（强正则化，防过拟合）----
     print(f"\n  ── LGB Model ──")
-    lgb = LgbModel(
-        learning_rate=0.03,
-        num_leaves=8,              # 浅树，小样本必备
-        num_boost_round=300,
-        # 以下通过参数注入额外正则化
-    )
+    n_features = len(dataset.feature_expressions) if hasattr(dataset, 'feature_expressions') else 240
+    print(f"  特征数: {n_features}")
+
+    # 当特征来自合并数据集时,直接训练numpy数组
+    train_df_check = dataset.fetch_learn(Segment.TRAIN).to_pandas()
+    n_features = train_df_check.select_dtypes(include=['number']).drop(columns=['label'], errors='ignore').shape[1]
+    print(f"  特征数: {n_features}")
+
+    if n_features > 200:
+        train_df = dataset.fetch_learn(Segment.TRAIN).to_pandas()
+        train_df = train_df.replace([np.inf, -np.inf], 0.0).fillna(0.0).select_dtypes(include=['number'])
+        y = train_df['label'].values
+        X = StandardScaler().fit_transform(np.nan_to_num(train_df.drop(columns=['label'], errors='ignore').values))
+        import lightgbm as lgb_m
+        lgb_model = lgb_m.train({
+            "objective": "binary", "verbosity": -1, "num_leaves": 8, "max_depth": 4,
+            "min_data_in_leaf": 20, "feature_fraction": 0.4, "bagging_fraction": 0.7,
+            "bagging_freq": 5, "lambda_l1": 0.5, "lambda_l2": 1.0, "learning_rate": 0.03,
+        }, lgb_m.Dataset(X, label=y), num_boost_round=200)
+
+        # 验证集预测
+        valid_df = dataset.fetch_learn(Segment.VALID).to_pandas()
+        valid_df = valid_df.replace([np.inf, -np.inf], 0.0).fillna(0.0).select_dtypes(include=['number'])
+        yv = valid_df['label'].values
+        Xv = StandardScaler().fit_transform(np.nan_to_num(valid_df.drop(columns=['label'], errors='ignore').values))
+        pred = lgb_model.predict(Xv)
+        lgb_acc = _calc_accuracy_np(pred, yv)
+        print(f"  LGB验证准确率: {lgb_acc:.1f}% (合并数据集)")
+    else:
+        lgb = LgbModel(learning_rate=0.03, num_leaves=8, num_boost_round=300)
     # 覆写params增加强正则化
     lgb.params.update({
         "lambda_l1": 0.5,
@@ -334,6 +359,14 @@ def _calc_accuracy(
     correct = (pred_dir == label_dir).sum()
     total = min_len
     return correct / total * 100 if total > 0 else 0.0
+
+
+def _calc_accuracy_np(pred: np.ndarray, label: np.ndarray) -> float:
+    min_len = min(len(pred), len(label))
+    pred_dir = (pred[:min_len] > 0).astype(int)
+    label_dir = (label[:min_len] > 0).astype(int)
+    correct = (pred_dir == label_dir).sum()
+    return correct / min_len * 100 if min_len > 0 else 0.0
 
 
 # ══════════════════════════════════════════════════════
@@ -428,10 +461,11 @@ def main() -> None:
         print(f"  LassoCV特征筛选 (240→?)")
         print(f"{'='*55}")
         from sklearn.linear_model import Lasso
+        from sklearn.preprocessing import StandardScaler
         train_df = dataset_158.fetch_learn(Segment.TRAIN).to_pandas()
-        train_df = train_df.fillna(0.0).select_dtypes(include=['number'])
+        train_df = train_df.replace([np.inf, -np.inf], 0.0).fillna(0.0).select_dtypes(include=['number'])
         y = train_df['label'].values
-        X = train_df.drop(columns=['label'], errors='ignore').values
+        X = StandardScaler().fit_transform(np.nan_to_num(train_df.drop(columns=['label'], errors='ignore').values))
         lasso = Lasso(alpha=0.005, max_iter=2000, random_state=42).fit(X, y)
         n_selected = np.sum(lasso.coef_ != 0)
         print(f"  选中: {n_selected}/{X.shape[1]} 因子")
