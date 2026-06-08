@@ -1544,7 +1544,7 @@ Market conditions can change quickly. The data above is for reference only and d
         try:
             from pathlib import Path
             today = datetime.now().strftime("%Y-%m-%d")
-            fusion_dir = Path("data/fusion_output")
+            fusion_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "fusion_output"
             if not fusion_dir.exists():
                 return None
             files = sorted(fusion_dir.glob(f"fusion_{today}*.json"))
