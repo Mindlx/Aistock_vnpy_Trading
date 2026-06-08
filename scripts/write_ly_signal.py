@@ -45,6 +45,11 @@ def main():
         print("[write_ly_signal] 无股票代码")
         return 1
 
+    # 读取 volume_ratio 备用
+    import sqlite3
+    stock_db = Path("systems/MindLynx-Aistock/data/stock_analysis.db")
+
+    results = {}
     results_rf = {}
     results_lgb = {}
     for code in stock_codes:
@@ -61,7 +66,26 @@ def main():
                 prob_up = float(sig.get("prob_up", 50))
                 signal_text = sig.get("signal", "")
                 score, _ = SignalNormalizer.normalize_lynx(signal_text, prob_up)
-                results_rf[code] = {"score": round(score, 3), "signal": signal_text, "prob_up": prob_up}
+                # 从stock_daily DB读取volume_ratio
+                vr = 0.0
+                if stock_db.exists():
+                    try:
+                        conn = sqlite3.connect(str(stock_db))
+                        row = conn.execute(
+                            "SELECT volume_ratio FROM stock_daily WHERE code=? ORDER BY date DESC LIMIT 1",
+                            (code,)
+                        ).fetchone()
+                        if row and row[0]:
+                            vr = round(row[0], 2)
+                        conn.close()
+                    except Exception:
+                        pass
+                results_rf[code] = {
+                    "score": round(score, 3), "signal": signal_text, "prob_up": prob_up,
+                    "price": float(sig.get("price", 0)),
+                    "pct_chg": float(sig.get("pct_chg", 0)),
+                    "volume_ratio": vr,
+                }
 
             # LGB模型（Alpha158）
             from vnpy_bridge.alpha_predictor import alpha_predict
@@ -69,7 +93,23 @@ def main():
             if prob_lgb is not None:
                 prob_pct = prob_lgb * 100
                 score_lgb, _ = SignalNormalizer.normalize_lynx("", prob_pct)
-                results_lgb[code] = {"score": round(score_lgb, 3), "prob_up": round(prob_pct, 1)}
+                vr = 0.0
+                if stock_db.exists():
+                    try:
+                        conn = sqlite3.connect(str(stock_db))
+                        row = conn.execute(
+                            "SELECT volume_ratio FROM stock_daily WHERE code=? ORDER BY date DESC LIMIT 1",
+                            (code,)
+                        ).fetchone()
+                        if row and row[0]:
+                            vr = round(row[0], 2)
+                        conn.close()
+                    except Exception:
+                        pass
+                results_lgb[code] = {
+                    "score": round(score_lgb, 3), "prob_up": round(prob_pct, 1),
+                    "volume_ratio": vr,
+                }
         except Exception as e:
             print(f"[write_ly_signal] {code}: {e}")
         time.sleep(1)

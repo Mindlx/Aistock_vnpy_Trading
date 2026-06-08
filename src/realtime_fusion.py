@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import os
-import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import requests
 
 # 确保项目根目录在路径中
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -166,6 +168,9 @@ class RealtimeFusion:
                     "at": at_score,
                     "has_disagreement": has_disagreement,
                     "is_degraded": is_degraded,
+                    "price": ly_stocks.get(code, {}).get("price", 0),
+                    "pct_chg": ly_stocks.get(code, {}).get("pct_chg", 0),
+                    "volume_ratio": ly_stocks.get(code, {}).get("volume_ratio", 0),
                 })
                 self._last_scores[code] = score_penalized
 
@@ -225,7 +230,14 @@ class RealtimeFusion:
             score = c['score']
             position = c.get('position', '')
             emoji = L7_EMOJI.get(c['signal'], "⚪")
-            line = f"{emoji}**{name}** {signal_display} Δ{score:+.2f}"
+            price = c.get('price', 0)
+            pct = c.get('pct_chg', 0)
+            vr = c.get('volume_ratio', 0)
+            price_str = f"¥{price:.2f}" if price else ""
+            chg_str = f"{pct:+.2f}%" if pct else ""
+            vr_str = f"量比{vr:.2f}" if vr else ""
+            extras = ' '.join(x for x in [price_str, chg_str, vr_str] if x)
+            line = f"{emoji}**{name}** {extras} {signal_display} Δ{score:+.2f}"
             lines.append(line)
         lines.append("")
         lines.append("📡 ly昨日｜ml实时｜at盘中")
