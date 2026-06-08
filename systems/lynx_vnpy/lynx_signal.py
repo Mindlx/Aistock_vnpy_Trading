@@ -288,30 +288,32 @@ def predict_signal(df: pd.DataFrame, stock_code: str,
     }
 
 def _l7_score(prob_up: float) -> float:
-    """Map prob_up (0-1) to L7 score (-3~+3) via logit+tanh.
-    Same formula as src/normalizer.py normalize_lynx()."""
-    import math
-    p = max(0.001, min(0.999, prob_up))
-    logit = math.log(p / (1 - p))
-    return round(3.0 * math.tanh(logit / 2.0), 2)
+    """Map prob_up (0-1) to L7 score (-3~+3), 复用normalizer的分段线性映射"""
+    from src.normalizer import SignalNormalizer
+    score, _ = SignalNormalizer.normalize_lynx("", prob_up * 100)
+    return round(score, 2)
 
 def _l7_label(score: float) -> str:
-    """L7 score → 7-level label."""
-    if score >= 2.0:   return "强烈看多"
-    if score >= 1.0:   return "看多"
-    if score >= 0.33:  return "谨慎看多"
-    if score >= -0.33: return "中性/持有"
-    if score >= -1.0:  return "谨慎看空"
-    if score >= -2.0:  return "看空"
-    return "强烈看空"
+    """L7 score → 中文标签，复用normalizer的L7_SIGNAL_NAMES"""
+    from src.normalizer import L7_SIGNAL_NAMES, L7_THRESHOLDS
+    if score >= L7_THRESHOLDS["strong_bullish"]:   return L7_SIGNAL_NAMES["strong_bullish"]
+    if score >= L7_THRESHOLDS["bullish"]:           return L7_SIGNAL_NAMES["bullish"]
+    if score >= L7_THRESHOLDS["cautious_bullish"]:  return L7_SIGNAL_NAMES["cautious_bullish"]
+    if score >= L7_THRESHOLDS["cautious_bearish"]:  return L7_SIGNAL_NAMES["neutral"]
+    if score >= L7_THRESHOLDS["bearish"]:           return L7_SIGNAL_NAMES["cautious_bearish"]
+    if score >= L7_THRESHOLDS["strong_bearish"]:    return L7_SIGNAL_NAMES["bearish"]
+    return L7_SIGNAL_NAMES["strong_bearish"]
 
 def _l7_emoji(score: float) -> str:
-    """L7 score → color emoji matching fusion system convention."""
-    if score >= 1.0:   return "🔴"   # 看多=红
-    if score >= 0.33:  return "🟠"   # 谨慎看多=橙
-    if score >= -0.33: return "⚪"   # 中性=白
-    if score >= -1.0:  return "🟡"   # 谨慎看空=金
-    return "🟢"                      # 看空=绿
+    """L7 score → emoji，复用normalizer的L7_EMOJI"""
+    from src.normalizer import L7_EMOJI, L7_THRESHOLDS
+    if score >= L7_THRESHOLDS["strong_bullish"]:   return L7_EMOJI["strong_bullish"]
+    if score >= L7_THRESHOLDS["bullish"]:           return L7_EMOJI["bullish"]
+    if score >= L7_THRESHOLDS["cautious_bullish"]:  return L7_EMOJI["cautious_bullish"]
+    if score >= L7_THRESHOLDS["cautious_bearish"]:  return L7_EMOJI["neutral"]
+    if score >= L7_THRESHOLDS["bearish"]:           return L7_EMOJI["cautious_bearish"]
+    if score >= L7_THRESHOLDS["strong_bearish"]:    return L7_EMOJI["bearish"]
+    return L7_EMOJI["strong_bearish"]
 
 # ===== 5. 推送 =====
 def push_wecom(signals: list[dict]):
@@ -341,6 +343,20 @@ def push_wecom(signals: list[dict]):
             f"L7{s['l7_score']:+0.2f}",
             f"置信{s['prob_up']}%",
         ]
+        # 仓位建议
+        try:
+            from src.normalizer import L7_POSITION, L7_SIGNAL_NAMES, L7_THRESHOLDS
+            sc = s['l7_score']
+            if sc >= L7_THRESHOLDS["strong_bullish"]:   pos_key = "strong_bullish"
+            elif sc >= L7_THRESHOLDS["bullish"]:        pos_key = "bullish"
+            elif sc >= L7_THRESHOLDS["cautious_bullish"]: pos_key = "cautious_bullish"
+            elif sc >= L7_THRESHOLDS["cautious_bearish"]: pos_key = "neutral"
+            elif sc >= L7_THRESHOLDS["bearish"]:        pos_key = "cautious_bearish"
+            elif sc >= L7_THRESHOLDS["strong_bearish"]: pos_key = "bearish"
+            else:                                       pos_key = "strong_bearish"
+            parts.append(f"仓位{L7_POSITION[pos_key]}")
+        except ImportError:
+            pass
         if s.get('rsi') is not None:
             parts.append(f"RSI{s['rsi']}")
         if s.get('macd_hist') is not None:
@@ -352,7 +368,7 @@ def push_wecom(signals: list[dict]):
         lines.append("｜".join(parts))
 
     lines.append("\n> 数据源: efinance")
-    lines.append("> 模型: RandomForest")
+    lines.append("> 模型: RF+LGB集成")
     text = "\n".join(lines)
 
     result = _send(text)
