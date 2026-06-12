@@ -117,10 +117,13 @@ def update_reliability_file(overrides: dict[str, float], dry_run: bool = False) 
         print(new_block)
         return True
 
-    # Backup original
+    # 原子写入: 临时文件 → os.replace
+    tmp = RELIABILITY_PATH.with_suffix(".py.tmp")
+    tmp.write_text(new_content, encoding="utf-8")
     backup = RELIABILITY_PATH.with_suffix(".py.bak")
-    RELIABILITY_PATH.rename(backup)
-    RELIABILITY_PATH.write_text(new_content, encoding="utf-8")
+    if RELIABILITY_PATH.exists():
+        RELIABILITY_PATH.rename(backup)
+    os.replace(str(tmp), str(RELIABILITY_PATH))
     print(f"Backup saved to {backup}")
     return True
 

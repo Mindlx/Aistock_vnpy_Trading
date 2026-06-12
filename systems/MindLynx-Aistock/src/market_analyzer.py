@@ -33,11 +33,11 @@ _ENGLISH_SECTION_PATTERNS = {
 }
 
 _CHINESE_SECTION_PATTERNS = {
-    "market_summary": r"###\s*一、(?:盘面总览|市场总结)",
-    "index_commentary": r"###\s*二、(?:指数结构|指数点评|主要指数)",
-    "sector_highlights": r"###\s*三、(?:板块主线|热点解读|板块表现)",
-    "funds_sentiment": r"###\s*四、(?:资金与情绪|资金动向)",
-    "news_catalysts": r"###\s*五、(?:消息催化|后市展望)",
+    "market_summary": r"#{3,4}\s*一、(?:盘面总览|市场总结)",
+    "index_commentary": r"#{3,4}\s*二、(?:指数结构|指数点评|主要指数)",
+    "sector_highlights": r"#{3,4}\s*三、(?:板块主线|热点解读|板块表现)",
+    "funds_sentiment": r"#{3,4}\s*四、(?:资金与情绪|资金动向)",
+    "news_catalysts": r"#{3,4}\s*五、(?:消息催化|后市展望)",
 }
 
 
@@ -600,8 +600,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if not match:
             return text
         start = match.end()
-        # Find the next ### heading after this one
-        next_heading = re.search(r"\n###\s", text[start:])
+        # Find the next section heading (一、二、三...) after this one
+        next_heading = re.search(r"\n#{2,4}\s*[一二三四五六七八九十]、", text[start:])
         if next_heading:
             insert_pos = start + next_heading.start()
         else:
@@ -1268,6 +1268,8 @@ Output the report content directly, no extra commentary.
 
 {self._get_strategy_prompt_block()}
 
+{stock_data or ""}
+
 ---
 
 # 输出格式模板（请严格按此格式输出）
@@ -1301,7 +1303,9 @@ Output the report content directly, no extra commentary.
 （列出需要关注的风险点；文末用引用形式补充：“> 以上数据仅供参考，不构成投资建议”）
 
 ### 八、自选股操盘建议
-（如果【自选股因子数据】不为空，基于这些数据和当日大盘背景，对每只自选股给出独立操盘建议：明确操作方向、仓位参考和关键价位。如果数据为空则跳过此章节。）
+（如果【自选股因子数据】或【自选股实时行情】不为空，基于这些数据和当日大盘背景，对每只自选股给出独立操盘建议：明确操作方向、仓位参考和关键价位。
+⚠️ 注意：严禁编造价格数据！所有价格和涨跌幅必须来自上方数据表格中的"现价"和涨跌幅字段。如果数据中不包含某只股票的价格信息，切勿自行编造。
+如果数据为空则跳过此章节。）
 
 ---
 
@@ -1540,31 +1544,71 @@ Market conditions can change quickly. The data above is for reference only and d
         return f"> {text}"
 
     def _load_stock_pool_data(self) -> str | None:
-        """加载当日融合系统自选股分析数据，供LLM生成操盘建议。"""
+        """加载当日融合系统自选股分析数据，供LLM生成操盘建议。
+
+        优先从融合输出文件读取（含因子信号），融合不存在时降级到实时行情。
+        """
+        # 方案一：从融合输出读
         try:
             from pathlib import Path
             today = datetime.now().strftime("%Y-%m-%d")
             fusion_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "fusion_output"
-            if not fusion_dir.exists():
-                return None
-            files = sorted(fusion_dir.glob(f"fusion_{today}*.json"))
-            if not files:
-                return None
-            import json
-            data = json.loads(files[-1].read_text(encoding="utf-8"))
-            lines = ["## 自选股因子数据"]
-            for item in data if isinstance(data, list) else data.get("results", []):
-                code = item.get("stock_code", item.get("code", ""))
-                name = item.get("stock_name", "")
-                ly = item.get("lynx_score", 0)
-                ml = item.get("mindlynx_score", 0)
-                fusion = item.get("fusion_score", 0)
-                sig = item.get("signal_name", "")
-                lines.append(f"- {name}({code})  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}")
-            return "\n".join(lines) if len(lines) > 1 else None
+            if fusion_dir.exists():
+                files = sorted(fusion_dir.glob(f"fusion_{today}*.json"))
+                if files:
+                    import json
+                    data = json.loads(files[-1].read_text(encoding="utf-8"))
+                    lines = ["## 自选股因子数据"]
+                    items = data if isinstance(data, list) else data.get("results", [])
+                    if items:
+                        for item in items:
+                            code = item.get("stock_code", item.get("code", ""))
+                            name = item.get("stock_name", "")
+                            ly = item.get("lynx_score", 0)
+                            ml = item.get("mindlynx_score", 0)
+                            fusion = item.get("fusion_score", 0)
+                            sig = item.get("signal_name", "")
+                            # 也尝试补实时价
+                            price_str = self._fetch_realtime_price_str(code)
+                            price_col = f"  现价{price_str}" if price_str else ""
+                            lines.append(f"- {name}({code})  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}{price_col}")
+                        return "\n".join(lines)
         except Exception as e:
-            logger.debug(f"[大盘] 自选股数据加载失败: {e}")
+            logger.debug(f"[大盘] 自选股融合数据加载失败: {e}")
+
+        # 方案二：融合不存在，降级到实时行情
+        return self._fetch_realtime_stock_data()
+
+    def _fetch_realtime_price_str(self, stock_code: str) -> str:
+        """获取单只股票的实时价格字符串（短格式）。"""
+        try:
+            q = self.data_manager.get_realtime_quote(stock_code, log_final_failure=False)
+            if q is not None and q.price is not None:
+                chg = f"{q.change_pct:+.2f}%" if q.change_pct is not None else ""
+                return f"¥{q.price:.2f}{chg}"
+        except Exception:
+            pass
+        return ""
+
+    def _fetch_realtime_stock_data(self) -> str | None:
+        """获取自选股实时行情数据（无融合因子时的降级方案）。"""
+        codes = getattr(self.config, "stock_list", [])
+        if not codes or not isinstance(codes, list):
             return None
+        lines = ["## 自选股实时行情（融合因子数据暂不可用）"]
+        for code in codes:
+            try:
+                q = self.data_manager.get_realtime_quote(code, log_final_failure=False)
+                if q is not None and q.price is not None:
+                    name = q.name or code
+                    chg = f"{q.change_pct:+.2f}%" if q.change_pct is not None else ""
+                    vol_r = f"  量比{q.volume_ratio:.2f}" if q.volume_ratio is not None else ""
+                    lines.append(f"- {name}({code})  ¥{q.price:.2f}  {chg}{vol_r}")
+                else:
+                    lines.append(f"- {code}  行情暂不可用")
+            except Exception:
+                lines.append(f"- {code}  行情获取失败")
+        return "\n".join(lines) if len(lines) > 1 else None
 
     def run_daily_review(self, session_label: str = "全天") -> str:
         """

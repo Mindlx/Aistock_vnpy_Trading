@@ -827,6 +827,103 @@ def cmd_simulate() -> None:
     print(f"{'='*55}")
 
 
+# ── Fix Valid (回填旧CSV的子系统valid字段) ────────────────
+
+KNOWN_DEFAULTS = {-0.1, 0.0}
+
+def cmd_fix_valid() -> None:
+    """回填旧CSV中缺失的子系统valid字段。
+
+    旧格式（5月29日~6月5日）fusion CSV中没有 lynx_valid /
+    mindlynx_valid / tradingagent_valid 列。回填规则：
+
+    1. 对每个日期 + 子系统，检查全量股票的score是否全部一致
+    2. 如果全部一致且值为已知默认值（-0.1 或 0.0）→ 全部 valid=False
+    3. 否则逐个股：score ≠ 0 且非空 → valid=True
+    """
+    conn = _get_db()
+    fixed = {"ly": 0, "ml": 0, "at": 0}
+    unchanged = {"ly": 0, "ml": 0, "at": 0}
+    subsystem_cols = [
+        ("ly_valid", "ly_score", 0.0),
+        ("ml_valid", "ml_score", -0.1),
+        ("at_valid", "at_score", 0.0),
+    ]
+
+    # 按日期分组找出所有valid=0的记录所在的日期
+    pending = conn.execute("""
+        SELECT DISTINCT p.date
+        FROM bt_predictions p
+        WHERE p.ly_valid = 0 OR p.ml_valid = 0 OR p.at_valid = 0
+        ORDER BY p.date
+    """).fetchall()
+
+    if not pending:
+        print("✅ 无需要回填的记录")
+        conn.close()
+        return
+
+    print(f"需回填日期: {[r['date'] for r in pending]}")
+
+    for row in pending:
+        date = row["date"]
+
+        # 获取该日期所有股票的各子系统score
+        scores = conn.execute("""
+            SELECT stock_code, ly_score, ml_score, at_score
+            FROM bt_predictions WHERE date = ?
+        """, (date,)).fetchall()
+
+        if not scores:
+            continue
+
+        # 检查每个子系统在该日期是否全部统一默认值
+        for valid_col, score_col, default_val in subsystem_cols:
+            vals = [r[score_col] for r in scores if r[score_col] is not None]
+            if not vals:
+                continue
+
+            is_all_same = len(set(vals)) == 1
+            is_all_default = is_all_same and vals[0] in KNOWN_DEFAULTS
+
+            for sr in scores:
+                code = sr["stock_code"]
+                sv = sr[score_col]
+
+                # 规则: 统一默认 → valid=False; score=0/None/空 → valid=False; 否则 valid=True
+                if is_all_default:
+                    new_valid = 0
+                else:
+                    new_valid = 1 if (sv is not None and sv != 0.0) else 0
+
+                old_valid = conn.execute(
+                    f"SELECT {valid_col} FROM bt_predictions WHERE date=? AND stock_code=?",
+                    (date, code)
+                ).fetchone()[0]
+
+                if old_valid == 0 and new_valid == 1:
+                    conn.execute(
+                        f"UPDATE bt_predictions SET {valid_col}=1, updated_at=datetime('now','localtime') "
+                        f"WHERE date=? AND stock_code=?",
+                        (date, code)
+                    )
+                    prefix = valid_col.replace("_valid", "")
+                    fixed[prefix] += 1
+                elif old_valid == 0 and new_valid == 0:
+                    prefix = valid_col.replace("_valid", "")
+                    unchanged[prefix] += 1
+
+    conn.commit()
+    conn.close()
+
+    print(f"✅ 回填完成")
+    print(f"  ly_valid: 修正 {fixed['ly']} 条, 保持0 {unchanged['ly']} 条")
+    print(f"  ml_valid: 修正 {fixed['ml']} 条, 保持0 {unchanged['ml']} 条")
+    print(f"  at_valid: 修正 {fixed['at']} 条, 保持0 {unchanged['at']} 条")
+
+    print(f"\n  子系统准确率 回填后 → 运行 `python scripts/backtest.py report` 查看")
+
+
 # ── 历史数据回填 ─────────────────────────────────────────
 
 def cmd_backfill() -> int:
@@ -1094,6 +1191,7 @@ def main() -> None:
     p_report.add_argument("--detail", action="store_true",
                           help="显示个股明细")
     p_backfill = sub.add_parser("backfill", help="扫描历史CSV回填数据库(首次部署用)")
+    p_fix_valid = sub.add_parser("fix-valid", help="回填旧CSV格式缺失的子系统valid字段")
     p_simulate = sub.add_parser("simulate", help="模拟交易：基于融合信号计算累计收益曲线")
     p_weightsweep = sub.add_parser("weight-sweep", help="网格搜索权重组合，输出准确率曲面与敏感度分析")
     p_walkforward = sub.add_parser("walkforward", help="WalkForward验证：滑动窗口检验样本外准确率稳定性")
@@ -1115,6 +1213,8 @@ def main() -> None:
         cmd_report(detail=args.detail)
     elif args.command == "backfill":
         cmd_backfill()
+    elif args.command == "fix-valid":
+        cmd_fix_valid()
     elif args.command == "simulate":
         cmd_simulate()
     elif args.command == "weight-sweep":

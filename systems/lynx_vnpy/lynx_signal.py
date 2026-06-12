@@ -51,6 +51,8 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # ===== 1. 数据获取（Sina finance API） =====
 _SESSION = requests.Session()
 _SESSION.headers.update({"Referer": "https://finance.sina.com.cn"})
+import atexit
+atexit.register(_SESSION.close)
 
 def _prefix(code: str) -> str:
     """判断股票代码所属市场前缀"""
@@ -315,6 +317,62 @@ def _l7_emoji(score: float) -> str:
     if score >= L7_THRESHOLDS["strong_bearish"]:    return L7_EMOJI["bearish"]
     return L7_EMOJI["strong_bearish"]
 
+# ===== 4.5 实时行情增强（替换缓存价格） =====
+def _enrich_realtime_price(signals: list[dict]) -> None:
+    """用腾讯财经免费API获取实时价格，覆盖信号中的缓存价格。
+
+    腾讯财经行情接口（免费，无需API Key）：
+    https://qt.gtimg.cn/q=sz000001 → 沪深实时行情
+    日K线数据可能有50分钟缓存延迟，推送时用实时价更准确。
+    """
+    if not signals:
+        return
+    import requests as _req
+    # 批量查询：一次请求最多50只股票，用分号分隔
+    codes = []
+    for s in signals:
+        code = s.get("code", "")
+        if code.startswith(("6", "5", "9")):
+            codes.append(f"sh{code}")
+        else:
+            codes.append(f"sz{code}")
+    if not codes:
+        return
+    try:
+        query = ",".join(codes)
+        resp = _req.get(f"https://qt.gtimg.cn/q={query}", timeout=10)
+        for line in resp.text.strip().split("\n"):
+            line = line.strip()
+            if "=" not in line:
+                continue
+            parts = line.split("~")
+            if len(parts) < 6:
+                continue
+            # parts[0] 末尾是 v_sh688202="1, 提取股票代码
+            code_raw = parts[0].split("=")[0].strip()
+            # 去掉 v_ 前缀，去掉 sh/sz 前缀
+            code = code_raw.lstrip("v_")
+            if code.startswith("sh") or code.startswith("sz"):
+                code = code[2:]
+            now_price = parts[3]
+            prev_close = parts[4]
+            change_pct = parts[5] if len(parts) > 5 else ""
+            try:
+                now_f = float(now_price)
+                prev_f = float(prev_close) if prev_close else 0
+                chg_f = (now_f - prev_f) / prev_f * 100 if prev_f > 0 else 0.0
+                # 覆盖信号中的价格
+                for s in signals:
+                    if s.get("code") == code:
+                        s["price"] = now_f
+                        s["change_pct"] = round(chg_f, 2)
+                        break
+            except (ValueError, TypeError):
+                continue
+    except Exception as e:
+        print(f"[实时行情] 获取失败: {e}")
+
+
 # ===== 5. 推送 =====
 def push_wecom(signals: list[dict]):
     """推送到企业微信（使用统一的 WeComNotifier）。"""
@@ -331,6 +389,12 @@ def push_wecom(signals: list[dict]):
         _send = lambda t: requests.post(WECOM_WEBHOOK, json={
             "msgtype": "markdown", "markdown": {"content": t},
         }, timeout=10)
+
+    _fallback_ok = lambda resp: (
+        resp is not None
+        and resp.status_code == 200
+        and resp.json().get("errcode") == 0
+    ) if hasattr(resp, "json") else False
 
     now = datetime.now()
     lines = [f"🧬 {now.strftime('%H:%M')} ly量化信号"]
@@ -513,6 +577,9 @@ def run(use_alpha: bool = False):
         print(f"  {s['signal']} {s['name']}({s['code']}) {s['prob_up']}%")
     print(f"{'='*55}")
 
+    # 用腾讯财经实时行情覆盖缓存价格（日K线缓存价可能滞后数十分钟）
+    _enrich_realtime_price(all_signals)
+
     # 推送
     if all_signals:
         push_wecom(all_signals)
@@ -577,7 +644,10 @@ def cmd_backtest() -> int:
             test_end = min(train_end + RETRAIN_INTERVAL, len(df) - 1)
 
             # 用截至 train_end 的数据训练模型
-            train_df = df.iloc[:train_end]
+            # 注意: compute_features 在完整数据集上计算 target (shift(-1)),
+            # 最后一行(train_end-1)的 target 使用了 train_end 的收盘价(测试集),
+            # 因此排除最后一行避免前视偏差。
+            train_df = df.iloc[:train_end - 1]
             trained = train_model(train_df, code)
             if trained is None:
                 continue

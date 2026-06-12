@@ -64,6 +64,16 @@ def _focus_level(val: float) -> str:
     if val >= 20: return "冷门"
     return "极度冷清"
 
+def _conclusion_short(w: float, f: float) -> str:
+    """简短结论文字（不含意愿/关注前缀）"""
+    if w >= 65 or (w >= 55 and f < 65):
+        return "同步积极"
+    if (w >= 55 and f >= 65) or (45 <= w < 55 and f < 65):
+        return "谨慎偏多"
+    if (45 <= w < 55 and f >= 65) or (35 <= w < 45 and f < 65):
+        return "注意风险"
+    return "危险信号"
+
 def _combined_grade(w: float, f: float, is_st: bool = False) -> tuple[str, str]:
     """综合评级: (图标, 结论描述)"""
     if is_st:
@@ -81,40 +91,36 @@ def _combined_grade(w: float, f: float, is_st: bool = False) -> tuple[str, str]:
 def run_xueqiu_sentiment(stock_codes: list[str]) -> str | None:
     """东方财富评级 — 综合参与意愿与关注指数，格式化推送。"""
     try:
-        # 先加载真正的 akshare（防止 AT 子系统的本地 akshare.py 文件遮蔽）
         import akshare as _  # noqa: F401
         _add_path("systems/mind_TradingAgent/mind_tradingagent/dataflows")
         from xueqiu import fetch_desire_raw, fetch_focus_raw
         from src.mind_stock_config import get_stock_name
 
-        stock_lines: list[str] = []
+        stock_data: list[dict] = []
         desire_date = focus_date = ""
 
         for code in stock_codes:
             desire_val = focus_val = None
             d_date = f_date = ""
 
-            # 获取参与意愿
             try:
                 ddf = fetch_desire_raw(code)
                 if ddf is not None and not ddf.empty:
                     row = ddf.iloc[-1]
                     desire_val = float(row.get("参与意愿", 0) or 0)
                     d_date = str(row.get("交易日期", ""))[5:10].replace("-", "/")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("东方财富 参与意愿 获取失败 %s: %s", code, e)
 
-            # 获取关注指数
             try:
                 fdf = fetch_focus_raw(code)
                 if fdf is not None and not fdf.empty:
                     row = fdf.iloc[-1]
                     focus_val = float(row.get("用户关注指数", 0) or 0)
                     f_date = str(row.get("交易日", ""))[5:10].replace("-", "/")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("东方财富 关注指数 获取失败 %s: %s", code, e)
 
-            # 取标题日期（用第一只股票的值）
             if d_date and not desire_date:
                 desire_date = d_date
             if f_date and not focus_date:
@@ -123,7 +129,6 @@ def run_xueqiu_sentiment(stock_codes: list[str]) -> str | None:
             if desire_val is None and focus_val is None:
                 continue
 
-            # 获取名称
             try:
                 name = get_stock_name(code) or code
             except Exception:
@@ -132,22 +137,36 @@ def run_xueqiu_sentiment(stock_codes: list[str]) -> str | None:
             w = desire_val or 50
             f = focus_val or 50
             is_st = name.startswith("*ST")
-            icon, conclusion = _combined_grade(w, f, is_st)
+            icon, _ = _combined_grade(w, f, is_st)
 
-            w_str = f"{w:.2f}" if desire_val is not None else "--"
-            f_str = f"{f:.2f}" if focus_val is not None else "--"
-            stock_lines.append(f"{icon}**{name}({code})** {w_str}/{f_str}｜{conclusion}")
+            stock_data.append({
+                "code": code, "name": name, "w": w, "f": f,
+                "icon": icon, "is_st": is_st,
+            })
 
-        if not stock_lines:
+        if not stock_data:
             return None
+
+        # 按意愿值从高到低排序（做多→做空）
+        stock_data.sort(key=lambda x: -x["w"])
+
+        stock_lines = []
+        for sd in stock_data:
+            icon = sd["icon"]
+            w_str = f"{sd['w']:.2f}"
+            f_str = f"{sd['f']:.2f}"
+            dl = _desire_level(sd["w"])
+            fl = _focus_level(sd["f"])
+            con = "ST风险" if sd["is_st"] else _conclusion_short(sd["w"], sd["f"])
+            stock_lines.append(
+                f"{icon}{sd['name']}｜意愿{dl} 关注{fl} {con}"
+            )
 
         title_date = ""
         if desire_date and focus_date:
-            title_date = f"\n⏰️参与意愿({desire_date})｜关注指数({focus_date})"
+            title_date = f" ({desire_date})"
         elif desire_date:
-            title_date = f"\n⏰️参与意愿({desire_date})"
-        elif focus_date:
-            title_date = f"\n⏰️关注指数({focus_date})"
+            title_date = f" ({desire_date})"
 
         return f"💰东方财富评级{title_date}\n" + "\n".join(stock_lines)
 

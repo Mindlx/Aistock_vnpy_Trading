@@ -47,9 +47,9 @@ def main():
 
     # 读取 volume_ratio 备用
     import sqlite3
+    from vnpy_bridge.alpha_predictor import alpha_predict
     stock_db = Path("systems/MindLynx-Aistock/data/stock_analysis.db")
 
-    results = {}
     results_rf = {}
     results_lgb = {}
     for code in stock_codes:
@@ -88,7 +88,6 @@ def main():
                 }
 
             # LGB模型（Alpha158）
-            from vnpy_bridge.alpha_predictor import alpha_predict
             prob_lgb = alpha_predict(df, code)
             if prob_lgb is not None:
                 prob_pct = prob_lgb * 100
@@ -119,13 +118,37 @@ def main():
     for prefix, results in [("ly_signal", results_rf), ("ly_alpha_signal", results_lgb)]:
         data = {"stocks": results, "updated_at": datetime.now().strftime("%Y-%m-%d"), "source": prefix}
         path = OUTPUT.parent / f"{prefix}.json"
-        tmp = str(path) + ".tmp"
+        tmp = str(path) + f".tmp.{os.getpid()}"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         os.rename(tmp, str(path))
 
     print(f"[write_ly_signal] RF {len(results_rf)}/{len(stock_codes)} → ly_signal.json")
     print(f"[write_ly_signal] LGB {len(results_lgb)}/{len(stock_codes)} → ly_alpha_signal.json")
+
+    # 记录 prob_up 到 CSV，用于 flat zone 校准分析
+    log_path = PROJECT_ROOT / "data" / "realtime" / "prob_up_log.csv"
+    header_needed = not log_path.exists()
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        with open(log_path, "a") as f:
+            if header_needed:
+                f.write("date,stock_code,prob_up_rf,prob_up_lgb,prob_up_ensemble,l7_score_rf,l7_score_lgb\n")
+            for code in stock_codes:
+                rf = results_rf.get(code, {})
+                lgb = results_lgb.get(code, {})
+                prf = rf.get("prob_up", "")
+                plgb = lgb.get("prob_up", "")
+                sr = rf.get("score", "")
+                sl = lgb.get("score", "")
+                ensemble = ""
+                if prf != "" and plgb != "":
+                    ensemble = f"{(float(prf) + float(plgb)) / 2:.1f}"
+                f.write(f"{today},{code},{prf},{plgb},{ensemble},{sr},{sl}\n")
+        print(f"[write_ly_signal] prob_up 已追加到 {log_path}")
+    except Exception as e:
+        print(f"[write_ly_signal] prob_up CSV 写入失败: {e}")
+
     return 0
 
 

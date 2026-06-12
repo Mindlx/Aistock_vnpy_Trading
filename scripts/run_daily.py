@@ -299,7 +299,7 @@ def write_ly_signal(results: List[Dict[str, Any]], date: str):
         return
     rt_dir = Path("data/realtime")
     rt_dir.mkdir(parents=True, exist_ok=True)
-    tmp = rt_dir / "ly_signal.json.tmp"
+    tmp = rt_dir / f"ly_signal.json.tmp.{os.getpid()}"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(ly_data, f, ensure_ascii=False)
     os.rename(tmp, rt_dir / "ly_signal.json")
@@ -321,7 +321,7 @@ def write_at_signal(ta_results: List[Dict[str, Any]], date: str):
                 }
     rt_dir = Path("data/realtime")
     rt_dir.mkdir(parents=True, exist_ok=True)
-    tmp = rt_dir / "at_signal.json.tmp"
+    tmp = rt_dir / f"at_signal.json.tmp.{os.getpid()}"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(at_data, f, ensure_ascii=False)
     os.rename(tmp, rt_dir / "at_signal.json")
@@ -368,8 +368,10 @@ def main():
         except ImportError as e:
             print(f"  ⚠️  TradingAgent 导入失败: {e}")
             print(f"     确保已 clone mind_TradingAgent 并安装依赖")
+            _ta_results_cache = None
         except Exception as e:
             print(f"  ⚠️  TradingAgent 执行异常: {e}")
+            _ta_results_cache = None
 
     # 加载数据
     if args.mock:
@@ -379,7 +381,7 @@ def main():
         print("\n📡 加载真实系统数据（零侵入，不修改原系统）...")
         stock_signals = load_real_data(stock_pool, today, config, args.stock_pool)
         # 如果 --run-ta 使用了快速降级，注入 TA 结果到 stock_signals
-        if args.run_ta and '_ta_results_cache' in dir() and _ta_results_cache:
+        if args.run_ta and _ta_results_cache is not None and _ta_results_cache:
             for s in stock_signals:
                 for r in _ta_results_cache:
                     if s.get("code") == r.get("code") and r.get("rating"):
@@ -517,9 +519,9 @@ def main():
                         extra_sections.append(f"🐉 龙虎榜 ({today})\n{dt}")
 
                 if fc.get("xueqiu", {}).get("enabled"):
-                    extra_sections.append("💰 **东方财富自选股评级报告已生成** 📎 完整报告见附件PDF")
-            except Exception:
-                pass
+                    pass  # 简讯+PDF 由 generate_rating_report.py 独立推送
+            except Exception as e:
+                print(f"  ⚠️ 特征桥异常: {e}")
 
             notifier.push_daily_decision(results, today, extra_sections=extra_sections or None)
 
@@ -529,7 +531,11 @@ def main():
                 _venv = _root / "systems/MindLynx-Aistock/.venv/bin/python"
                 _script = _root / "systems/MindLynx-Aistock/scripts/generate_rating_report.py"
                 try:
-                    subprocess.run([str(_venv), str(_script)], timeout=300)
+                    bt_rating = subprocess.run(
+                        [str(_venv), str(_script)], capture_output=True, text=True, timeout=300,
+                    )
+                    if bt_rating.returncode != 0:
+                        print(f"  ⚠️ 东方财富评级 PDF 推送失败: {bt_rating.stderr[:200]}")
                 except Exception as e:
                     print(f"  ⚠️ 东方财富评级 PDF 推送异常: {e}")
         else:

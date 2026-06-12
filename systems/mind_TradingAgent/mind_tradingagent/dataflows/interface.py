@@ -36,6 +36,8 @@ from .akshare import (
     get_cashflow as get_akshare_cashflow,
     get_income_statement as get_akshare_income_statement,
     get_news as get_akshare_news,
+    get_block_trades as get_akshare_block_trades,
+    get_shareholder_changes as get_akshare_shareholder_changes,
 )
 
 # Configuration and routing logic
@@ -69,6 +71,8 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_news",
             "get_global_news",
+            "get_block_trades",
+            "get_shareholder_changes",
             "get_insider_transactions",
         ]
     }
@@ -124,6 +128,12 @@ VENDOR_METHODS = {
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
+    },
+    "get_block_trades": {
+        "akshare": get_akshare_block_trades,
+    },
+    "get_shareholder_changes": {
+        "akshare": get_akshare_shareholder_changes,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,

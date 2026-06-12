@@ -308,8 +308,10 @@ class FusionEngine:
         signal_name_map = L7_SIGNAL_NAMES
         position_map = L7_POSITION
 
-        # 检查分歧（使用概率空间的等价判断）
-        has_disagreement = (p_ly - 0.50) * (p_at - 0.50) < -0.2
+        # 检查分歧（使用概率空间的等价判断，含 ml）
+        has_disagreement = ((p_ly - 0.50) * (p_at - 0.50) < -0.2
+                           or (p_ly - 0.50) * (p_ml - 0.50) < -0.2
+                           or (p_ml - 0.50) * (p_at - 0.50) < -0.2)
         position = position_map.get(signal_label, "0成")
         if has_disagreement:
             position = SignalNormalizer.cap_position_for_disagreement(position)
@@ -694,17 +696,52 @@ class FusionEngine:
         # 按融合得分降序排列
         results.sort(key=lambda r: (r.get("valid", False), r.get("fusion_score", 0)), reverse=True)
 
+        # ── v4.0: 附加 UnifiedPosition 仓位建议 + 组合约束 ──
+        from src.position import UnifiedPosition, PositionConstraintEngine
+
+        positions = []
+        disagreements = []
+        for item in results:
+            if item.get("valid"):
+                sig = item.get("signal", "neutral")
+                pos = UnifiedPosition.from_signal(sig)
+                positions.append(pos)
+                disagreements.append(item.get("has_disagreement", False))
+            else:
+                positions.append(UnifiedPosition.from_signal("neutral"))
+                disagreements.append(False)
+
+        constraint = PositionConstraintEngine(total_stocks=len(results))
+        constrained = constraint.apply(positions, disagreements)
+
+        for item, pos in zip(results, constrained):
+            item["unified_position"] = {
+                "pct": pos.pct,
+                "label": pos.label,
+                "min_pct": pos.min_pct,
+                "max_pct": pos.max_pct,
+            }
+
         return results
 
     def get_portfolio_summary(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """生成投资组合摘要"""
+        """生成投资组合摘要（含 v4.0 仓位约束后汇总）。"""
+        from src.position import PositionConstraintEngine
+
         valid_results = [r for r in results if r.get("valid", False)]
 
-        strong_bullish = [r for r in valid_results if r["signal"] == "strong_bullish"]
-        weak_bullish = [r for r in valid_results if r["signal"] in ("bullish", "cautious_bullish")]
-        neutral = [r for r in valid_results if r["signal"] == "neutral"]
-        weak_bearish = [r for r in valid_results if r["signal"] in ("cautious_bearish", "bearish")]
-        strong_bearish = [r for r in valid_results if r["signal"] == "strong_bearish"]
+        strong_bullish = [r for r in valid_results if r.get("signal") == "strong_bullish"]
+        weak_bullish = [r for r in valid_results if r.get("signal") in ("bullish", "cautious_bullish")]
+        neutral = [r for r in valid_results if r.get("signal") == "neutral"]
+        weak_bearish = [r for r in valid_results if r.get("signal") in ("cautious_bearish", "bearish")]
+        strong_bearish = [r for r in valid_results if r.get("signal") == "strong_bearish"]
+
+        # 仓位约束后摘要
+        from src.position import UnifiedPosition, PositionConstraintEngine
+        constraint = PositionConstraintEngine(total_stocks=len(valid_results))
+        positions = [UnifiedPosition.from_signal(r.get("signal", "neutral")) for r in valid_results]
+        constrained = constraint.apply(positions)
+        portfolio = constraint.summary(constrained)
 
         return {
             "total_valid": len(valid_results),
@@ -718,4 +755,7 @@ class FusionEngine:
             },
             "degraded_count": sum(1 for r in valid_results if r.get("is_degraded", False)),
             "disagreement_count": sum(1 for r in valid_results if r.get("has_disagreement", False)),
+            # v4.0 仓位
+            "portfolio_position": portfolio,
+            "portfolio_position_display": constraint.summary_display(constrained),
         }

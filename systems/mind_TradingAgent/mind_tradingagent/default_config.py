@@ -95,6 +95,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "China A-share market PBOC liquidity stimulus",
         "North-bound capital south-bound Shanghai Shenzhen Connect",
         "China regulatory policy stock market tech property",
+        "China A-share market news today policy",
+        "Chinese stock market sector rotation capital flow",
+        "China top economic news this week",
     ],
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)

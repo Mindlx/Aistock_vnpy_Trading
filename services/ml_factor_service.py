@@ -155,6 +155,12 @@ class MLFactorService:
         os.rename(tmp, str(OUTPUT_PATH))
         return data
 
+    def close(self):
+        """关闭数据库连接，释放资源"""
+        if self._db_conn is not None:
+            self._db_conn.close()
+            self._db_conn = None
+
     def run_daemon(self, interval: int = 300):
         """守护模式"""
         print(f"[ml-factor] daemon started, interval={interval}s")

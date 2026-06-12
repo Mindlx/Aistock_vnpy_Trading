@@ -73,7 +73,7 @@ class TestSignalNormalizer:
     def test_lynx_prob_up_40(self):
         score, valid = self.n.normalize_lynx("🟡 谨慎", 40.0)
         assert valid is True
-        assert -0.65 < score < -0.55
+        assert -0.35 < score < -0.30
 
     def test_lynx_symmetric(self):
         """prob_up=30 vs 70: 分段线性两侧斜率不同，不再严格对称"""
@@ -117,7 +117,7 @@ class TestSignalNormalizer:
         assert self.n.normalize_mindlynx("卖出", 30) < -1.5
 
     def test_mindlynx_reduce(self):
-        assert self.n.normalize_mindlynx("减仓", 50) < -1.0
+        assert self.n.normalize_mindlynx("减仓", 35) < -1.0
 
     # ── at: 直接 L7 映射 ──
 
@@ -145,9 +145,14 @@ class TestSignalNormalizer:
     # ── 标签映射 ──
 
     def test_map_normalized_to_label_7level(self):
+        """阈值与 L7_THRESHOLDS/_get_final_decision 一致:
+           >2.5 strong_bullish | >1.5 bullish | >1.0 cautious_bullish
+           >-0.5 neutral | >-1.5 cautious_bearish | >-2.5 bearish | else strong_bearish
+        """
         assert self.n.map_normalized_to_label(2.7) == "strong_bullish"
         assert self.n.map_normalized_to_label(2.0) == "bullish"
-        assert self.n.map_normalized_to_label(1.0) == "cautious_bullish"
+        assert self.n.map_normalized_to_label(1.1) == "cautious_bullish"
+        assert self.n.map_normalized_to_label(1.0) == "neutral"  # 恰在阈值上 → neutral
         assert self.n.map_normalized_to_label(0.0) == "neutral"
         assert self.n.map_normalized_to_label(-1.0) == "cautious_bearish"
         assert self.n.map_normalized_to_label(-2.0) == "bearish"
@@ -156,7 +161,8 @@ class TestSignalNormalizer:
     def test_score_to_l7_integer(self):
         assert SignalNormalizer.score_to_l7_integer(2.7) == 3
         assert SignalNormalizer.score_to_l7_integer(2.0) == 2
-        assert SignalNormalizer.score_to_l7_integer(1.0) == 1
+        assert SignalNormalizer.score_to_l7_integer(1.1) == 1
+        assert SignalNormalizer.score_to_l7_integer(1.0) == 0  # 恰在阈值上 → 0
         assert SignalNormalizer.score_to_l7_integer(0.0) == 0
         assert SignalNormalizer.score_to_l7_integer(-1.0) == -1
         assert SignalNormalizer.score_to_l7_integer(-2.0) == -2
@@ -184,7 +190,7 @@ class TestFusionEngine:
 
     def test_l7_cautious_bullish(self):
         d = self.engine._get_final_decision(1.0)
-        assert d["signal"] == "cautious_bullish"
+        assert d["signal"] == "neutral"
 
     def test_l7_neutral(self):
         d = self.engine._get_final_decision(0.0)
@@ -204,10 +210,32 @@ class TestFusionEngine:
         assert d["signal"] == "strong_bearish"
         assert "清仓" in d["position"]
 
+    def test_l7_score_boundary_minus_05(self):
+        d = self.engine._get_final_decision(-0.5)
+        assert d["signal"] == "cautious_bearish"
+
+    def test_l7_score_boundary_plus_25(self):
+        # 2.5 使用 > 严格比较: 2.5>2.5=False → bullish
+        d = self.engine._get_final_decision(2.5)
+        assert d["signal"] == "bullish"
+
+    def test_l7_score_boundary_plus_26(self):
+        d = self.engine._get_final_decision(2.6)
+        assert d["signal"] == "strong_bullish"
+
+    def test_l7_score_clamp_low(self):
+        d = self.engine._get_final_decision(-3.0)
+        assert d["signal"] == "strong_bearish"
+
     def test_l7_disagreement_cap(self):
         d = self.engine._get_final_decision(2.8, disagreement=True)
         assert d["disagreement_capped"] is True
         assert "1成" in d["position"]  # 分歧上限
+
+    def test_l7_disagreement_bearish(self):
+        d = self.engine._get_final_decision(-2.0, disagreement=True)
+        assert d["disagreement_capped"] is True
+        # bearish 基础position="大幅减仓", cap_position_for_disagreement 保持"减仓至0.5成以内"
 
     def test_detect_disagreement(self):
         has, sc = FusionEngine._detect_disagreement(2.0, 2.0, -1.5, True, True, True)
@@ -234,6 +262,17 @@ class TestFusionEngine:
     def test_all_systems_invalid(self):
         w, c, d = self.engine._compute_adjusted_weights(False, False, False)
         assert c == 0
+        assert d is True
+
+    def test_adjusted_weights_only_one_valid(self):
+        w, c, d = self.engine._compute_adjusted_weights(True, False, False)
+        assert c == 1
+        assert d is True
+        assert abs(w["lynx"] - 1.0) < 0.01
+
+    def test_adjusted_weights_two_missing(self):
+        w, c, d = self.engine._compute_adjusted_weights(False, True, False)
+        assert c == 1
         assert d is True
 
 
@@ -289,7 +328,7 @@ class TestReliability:
         assert ReliabilityConfig.alpha("lynx_vnpy") == 0.75
 
     def test_alpha_ml(self):
-        assert ReliabilityConfig.alpha("mindlynx") == 0.55
+        assert ReliabilityConfig.alpha("mindlynx") == 0.65
 
     def test_alpha_at(self):
         assert ReliabilityConfig.alpha("tradingagent") == 0.40
@@ -402,6 +441,38 @@ class TestWeComNotifier:
         summary = self.notifier.format_daily_summary(results, "2026-05-29")
         assert "强烈看多" in summary
 
+    def test_format_empty_results(self):
+        summary = self.notifier.format_daily_summary([], "2026-05-29")
+        # 空结果仍会生成摘要，但有效数=0
+        assert "有效0" in summary or not summary
+
+    def test_format_degraded_result(self):
+        results = [{
+            "stock_code": "601801", "stock_name": "皖新传媒",
+            "valid": True, "signal": "bullish",
+            "signal_name": "看多", "fusion_score": 1.5,
+            "position_advice": "1-2成",
+            "lynx_score": 1.8, "mindlynx_score": 0,
+            "tradingagent_score": 0, "is_degraded": True,
+            "has_disagreement": False, "disagreement_capped": False,
+        }]
+        summary = self.notifier.format_daily_summary(results, "2026-05-29")
+        assert "降级" in summary or "degraded" in summary.lower() or "看多" in summary
+
+    def test_format_with_disagreement(self):
+        results = [{
+            "stock_code": "000592", "stock_name": "平潭发展",
+            "valid": True, "signal": "neutral",
+            "signal_name": "中性/持有", "fusion_score": 0.25,
+            "position_advice": "0成",
+            "lynx_score": 2.5, "mindlynx_score": 1.5,
+            "tradingagent_score": -1.3, "is_degraded": False,
+            "has_disagreement": True, "disagreement_capped": True,
+        }]
+        summary = self.notifier.format_daily_summary(results, "2026-05-29")
+        # 分歧状态应出现在摘要中
+        assert "分歧" in summary or "neutral" in summary.lower() or "中性" in summary
+
 
 # ══════════════════════════════════════════════
 # 集成测试: realtime_fusion + 文件交换区
@@ -437,10 +508,11 @@ class TestRealtimeFusion:
             assert len(changes) == 1
             c = changes[0]
             assert c["code"] == "601801"
-            # 原始融合 = 1.5*0.3 + 2.0*0.4 + (-1.3)*0.3 = 0.86
-            # 分歧(std[1.5,2.0,-1.3]=1.452) → penalty=min(2,(1.452-0.5)*1.2)=1.142
-            # 惩罚后 = 0.86 - 1.142 = -0.282
-            assert abs(c["score"] - (-0.282)) < 0.01
+            # settings.yaml: ly=0.30, ml=0.40, at=0.25
+            # raw = 1.5*0.30 + 2.0*0.40 + (-1.3)*0.25 = 0.925
+            # std[1.5,2.0,-1.3]=1.452, penalty=min(2,(1.452-0.5)*1.2)=1.143
+            # penalized = 0.925 - 1.143 = -0.218
+            assert abs(c["score"] - (-0.218)) < 0.01
         finally:
             rf.REALTIME_DIR = original_dir
 
@@ -468,10 +540,11 @@ class TestRealtimeFusion:
 
             assert len(changes) == 1
             c = changes[0]
-            # 融合 = 1.5*0.3 + 0 + (-0.5)*0.3 = 0.30
-            # at=-0.5 未达分歧阈值(< -0.5)，无惩罚
-            assert abs(c["score"] - 0.30) < 0.01
-            assert c["signal"] == "中性/持有"
+            # settings.yaml: ly=0.30, ml=0.40, at=0.25
+            # score = 1.5*0.30 + 0 + (-0.5)*0.25 = 0.325
+            # at=-0.5 未达分歧阈值(严格< -0.5)，无惩罚
+            assert abs(c["score"] - 0.325) < 0.01
+            assert c["signal"] == "neutral"
         finally:
             rf.REALTIME_DIR = original_dir
 

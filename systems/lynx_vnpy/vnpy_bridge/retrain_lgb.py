@@ -52,8 +52,8 @@ def main():
     X_list, y_list = [], []
     for code in codes:
         df = pd.read_sql(
-            f"SELECT date, open, high, low, close, volume FROM stock_daily "
-            f"WHERE code='{code}' ORDER BY date", conn
+            "SELECT date, open, high, low, close, volume FROM stock_daily "
+            "WHERE code=? ORDER BY date", conn, params=(code,)
         )
         if len(df) < 120:
             continue

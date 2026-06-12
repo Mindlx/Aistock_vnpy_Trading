@@ -1104,7 +1104,15 @@ class RealtimeMonitorService:
         # 重置状态
         self._states.clear()
         self._quotes.clear()
-        self._last_briefing_time = time.time()
+        # 首次简报偏移，避开与整点分析(10:00/11:00/14:00/15:00)同时触发
+        # 早盘目标 09:37，午盘目标 13:07
+        from src.core.trading_calendar import get_market_now as _get_mkt_now
+        _mkt = _get_mkt_now("cn")
+        if _mkt.hour < 12:
+            _target = _mkt.replace(hour=9, minute=37, second=0, microsecond=0)
+        else:
+            _target = _mkt.replace(hour=13, minute=7, second=0, microsecond=0)
+        self._last_briefing_time = _target.timestamp() - self._briefing_interval
 
         # 加载日线数据
         self._stock_codes = codes

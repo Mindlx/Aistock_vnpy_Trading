@@ -1,6 +1,6 @@
 # 当前项目状态快照
 
-> 最后更新: 2026-06-07 (周日)
+> 最后更新: 2026-06-09 (周二)
 > 范围: 代码架构 + 运行时状态 + 关键配置 + 近期变更 + 待办
 > 覆盖: src/、scripts/、services/、config/systemd/、docs/
 
@@ -141,9 +141,10 @@ data/realtime/
 
 | 系统 | 权重 | 说明 |
 |------|------|------|
-| ly (lynx_vnpy) | 0.30 | RF量化模型，基线信号 |
-| ml (MindLynx) | 0.40 | 因子层实时模型，盘中填补 |
-| at (TradingAgent) | 0.30 | 多智能体辩论，主观判断 |
+| ly (lynx_vnpy) | 0.30 | RF+LGB双模型 + alpha158增强 |
+| mindlynx | 0.40 | 12因子+策略+LLM混合模式 |
+| at (TradingAgent) | 0.25 | 多智能体辩论，主观判断 |
+| ml_factor | 0.05 | 纯12因子数学信号（无LLM） |
 
 fusion_mode: "dual"（同时输出linear+bayesian，CSV暴露linear层字段）
 
@@ -162,7 +163,7 @@ Flat zone (41-59): LLM方向信号弱(1.8% acc), 整体系数乘0.5。
 |------|-----------|----------|------|
 | ly | 0.75 | 0.0 | sklearn predict_proba, 100%可重复 |
 | ml | 0.55~0.65 | 0.15 | ~40%因子+~60%LLM, per-stock差异 |
-| at | 0.40 | 0.30 | 纯LLM角色扮演, prompt敏感 |
+| at | 0.25 | 0.25 | 纯LLM角色扮演, prompt敏感 |
 
 **per-stock alpha覆盖**: 000592=0.8, 300652=0.3, 600372=0.8, 603189=0.8, 603557=0.3, 605368=0.4, 688202=0.3。其余用BASE_ALPHA默认值0.65。DB动态alpha优先级高于静态覆盖。
 
@@ -291,7 +292,7 @@ DB: `data/backtest/bt_results.db`，60列schema覆盖子系统有效性、ML das
 | fusion_engine.py | 709 | 融合核心：linear/bayesian/dual 三种模式 |
 | normalizer.py | 390 | L7映射 v3.1 + 概率空间工具 |
 | reliability.py | 285 | 贝叶斯α/c/h参数 + 幻觉检测 + 置信度校准 |
-| data_loader.py | 965 | 零侵入三系统读取 + UnifiedCache集成 |
+| data_loader.py | 1052 | 零侵入三系统读取 + UnifiedCache集成 |
 | realtime_fusion.py | 307 | 文件交换区扫描daemon |
 | wecom_notifier.py | 294 | 企业微信推送 v3.0 |
 | feature_bridge.py | 156 | 可选功能：龙虎榜/东方财富评级 |
@@ -387,16 +388,46 @@ ly的58因子提供体系化覆盖(K线形态/多窗口统计/分位数等)。
 
 用52/49阈值+HP3双路径重新评估全部历史记录，更新per-stock alpha。
 
-### P3 — L7_THRESHOLDS 校准
+### P3 — 数据积累（被动等待）
 
-等待条件（全部满足）:
-- post-HP3记录 ≥200条 (~6/15)
-- AT评估完成
-- backtest --force成功运行
+| 任务 | 条件 | 预计 |
+|------|------|------|
+| 东方财富w/f阈值校准 | 384样本 | ~6/10 |
+| prob_up + 融合回测 | 30交易日 | ~6月下旬 |
+| AT价值评估 | forward数据充足 | ~6/15 |
 
-c1skill论证结论: **现在不改L7 flat zone**。原因: ①98.2%的pre-HP3数据落在flat zone ②at 40.5% strong_bearish可能是噪音 ③AT评估未完成。
+### ✅ 已完成修复（2026-06-09 批量修复）
 
-### P2-c1skill 已实现的改进
+**严重级别 (8项)**:
+- S1 `data_loader.py:336` — for缩进错误修复，ML数据从仅1只变为全量10只
+- S2 `calibrate_alphas.py:121` — 原子写入，崩溃不丢文件
+- S8 `normalizer.py:316+334` — map_normalized_to_label/score_to_l7_integer阈值对齐L7_THRESHOLDS（旧0.5→1.0）
+- S3 `retrain_lgb.py:55` — SQL f-string改为参数化查询
+- H1 `data_loader.py:1027,1029` — bool强制转换if x→is not None，score=0不再被吞
+- H2 4处except:pass → logger.warning
+- H3 `realtime_fusion.py:101` — 文件句柄泄露修复
+- H6 `run_daily.py:532` — 子进程加capture_output+返回码检查
+
+**功能修复 (7项)**:
+- H4 `fusion_engine.py:312` — 贝叶斯分歧检测加p_ml（之前只检查ly/at）
+- H8 `config/settings.yaml` — at权重0.30→0.25与生产一致
+- S4 `lynx_signal.py:580` — 回测前视偏差修复（删训练集最后一行）
+- S7 `trading_graph.py` — TA图执行加3600s超时保护
+- M2 `wecom_notifier.py:289` — list.index()→enumerate()
+- F2 `wecom_notifier.py:167` — format_daily_summary date参数生效
+- M5 `fusion_engine.py:703` — get_portfolio_summary加.get()保护
+
+**代码质量 (6项)**:
+- M6 import移出for循环
+- L3 删未用import
+- L4 run_daily.py `in dir()` → 常规写法
+- M12 6文件清理未用import
+- H7 `expr_cache.py` 异常加日志
+- H9 `stock_knowledge.py` with语句防连接泄露
+- M10 analyzer JSON校验加3层回退
+- M3 data_loader.py删重复键
+
+### P2-c1skill 之前已实现的改进
 
 ✅ WalkForward融合回测 (train=20, test=10, step=5)
 ✅ MAD去极值 (factor_engine.py winsorize_mad, 阈值5.0≈3.35σ)
@@ -427,6 +458,14 @@ c1skill论证结论: **现在不改L7 flat zone**。原因: ①98.2%的pre-HP3�
 ### 9.3 周末空转
 
 realtime-fusion和ml-factor服务已加入 `_is_trading_day()` 检测，非工作日睡眠到下一交易日09:33。
+
+### 9.4 前视偏差陷阱（已修复）
+
+`lynx_signal.py` 回测中 `compute_features()` 在全量数据集上计算 target（`shift(-1)`），再用 `df.iloc[:train_end]` 训练。最后一行 target 用了测试集收盘价。**已修复**: 训练改为 `df.iloc[:train_end - 1]`。
+
+### 9.5 连接泄露陷阱（已修复）
+
+`stock_knowledge.py` 中 `sqlite3.connect()` 在函数头打开、140行后才关闭。中间5+异常路径可能跳过close。**已修复**: 改为 `with sqlite3.connect() as conn` 自动释放。
 
 ---
 

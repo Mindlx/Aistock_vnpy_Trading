@@ -91,7 +91,11 @@ TradingAgent    10/17      58.8%
 
 ### 2.6 自动执行
 
-融合引擎每日 19:00 运行后自动调用 `backtest.py update`，代码位于 `run_daily.py:443-455`。
+| 回测 | 触发器 | 频率 |
+|------|--------|------|
+| **融合回测** `backtest.py update` | 融合引擎每日19:00运行后自动调用 (`run_daily.py:484-499`) | 每日 |
+| **LY 独立回测** `lynx_signal.py --backtest` | `Aistock_vnpy_Trading-lynx-backtest.timer` | 每周日 10:00 |
+| **东方财富评级阈值校准** `calibrate_eastmoney_thresholds.py` | `Aistock_vnpy_Trading-eastmoney-calibrate.timer` | 每月1日 10:00 |
 
 ---
 
@@ -138,7 +142,7 @@ TradingAgent    10/17      58.8%
   601801 皖新传媒    : 85.2% (46/54)  高置信: 93.1%
 ```
 
-**⚠️ 注意**: 当前为 in-sample 测试——模型在全部历史数据上训练，在同一数据集上验证。准确率偏高（88.9%）包含过拟合成分。需要 walk-forward 验证才能得到真实的 out-of-sample 准确率。
+**✅ Walk-forward 已实现**: 当前使用 expanding window walk-forward（每20天重训练一次，最少60天作为初始训练集）。`cmd_backtest()` 使用 `train_df = df.iloc[:train_end - 1]` 确保训练集不含未来数据（修复了前视偏差问题）。准确率为 out-of-sample 估计。
 
 ### 3.4 模型信息
 
@@ -253,7 +257,7 @@ ML 的 Agent 系统自动使用回测数据做技能加权：
 | **评估范围** | T+1 方向准确率 | T+1 方向准确率 | T+5/10/20 方向+盈亏+回撤 |
 | **结果类型** | 方向正确/错误 | 方向正确/错误 | win/loss/neutral + 收益率 |
 | **样本量** | 60 (匹配40) | 569 (in-sample) | 1,795 (598 已完成) |
-| **频率** | 每日自动 | 手动 | 每日自动 (pipeline 中) |
+| **频率** | 每日自动 | 每周日自动 (systemd timer) | 每日自动 (pipeline 中) |
 
 ---
 
@@ -262,7 +266,7 @@ ML 的 Agent 系统自动使用回测数据做技能加权：
 | 场景 | 命令 | 说明 |
 |------|------|------|
 | **每日检查融合准确率** | `scripts/backtest.py report` | 快速查看当日 + 累计准确率 |
-| **评估模型是否退化** | `lynx_signal.py --backtest` | 运行后对比历史准确率变化 |
+| **评估模型是否退化** | `lynx_signal.py --backtest` | 每周日自动运行，也可手动触发对比历史变化 |
 | **分析 LLM 建议质量** | `main.py --backtest --backtest-report` | 看 ML 独立报告 (Sharpe/回撤/NAV) |
 | **对比 LLM vs 因子** | `python -m src.core.factor_backtest` | LLM 是否比纯因子组合更优 |
 | **补充历史数据** | `scripts/backtest.py backfill` | 首次部署或融合 CSV 更新后执行 |
@@ -273,7 +277,7 @@ ML 的 Agent 系统自动使用回测数据做技能加权：
 
 | 项目 | 优先级 | 说明 |
 |------|--------|------|
-| ly walk-forward 验证 | 🟡 中 | 当前为 in-sample，需改为滑动窗口训练+预测 |
+| ly walk-forward 验证 | ✅ 已完成 | 当前为 expanding window walk-forward（每20天重训练）|
 | 模拟交易回测 | 🟡 中 | 当前只有方向准确率，缺 portfolio 模拟（仓位/止损/资金管理） |
 | at 独立回测 | 🟢 低 | TradingAgent 无独立回测系统，仅在融合层面评估 |
 | 更多历史数据 | 🟢 低 | 每日自动积累，1-2 月后 ML 20d 窗口才够用 |

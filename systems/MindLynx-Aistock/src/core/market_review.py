@@ -247,11 +247,11 @@ def run_market_review(
                 _sectors_raw = _dm.get_sector_rankings(n=40)  # 取尽量多覆盖全市场
                 # get_sector_rankings 返回 (上涨板块列表, 下跌板块列表)
                 if _sectors_raw and len(_sectors_raw) == 2:
-                    # 合并涨跌列表，按成交额排序取 Top 16（确保方块面积可读）
+                    # 合并涨跌列表，按涨跌幅绝对值排序取 Top 16（展示涨跌+成交额交叉面）
                     _all_sectors_raw = _sectors_raw[0] + _sectors_raw[1]
                     _all_sectors = sorted(
                         _all_sectors_raw,
-                        key=lambda s: float(s.get('amount', 0) or 0),
+                        key=lambda s: abs(float(s.get('change_pct', 0) or 0)),
                         reverse=True,
                     )[:16]
                 else:

@@ -1,5 +1,6 @@
 # Mind TradingAgent/graph/trading_graph.py
 
+import concurrent.futures
 import logging
 import os
 from pathlib import Path
@@ -333,6 +334,36 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
 
+    def _invoke_with_timeout(self, init_state, args, timeout_s=3600):
+        """调用 graph.stream/invoke 并设置挂钟超时（秒）。
+
+        默认 3600s = 1h，覆盖正常多只股票的 LLM 调用链。
+        超时抛出 TimeoutError，由 propagate() 中的 try/finally 清理资源。
+        """
+        def _run():
+            if self.debug:
+                trace = []
+                for chunk in self.graph.stream(init_state, **args):
+                    if len(chunk.get("messages", [])) == 0:
+                        pass
+                    else:
+                        chunk["messages"][-1].pretty_print()
+                        trace.append(chunk)
+                result = {}
+                for chunk in trace:
+                    result.update(chunk)
+                return result
+            return self.graph.invoke(init_state, **args)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_run)
+            try:
+                return future.result(timeout=timeout_s)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError(
+                    f"TA 图执行超时 {timeout_s}s (company={self.ticker})"
+                )
+
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM.
@@ -347,21 +378,8 @@ class TradingAgentsGraph:
             tid = thread_id(company_name, str(trade_date))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
-        if self.debug:
-            trace = []
-            for chunk in self.graph.stream(init_agent_state, **args):
-                if len(chunk["messages"]) == 0:
-                    pass
-                else:
-                    chunk["messages"][-1].pretty_print()
-                    trace.append(chunk)
-            # Streamed chunks are per-node deltas. Merge them so the returned
-            # state matches what graph.invoke() yields in the non-debug path.
-            final_state = {}
-            for chunk in trace:
-                final_state.update(chunk)
-        else:
-            final_state = self.graph.invoke(init_agent_state, **args)
+        # 执行图（含挂钟超时保护）
+        final_state = self._invoke_with_timeout(init_agent_state, args)
 
         # Store current state for reflection.
         self.curr_state = final_state

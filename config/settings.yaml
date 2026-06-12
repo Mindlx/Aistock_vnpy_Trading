@@ -115,11 +115,11 @@ backtest:
   initial_weights:          # 回测使用的权重起始值（与 weights 保持一致即可）
     lynx_vnpy: 0.30
     mindlynx: 0.40
-    tradingagent: 0.30
+    tradingagent: 0.25
   weight_search_range:      # 网格搜索范围
     lynx_vnpy: [0.2, 0.3, 0.35, 0.4]
     mindlynx: [0.2, 0.3, 0.35, 0.4]
-    tradingagent: [0.2, 0.3, 0.35, 0.4]
+    tradingagent: [0.2, 0.25, 0.3, 0.35]
   report:
     weekly_cron: "30 17 * * 5"   # 每周五17:30推送周报
     accuracy_threshold: 0.50      # 基准准确率（低于此阈值告警）

@@ -63,6 +63,17 @@ from src.report_language import (
     localize_trend_prediction,
     normalize_report_language,
 )
+
+# 信号排序优先级：strong_buy(好) → buy → hold → watch → reduce → sell(差)
+_SIGNAL_RANK = {
+    "strong_buy": 0, "buy": 1, "hold": 2,
+    "watch": 3, "reduce": 4, "sell": 5, "strong_sell": 5,
+}
+
+def _signal_sort_key(r):
+    """按信号好→差排序，同级内按 sentiment_score 降序。"""
+    _, _, tag = get_signal_level(r.operation_advice, r.sentiment_score, None)
+    return _SIGNAL_RANK.get(tag, 99), -r.sentiment_score
 from src.utils.data_processing import normalize_model_used
 from src.utils.sanitize import sanitize_diagnostic_text
 
@@ -692,7 +703,7 @@ class NotificationService(
         ]
 
         # 按评分排序（高分在前）
-        sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
+        sorted_results = sorted(results, key=_signal_sort_key)
 
         # 统计信息 - 使用 decision_type 字段准确统计
         buy_count = sum(1 for r in results if getattr(r, "decision_type", "") == "buy")
@@ -1011,7 +1022,7 @@ class NotificationService(
             report_date = datetime.now().strftime("%Y-%m-%d")
 
         # 按评分排序（高分在前）
-        sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
+        sorted_results = sorted(results, key=_signal_sort_key)
 
         # 统计信息 - 使用 decision_type 字段准确统计
         buy_count = sum(1 for r in results if getattr(r, "decision_type", "") == "buy")
@@ -1239,9 +1250,13 @@ class NotificationService(
                         )
                     # 量能分析
                     if vol_data:
+                        vr = vol_data.get("volume_ratio", "N/A")
+                        if vr in (0, None, "", "N/A", "0"):
+                            vr = getattr(result, "volume_ratio_5d", "N/A")
+                        vr_label = "昨日量比" if getattr(result, "volume_ratio_is_daily", False) else "量比"
                         report_lines.extend(
                             [
-                                f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {vol_data.get('volume_ratio', 'N/A')} ({vol_data.get('volume_status', '')}) ｜ "
+                                f"**{labels['volume_label']}**: {vr_label} {vr} ({vol_data.get('volume_status', '')}) ｜ "
                                 f"{labels['turnover_rate_label']} {vol_data.get('turnover_rate', 'N/A')}%",
                                 f"💡 {vol_data.get('volume_meaning', '')}",
                                 "",
@@ -1399,7 +1414,7 @@ class NotificationService(
         report_date = datetime.now().strftime("%Y-%m-%d")
 
         # 按评分排序
-        sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
+        sorted_results = sorted(results, key=_signal_sort_key)
 
         # 统计 - 使用 decision_type 字段准确统计
         buy_count = sum(1 for r in results if getattr(r, "decision_type", "") == "buy")
@@ -1577,7 +1592,7 @@ class NotificationService(
         labels = get_report_labels(report_language)
 
         # 按评分排序
-        sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
+        sorted_results = sorted(results, key=_signal_sort_key)
 
         # 统计 - 使用 decision_type 字段准确统计
         buy_count = sum(1 for r in results if getattr(r, "decision_type", "") == "buy")
@@ -1678,7 +1693,7 @@ class NotificationService(
         # Fallback: brief summary from dashboard report
         if not results:
             return f"# {report_date} {labels['brief_title']}\n\n{labels['no_results']}"
-        sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
+        sorted_results = sorted(results, key=_signal_sort_key)
         buy_count = sum(1 for r in results if getattr(r, "decision_type", "") == "buy")
         sell_count = sum(1 for r in results if getattr(r, "decision_type", "") == "sell")
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
@@ -2280,7 +2295,7 @@ class NotificationBuilder:
         labels = get_report_labels(report_language)
         lines = [f"📊 **{labels['summary_heading']}**", ""]
 
-        for r in sorted(results, key=lambda x: x.sentiment_score, reverse=True):
+        for r in sorted(results, key=_signal_sort_key):
             _, emoji, _ = get_signal_level(r.operation_advice, r.sentiment_score, report_language)
             name = get_localized_stock_name(r.name, r.code, report_language)
             lines.append(

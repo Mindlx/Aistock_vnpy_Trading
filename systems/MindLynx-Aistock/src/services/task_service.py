@@ -116,6 +116,12 @@ class TaskService:
         tasks.sort(key=lambda x: x.get("start_time", ""), reverse=True)
         return tasks[:limit]
 
+    def shutdown(self):
+        """关闭线程池，等待正在执行的任务完成"""
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+
     def get_analysis_history(
         self, code: str | None = None, query_id: str | None = None, days: int = 30, limit: int = 50
     ) -> list[dict[str, Any]]:

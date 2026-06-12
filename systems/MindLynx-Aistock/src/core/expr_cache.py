@@ -114,8 +114,8 @@ class SQLiteExpressionCache:
             conn.execute("DELETE FROM expr_cache WHERE key=?", (key,))
             conn.commit()
             conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[ExprCache] delete failed for %s: %s", key, exc)
 
     def clear(self) -> None:
         try:
@@ -123,8 +123,8 @@ class SQLiteExpressionCache:
             conn.execute("DELETE FROM expr_cache")
             conn.commit()
             conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[ExprCache] clear failed: %s", exc)
 
 
 # Global cache instances

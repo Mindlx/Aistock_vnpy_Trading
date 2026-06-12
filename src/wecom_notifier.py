@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 import requests
 
-from src.normalizer import L7_EMOJI, GROUP_ICONS, L7_SIGNAL_NAMES, L7_POSITION
+from src.normalizer import L7_EMOJI, L7_SIGNAL_NAMES, L7_POSITION, SignalNormalizer
+from src.position import UnifiedPosition, PositionConstraintEngine, pct_to_label
 
 
 # L7 信号 → 图标/颜色映射（7 级，从 normalizer 导入）
@@ -26,6 +28,10 @@ class WeComNotifier:
         self.webhook_url = webhook_url
         self.enabled = enabled
         self.session = requests.Session()
+
+    def close(self):
+        """关闭 HTTP Session，释放连接池"""
+        self.session.close()
 
     def send_markdown(self, content: str) -> Optional[Dict[str, Any]]:
         """发送 Markdown 格式消息"""
@@ -62,40 +68,27 @@ class WeComNotifier:
 
     @staticmethod
     def _summary_position(valid: List[Dict[str, Any]]) -> str:
-        """根据有效结果汇总建议总仓位"""
+        """汇总建议总仓位（% of 总资金）。
+
+        只算非中性仓位，避免大量0%拉低均值。
+        """
         if not valid:
-            return "0成"
-        # 按fusion_score对应的L7_POSITION取中间值，再取均值
+            return "总仓位0% (空仓)"
         total_pct = 0.0
-        count = 0
+        active_count = 0
         for r in valid:
-            sig = r.get("signal", "neutral")
-            pos_str = L7_POSITION.get(sig, "0成")
-            # 解析中文仓位描述：取数字范围的中值
-            if "清仓" in pos_str:
-                pct = 0.0
-            elif "减仓" in pos_str:
-                pct = 0.05
-            elif "大幅减仓" in pos_str:
-                pct = 0.03
-            elif "0成" in pos_str:
-                pct = 0.0
-            elif "-" in pos_str:
-                parts = pos_str.replace("成", "").split("-")
-                low, high = float(parts[0]), float(parts[1])
-                pct = (low + high) / 2 * 0.1
+            # 优先用 unified_position
+            up = r.get('unified_position')
+            if up and isinstance(up, dict) and up.get('pct', 0) > 0:
+                pct = up['pct']
             else:
-                pct = 0.0
-            total_pct += pct
-            count += 1
-        avg_pct = total_pct / count if count > 0 else 0.0
-        avg_cheng = avg_pct * 10
-        if avg_cheng >= 2.0:
-            return f"{avg_cheng:.0f}成"
-        elif avg_cheng >= 0.5:
-            return f"{avg_cheng:.1f}成"
-        else:
-            return "0成"
+                sig = r.get("signal", "neutral")
+                pct = SignalNormalizer.l7_target_pct(sig)
+            if pct > 0.5:
+                total_pct += pct
+                active_count += 1
+        label = "重仓" if total_pct > 70 else ("中仓" if total_pct > 30 else "轻仓")
+        return f"总仓位{total_pct:.0f}% ({label})"
 
     @staticmethod
     def _stock_line(r) -> str:
@@ -113,7 +106,15 @@ class WeComNotifier:
         ms = r.get("mindlynx_score", 0)
         ts = r.get("tradingagent_score", 0)
         sig = r.get('signal_name', '中性')
-        pos = r.get('position_advice', '0成')
+        # v4.0: 优先用 unified_position，否则从信号标签计算百分比
+        up = r.get('unified_position')
+        if up and isinstance(up, dict) and up.get('pct', 0) > 0:
+            pos = f"{up['pct']:.0f}% ({up.get('label', '')})"
+        else:
+            sig_label = r.get('signal', 'neutral')
+            pct = SignalNormalizer.l7_target_pct(sig_label)
+            label = SignalNormalizer.l7_target_label(sig_label)
+            pos = f"{pct:.0f}% ({label})" if pct > 0 else "空仓"
 
         # 股价和涨跌幅
         price_str = f"¥{price:.2f}" if price else "-"
@@ -139,8 +140,7 @@ class WeComNotifier:
             stop_price = float(stop_loss)
             dist = (price - stop_price) / price * 100
             if dist > 0:
-                urgency = "🛑" if dist < 3 else ("⚠️" if dist < 7 else "")
-                stop_str = f"{urgency}止{stop_price:.2f}({dist:.1f}%)"
+                stop_str = f"止损{stop_price:.2f}({dist:.1f}%)"
 
         extras = [x for x in [vr_str, sup_str, stop_str] if x]
         extra_str = f"｜{' '.join(extras)}" if extras else ""
@@ -163,73 +163,28 @@ class WeComNotifier:
         degraded = [r for r in valid if r.get("is_degraded")]
         stale_ta = [r for r in valid if r.get("ta_is_stale")]
 
-        now = self._tz_cn_now()
+        ts = self._tz_cn_now()
         lines = [
-            f"## 🛟 {now.strftime('%H:%M')} 融合决策"
-            f"｜有效{len(valid)}"
-            f"｜TA{len(results)}",
+            f"## 🛟 {ts.strftime('%H:%M')} 融合决策",
             "",
         ]
 
-        # ── 一句话总结 ──
-        total_score = sum(r.get("fusion_score", 0) for r in valid)
-        avg_score = total_score / len(valid) if valid else 0.0
-        bullish_count = sum(1 for r in valid if r.get("fusion_score", 0) > 0.5)
-        bearish_count = sum(1 for r in valid if r.get("fusion_score", 0) < -0.5)
-        if avg_score > 0.3:
-            stance = "偏多"
-        elif avg_score < -0.3:
-            stance = "偏空"
-        else:
-            stance = "中性/分化"
-        lines.append(
-            f"📌 **今日立场**: {stance}(融合{avg_score:+.2f})"
-            f"｜看多{bullish_count}只看空{bearish_count}只"
-            f"｜建议总仓位{self._summary_position(valid)}"
-        )
-        lines.append("")
-
-        # ── 风险提醒（聚合止损+分歧+降级）──
-        risk_lines = []
-
-        stop_alerts = []
-        for r in valid:
-            stop_loss = r.get("mindlynx_stop_loss")
-            price = r.get("price", 0)
-            if stop_loss and price and float(stop_loss) > 0:
-                dist = (price - float(stop_loss)) / price * 100
-                if 0 < dist < 7:
-                    stop_alerts.append((dist, r))
-        if stop_alerts:
-            stop_alerts.sort()
-            items = []
-            for dist, r in stop_alerts[:3]:
-                name = r.get('stock_name', '')
-                code = r['stock_code']
-                sl = float(r.get("mindlynx_stop_loss", 0))
-                items.append(f"{name}({code})距止损仅{dist:.1f}%")
-            risk_lines.append(f"🛑 止损关注: {'; '.join(items)}")
-
-        if disagree:
-            items = [f"{r['stock_name']}({r['stock_code']})" for r in disagree[:3]]
-            risk_lines.append(f"⚡ 系统分歧: {'; '.join(items)}")
-
-        degraded = [r for r in valid if r.get("is_degraded")]
-        stale_ta = [r for r in valid if r.get("ta_is_stale")]
-        if degraded:
-            risk_lines.append(f"⚠️ 子系统降级: {len(degraded)}只")
-        if stale_ta:
-            risk_lines.append(f"⚠️ TA数据过期: {len(stale_ta)}只")
-
-        if risk_lines:
-            lines.append(f"**⚠ 风险提醒**")
-            for rl in risk_lines:
-                lines.append(f"- {rl}")
+        # ── 3档快速总览（好/中/差）──
+        bull_count = sum(1 for r in valid if r.get("signal") in ("strong_bullish", "bullish", "cautious_bullish"))
+        neut_count = sum(1 for r in valid if r.get("signal") == "neutral")
+        bear_count = sum(1 for r in valid if r.get("signal") in ("cautious_bearish", "bearish", "strong_bearish"))
+        overview = []
+        if bull_count:
+            overview.append(f"看好{bull_count}只")
+        if neut_count:
+            overview.append(f"中立{neut_count}只")
+        if bear_count:
+            overview.append(f"看空{bear_count}只")
+        if overview:
+            lines.append("📊 " + " ｜".join(overview))
             lines.append("")
 
-        # ── 按信号强度分组 ──
-        consensuses = [r for r in valid if not r.get("has_disagreement")]
-
+        # ── 按信号强度分组（7档，含分歧股票）──
         signal_groups = [
             ("🚀 强烈看多", "strong_bullish"),
             ("📈 看多", "bullish"),
@@ -240,17 +195,23 @@ class WeComNotifier:
             ("🚨 强烈看空", "strong_bearish"),
         ]
 
-        grouped = {sig: [] for _, sig in signal_groups}
-        for r in consensuses:
+        grouped = {sig: {"consensus": [], "disagreement": []} for _, sig in signal_groups}
+        for r in valid:
             sig = r.get("signal", "neutral")
-            grouped.get(sig, []).append(r)
+            bucket = "disagreement" if r.get("has_disagreement") else "consensus"
+            if sig in grouped:
+                grouped[sig][bucket].append(r)
 
         for title, sig_key in signal_groups:
-            stocks = grouped[sig_key]
-            if not stocks:
+            bucket = grouped[sig_key]
+            # 共识股票在前，分歧股票在后
+            bucket["consensus"].sort(key=lambda x: x.get("fusion_score", 0), reverse=True)
+            bucket["disagreement"].sort(key=lambda x: x.get("fusion_score", 0), reverse=True)
+            all_stocks = bucket["consensus"] + bucket["disagreement"]
+            if not all_stocks:
                 continue
-            lines.append(f"**{title}**")
-            for r in stocks:
+            lines.append(f"**{title}** ({len(all_stocks)}只)")
+            for r in all_stocks:
                 lines.append(self._stock_line(r))
             lines.append("")
 
@@ -287,8 +248,7 @@ class WeComNotifier:
 
         # 可选附加信息（龙虎榜、雪球情绪等）
         if extra_sections:
-            for section in extra_sections:
+            for idx, section in enumerate(extra_sections):
                 self.send_markdown(section)
-                if extra_sections.index(section) < len(extra_sections) - 1:
-                    import time
+                if idx < len(extra_sections) - 1:
                     time.sleep(0.5)

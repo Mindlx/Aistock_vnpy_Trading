@@ -494,8 +494,39 @@ def get_global_news() -> str:
     return "# Global macro news: not available via akshare. Configure yfinance or alpha_vantage for global news.\n"
 
 
-def get_insider_transactions(
-    ticker: Annotated[str, "stock code, e.g. 601801.SS"]
+def get_block_trades(
+    ticker: Annotated[str, "stock code, e.g. 601801.SS"],
+    curr_date: str = "",
 ) -> str:
-    """Get insider transactions. A-share insider data is limited; return placeholder."""
-    return f"# Insider transactions data not available for A-shares via akshare.\n"
+    """获取大宗交易数据（A股专用，免费）。"""
+    code = _bare_code(ticker)
+    try:
+        df = ak.stock_dzjy_mrmx(symbol=code)
+        if df is not None and not df.empty:
+            lines = [f"# Block trades (大宗交易) for {code}", f"# Total: {len(df)} records"]
+            for _, row in df.head(10).iterrows():
+                lines.append(f"- {row.to_dict()}")
+            return "\n".join(lines)
+        return f"# No block trade data for {code}\n"
+    except Exception as e:
+        logger.debug(f"block_trades({ticker}) failed: {e}")
+        return f"# Block trades not available for {ticker}\n"
+
+
+def get_shareholder_changes(
+    ticker: Annotated[str, "stock code, e.g. 601801.SS"],
+    curr_date: str = "",
+) -> str:
+    """获取股东增减持数据（A股专用，免费）。"""
+    code = _bare_code(ticker)
+    try:
+        df = ak.stock_share_hold_change(symbol=code)
+        if df is not None and not df.empty:
+            lines = [f"# Shareholder changes (股东增减持) for {code}", f"# Total: {len(df)} records"]
+            for _, row in df.head(10).iterrows():
+                lines.append(f"- {row.to_dict()}")
+            return "\n".join(lines)
+        return f"# No shareholder change data for {code}\n"
+    except Exception as e:
+        logger.debug(f"shareholder_changes({ticker}) failed: {e}")
+        return f"# Shareholder changes not available for {ticker}\n"

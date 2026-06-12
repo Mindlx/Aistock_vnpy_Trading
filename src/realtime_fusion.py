@@ -121,15 +121,15 @@ class RealtimeFusion:
         ml_stocks = ml.get("stocks", {})
         at_stocks = at.get("stocks", {})
 
-        # 判断各系统是否有效（是否有数据）
+        # 判断各系统是否有效：有数据即可（不检查时间新鲜度，各系统有自身的更新周期）
         ly_available = bool(ly_stocks)
         ml_available = bool(ml_stocks)
         at_available = bool(at_stocks)
         valid_count = sum([ly_available, ml_available, at_available])
         is_degraded = valid_count < 3
 
-        # 权重重分配：子系统缺失时，权重重新归一化到有效系统
-        # 例如 ML 缺失时 ly:at 权重从 0.30:0.30 变为 0.50:0.50
+        # 权重重分配：子系统文件缺失时，权重重新归一化到有效系统
+        # 例如 ML 文件缺失时 ly:at 权重从 0.30:0.30 变为 0.50:0.50
         _avail = {"lynx": ly_available, "mindlynx": ml_available, "tradingagent": at_available}
         _total = sum(self.WEIGHTS[k] for k, v in _avail.items() if v)
         if _total > 0:
@@ -139,6 +139,9 @@ class RealtimeFusion:
 
         # 所有出现过的股票代码
         all_codes = set(ly_stocks) | set(ml_stocks) | set(at_stocks)
+
+        # 获取实时行情价格（替代lynx信号中的昨收盘价）
+        realtime_prices = self._fetch_realtime_prices(all_codes)
 
         changes = []
         for code in sorted(all_codes):
@@ -184,9 +187,9 @@ class RealtimeFusion:
                     "at": at_score,
                     "has_disagreement": has_disagreement,
                     "is_degraded": is_degraded,
-                    "price": ly_stocks.get(code, {}).get("price", 0),
-                    "pct_chg": ly_stocks.get(code, {}).get("pct_chg", 0),
-                    "volume_ratio": ly_stocks.get(code, {}).get("volume_ratio", 0),
+                    "price": realtime_prices.get(code, {}).get("price", 0) or ly_stocks.get(code, {}).get("price", 0),
+                    "pct_chg": realtime_prices.get(code, {}).get("pct_chg", 0) or ly_stocks.get(code, {}).get("pct_chg", 0),
+                    "volume_ratio": realtime_prices.get(code, {}).get("volume_ratio", 0) or ly_stocks.get(code, {}).get("volume_ratio", 0),
                 })
                 self._last_scores[code] = score_penalized
 
@@ -274,6 +277,56 @@ class RealtimeFusion:
         return d.isoweekday() <= 5  # 1=Mon ... 5=Fri
 
     @staticmethod
+    def _is_trading_hour(d: datetime | None = None) -> bool:
+        """检查当前是否在A股交易时段（09:30-11:30 / 13:00-15:00）。"""
+        if d is None:
+            d = datetime.now()
+        h, m = d.hour, d.minute
+        # 上午盘 09:30-11:30
+        if h == 9 and m >= 30:
+            return True
+        if 10 <= h <= 10:
+            return True
+        if h == 11 and m <= 30:
+            return True
+        # 下午盘 13:00-15:00
+        if 13 <= h <= 14:
+            return True
+        if h == 15 and m == 0:
+            return True
+        return False
+
+    @staticmethod
+    def _fetch_realtime_prices(codes: set[str]) -> dict[str, dict[str, float]]:
+        """从新浪行情API获取实时价格、涨跌幅、量比。
+
+        Returns:
+            {code: {"price": float, "pct_chg": float, "volume_ratio": float}}
+        """
+        prices: dict[str, dict[str, float]] = {}
+        for code in sorted(codes):
+            prefix = "sh" if code.startswith(("6", "5", "9")) else "sz"
+            url = f"https://hq.sinajs.cn/list={prefix}{code}"
+            try:
+                resp = requests.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=5)
+                if resp.status_code == 200:
+                    parts = resp.text.split(",")
+                    # 格式: 股票名,今开,昨收,当前价,最高,最低,买一价,卖一价,成交量(手),成交额(元)
+                    # parts[2]=昨收, parts[3]=当前价
+                    if len(parts) >= 30:
+                        prev_close = float(parts[2]) if parts[2] else 0.0
+                        current = float(parts[3]) if parts[3] else 0.0
+                        pct = round((current - prev_close) / prev_close * 100, 2) if prev_close > 0 else 0.0
+                        prices[code] = {
+                            "price": current,
+                            "pct_chg": pct,
+                            "volume_ratio": 0.0,  # Sina不直接提供量比，用ly/DB值兜底
+                        }
+            except Exception:
+                pass
+        return prices
+
+    @staticmethod
     def _seconds_until_next_trading_day(resume_hour: int = 9, resume_min: int = 33) -> float:
         """计算到下一个交易日 resume_hour:resume_min 的秒数。"""
         now = datetime.now()
@@ -291,7 +344,7 @@ class RealtimeFusion:
         return 0.0
 
     def run_daemon(self, interval: int = 300):
-        """守护模式 — 仅在交易日运行，周末自动跳过。"""
+        """守护模式 — 仅在交易日交易时段运行，周末和盘后自动跳过。"""
         print(f"[realtime-fusion] daemon started, interval={interval}s", flush=True)
         while True:
             # 非交易日跳过
@@ -299,6 +352,32 @@ class RealtimeFusion:
                 wait = self._seconds_until_next_trading_day()
                 next_label = (datetime.now() + timedelta(seconds=wait)).strftime("%a %m-%d %H:%M")
                 print(f"[realtime-fusion] 非交易日，休眠 {wait/3600:.1f}h 到 {next_label}", flush=True)
+                time.sleep(wait)
+                continue
+
+            # 非交易时段跳过
+            if not self._is_trading_hour():
+                # 计算到下一个交易时段（下午13:00或次日09:30）的秒数
+                now = datetime.now()
+                if now.hour < 9 or (now.hour == 9 and now.minute < 30):
+                    # 早于09:30 → 睡到09:33
+                    next_open = now.replace(hour=9, minute=33, second=0, microsecond=0)
+                elif now.hour < 13:
+                    # 午休 11:30-13:00 → 睡到13:03
+                    next_open = now.replace(hour=13, minute=3, second=0, microsecond=0)
+                else:
+                    # 收盘后 → 睡到次日09:33
+                    tomorrow = now + timedelta(days=1)
+                    next_open = tomorrow.replace(hour=9, minute=33, second=0, microsecond=0)
+                    # 如果明天是周末，用交易日的09:33
+                    if next_open.isoweekday() >= 6:
+                        days_ahead = {6: 2, 7: 1}[next_open.isoweekday()]
+                        next_open = (next_open + timedelta(days=days_ahead)).replace(
+                            hour=9, minute=33, second=0, microsecond=0,
+                        )
+                wait = (next_open - now).total_seconds()
+                next_label = next_open.strftime("%a %m-%d %H:%M")
+                print(f"[realtime-fusion] 非交易时段，休眠 {wait/3600:.1f}h 到 {next_label}", flush=True)
                 time.sleep(wait)
                 continue
 

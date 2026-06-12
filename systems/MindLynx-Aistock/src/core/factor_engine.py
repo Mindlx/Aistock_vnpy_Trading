@@ -202,6 +202,8 @@ def _compute_momentum_reversal(df: np.ndarray, window: int = 21) -> float:
     if len(df) < window:
         return 0.0
     recent = df[-window:]
+    if recent[0] == 0:
+        return 0.0
     return (recent[0] - recent[-1]) / recent[0]  # return over window, sign flipped later
 
 
@@ -223,7 +225,10 @@ def _compute_low_volatility(close: np.ndarray, window: int = 20) -> tuple[float,
     """
     if len(close) < window:
         return 0.0, 0.0
-    returns = np.diff(close[-window:]) / close[-window:-1]
+    slice_ = close[-window:-1]
+    slice_ = np.where(slice_ == 0, np.nan, slice_)
+    returns = np.diff(close[-window:]) / slice_
+    returns = np.where(np.isfinite(returns), returns, 0.0)
     vol = np.std(returns) * np.sqrt(252) if len(returns) > 0 else 0.0
     return vol, vol
 
@@ -245,7 +250,9 @@ def _compute_volume_trend(close: np.ndarray, volume: np.ndarray, window: int = 1
     """
     if len(close) < window + 1 or len(volume) < window + 1:
         return 0.0
-    pct_close = np.diff(close[-window - 1 :]) / close[-window - 1 : -1]
+    slice_ = np.where(close[-window - 1 : -1] == 0, np.nan, close[-window - 1 : -1])
+    pct_close = np.diff(close[-window - 1 :]) / slice_
+    pct_close = np.where(np.isfinite(pct_close), pct_close, 0.0)
     pct_vol = np.diff(volume[-window - 1 :])
     if len(pct_close) < 2 or np.std(pct_close) == 0 or np.std(pct_vol) == 0:
         return 0.0
