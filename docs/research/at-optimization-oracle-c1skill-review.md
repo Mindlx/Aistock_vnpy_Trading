@@ -133,7 +133,11 @@ commit `a1187c0` (2026-06-12) 已实现 LY 双模型信号注入 ML 子系统的
 
 ## 七、状态
 
-🟡 已分析完成，待深度研究后实施
+🟢 已分阶段实施:
+  1. **数据注入** (commit `4010889`): LY 信号 + ML 因子注入 AT，Option A+ 双通道，已验证通过
+  2. **Agent 精简** (commit `324bd0d`): Sentiment Analyst 关闭、Bull/Bear→单 Researcher、3 Risk→2 Risk
+  3. **P0 执行** (commit `b61eeac`): 统计检验 (28% 反指) + 降权到 0.10
+  4. **待验证**: 注入 + 精简后的 AT 准确率需积累 5 个交易日数据
 
 ---
 

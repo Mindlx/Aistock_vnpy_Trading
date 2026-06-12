@@ -2,7 +2,8 @@
 
 > 实施日期: 2026-06-12
 > 相关研究报告: `docs/research/at-optimization-oracle-c1skill-review.md`
-> 涉及提交: `4010889`, `1063af2`, `b61eeac`, `21b50bd`, `c79cace`, `fdadcec`
+> 涉及提交: `4010889`, `1063af2`, `b61eeac`, `21b50bd`, `c79cace`, `fdadcec`, `324bd0d`
+> 零侵入说明: 注入实施（commit 4010889）未修改 AT 子系统。Agent 精简（commit 324bd0d）利用规则豁免修改了 AT 子系统的 graph/agents 代码。
 
 ---
 
@@ -252,7 +253,74 @@ git checkout 1063af2 -- src/mind_agent_wrapper.py
 
 ---
 
-## 八、术语
+---
+
+## 九、AT Agent 精简优化（324bd0d）
+
+> 实施日期: 2026-06-12 | 论证: c1skill | 设计: 基于 A 股特点 + 运行时性能分析
+
+### 9.1 背景
+
+AT 每只股票运行 10+ 分钟（12 个 Agent 依次调用 DeepSeek API），核心问题有两个:
+
+1. **max_debate_rounds=1 下辩论无循环** — Bull↔Bear 辩论和 3 个 Risk 辩论都只有 1 轮，实际是线性流水线而非辩论
+2. **部分 Agent 对 A 股冗余** — Sentiment 与 News 数据源重叠、Bull/Bear 分立无必要、3 个 Risk 各说一次
+
+### 9.2 改动清单
+
+| Agent | 变动 | 理由 | 侵入性 |
+|-------|------|------|--------|
+| Sentiment Analyst | **关闭** | 雪球/股吧情绪已被 News + 数据注入覆盖 | 🟢 零侵入（`selected_analysts`） |
+| Bull Researcher | **合并为单 Researcher** | 1 轮下无实质辩论 | 🟡 豁免（新 `researcher.py`） |
+| Bear Researcher | **合并为单 Researcher** | 同上 | 🟡 豁免 |
+| Research Manager | **合并为单 Researcher** | 单 Researcher 直接输出投资计划 | 🟡 豁免 |
+| Conservative Risk | **删除** | 留激进+中性双循环即可覆盖风险偏好对比 | 🟡 豁免 |
+
+### 9.3 精简前后对比
+
+```
+精简前 (12 Agent):                          精简后 (8 Agent):
+START ─→ Market ─→ Sentiment ─→ News ─→ Fundamentals     START ─→ Market ─→ News ─→ Fundamentals
+          │                                              │
+          ▼                                              ▼
+     Bull ↔ Bear (1轮)                              Researcher (单节点)
+          │                                              │
+          ▼                                              ▼
+     Research Manager                                    Trader
+          │                                              │
+          ▼                                              ▼
+     Trader → Aggressive → Conservative → Neutral     Aggressive ↔ Neutral (2轮)
+          │                                              │
+          ▼                                              ▼
+     Portfolio Manager → END                       Portfolio Manager → END
+
+节省: 4个 Agent (-33%), 预计减少 ~3-4 分钟/股
+```
+
+### 9.4 新 Researcher Prompt 设计
+
+单 Researcher prompt 同时分析多空两面，包含 A 股特有维度：
+
+- 政策方向（Policy direction）
+- 技术面（Technicals）
+- 资金流向（Capital flow）
+- 基本面（Fundamentals）
+- 风险信号（ST/delisting）
+
+### 9.5 已验证
+
+- ✅ 所有文件 Python 语法检查通过
+- ✅ setup.py 图结构修改完成（删除/合并节点和边）
+- ✅ conditional_logic.py 风险辩论路由简化
+- ✅ agents/__init__.py 导出更新
+
+### 9.6 待验证（运行后）
+
+- [ ] AT 单股耗时是否从 10+ min 降到 ~6-7 min
+- [ ] Researcher 单节点输出质量与之前 Bull+Bear+Manager 是否一致
+- [ ] 2 个 Risk（激进+中性）的辩论是否足够覆盖风险场景
+
+## 十、术语
 
 | 缩写 | 全称 |
 |------|------|
