@@ -267,7 +267,7 @@ class BacktestRepository:
         with self.db.get_session() as session:
             conditions = [
                 BacktestSummary.scope == scope,
-                BacktestSummary.code == (code if code is not None else "__overall__"),
+                BacktestSummary.code == code,
                 BacktestSummary.engine_version == engine_version,
             ]
             if skill_id is not None:

@@ -42,11 +42,9 @@ from sqlalchemy import (
     func,
     or_,
     select,
-    text,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import (
     Session,
     declarative_base,
@@ -762,12 +760,11 @@ class DatabaseManager:
 
         engine_kwargs = {
             "echo": False,
-            "poolclass": NullPool,
+            "pool_pre_ping": True,
         }
         if str(db_url).startswith("sqlite:") and self._sqlite_busy_timeout_ms > 0:
             engine_kwargs["connect_args"] = {
                 "timeout": self._sqlite_busy_timeout_ms / 1000,
-                "check_same_thread": False,
             }
 
         # 创建数据库引擎
@@ -791,15 +788,6 @@ class DatabaseManager:
 
         # 迁移: 为已有数据库添加 skill_id 列 (backtest skill-level infrastructure)
         self._migrate_add_skill_id_columns()
-        self._migrate_add_backtest_columns()
-
-        if self._sqlite_file_db:
-            try:
-                with self._engine.connect() as conn:
-                    conn.execute(text("PRAGMA journal_mode=DELETE"))
-                    conn.commit()
-            except Exception:
-                pass
 
         self._initialized = True
         logger.info(f"数据库初始化完成: {db_url}")
@@ -821,24 +809,6 @@ class DatabaseManager:
                         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} VARCHAR(64)"))
                         conn.commit()
                     logger.info("Migration: added %s column to %s", column_name, table_name)
-        except Exception:
-            pass  # fresh database or inspector unavailable — create_all already handles this
-
-    @staticmethod
-    def _migrate_add_backtest_columns() -> None:
-        """Add new backtest columns to existing databases (non-destructive migration)."""
-        try:
-            from sqlalchemy import inspect, text
-
-            inspector = inspect(DatabaseManager._instance._engine)  # type: ignore[union-attr]
-            table_name = "backtest_summaries"
-            existing = {c["name"] for c in inspector.get_columns(table_name)}
-            for col_name, col_type in [("sentiment_direction_accuracy_pct", "FLOAT")]:
-                if col_name not in existing:
-                    with DatabaseManager._instance._engine.connect() as conn:  # type: ignore[union-attr]
-                        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}"))
-                        conn.commit()
-                    logger.info("Migration: added %s column to %s", col_name, table_name)
         except Exception:
             pass  # fresh database or inspector unavailable — create_all already handles this
 
