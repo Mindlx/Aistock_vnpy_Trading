@@ -3057,6 +3057,11 @@ class GeminiAnalyzer:
         if allocation_text:
             prompt += "\n\n---\n\n" + str(allocation_text) + "\n"
 
+
+        # 注入 LY 量化信号（双模型预判）
+        ly_text = context.get("ly_signal", "")
+        if ly_text:
+            prompt += "\n\n---\n\n" + str(ly_text) + "\n"
         # 注入股票知识库 (Phase 5) — 放末尾，recency bias
         knowledge_text = context.get("knowledge_prompt", "")
         if knowledge_text:
@@ -3354,21 +3359,40 @@ class GeminiAnalyzer:
     def _validate_json_response(self, text: str) -> None:
         """Validate that *text* contains a parseable JSON object.
 
-        Used as the ``response_validator`` argument to :meth:`_call_litellm` so
-        that a JSON-less or unparseable reply from the primary model is treated
-        as a model failure and triggers fallback to the next configured model.
+        Detection priority:
+          1. Parse full text directly (fast path for pure JSON)
+          2. Extract from ```json``` markdown block (most reliable extraction)
+          3. Fallback: first { → last } (heuristic, handles prose-wrapped JSON)
 
         Raises:
             ValueError: if no JSON object is found in *text*.
-            json.JSONDecodeError: if the extracted JSON cannot be parsed (after
-                :meth:`_fix_json_string` attempts repair).
+            json.JSONDecodeError: if the extracted JSON cannot be parsed.
         """
+        # Fast path: pure JSON response
+        text_stripped = text.strip()
+        if text_stripped.startswith("{") and text_stripped.endswith("}"):
+            try:
+                json.loads(self._fix_json_string(text_stripped))
+                return
+            except json.JSONDecodeError:
+                pass  # fall through to extraction
+
         cleaned = text
+        # Extract markdown code block if present (most reliable)
         if "```json" in cleaned:
+            m = __import__("re").search(r"```json\s*\n?(.*?)\n?```", cleaned, __import__("re").DOTALL)
+            if m:
+                candidate = m.group(1).strip()
+                try:
+                    json.loads(self._fix_json_string(candidate))
+                    return
+                except json.JSONDecodeError:
+                    pass
             cleaned = cleaned.replace("```json", "").replace("```", "")
         elif "```" in cleaned:
             cleaned = cleaned.replace("```", "")
 
+        # Fallback: first { → last }
         json_start = cleaned.find("{")
         json_end = cleaned.rfind("}") + 1
 

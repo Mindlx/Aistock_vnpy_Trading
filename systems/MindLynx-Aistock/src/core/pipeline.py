@@ -230,6 +230,21 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                             stock_name = realtime_quote.name
                         # 兼容不同数据源的字段（有些数据源可能没有 volume_ratio）
                         volume_ratio = getattr(realtime_quote, "volume_ratio", None)
+                        # ⚡ 量比缺失时从日K线数据自行计算（统一入口，覆盖agent/非agent所有下游路径）
+                        if volume_ratio is None:
+                            try:
+                                rows = self.db.get_latest_data(code, days=6)
+                                if rows and len(rows) >= 2:
+                                    today_vol = float(getattr(rows[0], "volume", 0) or 0)
+                                    vols = [float(getattr(r, "volume", 0) or 0) for r in rows[1:]]
+                                    avg_5d = sum(vols) / len(vols) if vols else 0
+                                    if today_vol > 0 and avg_5d > 0:
+                                        vr = round(today_vol / avg_5d, 2)
+                                        realtime_quote.volume_ratio = vr
+                                        realtime_quote._vr_is_daily = True  # 标记为日线计算值
+                                        volume_ratio = vr
+                            except Exception as e:
+                                logger.debug(f"[pipeline] 量比计算失败({code}): {e}")
                         turnover_rate = getattr(realtime_quote, "turnover_rate", None)
                         logger.info(
                             f"{stock_name}({code}) 实时行情: 价格={realtime_quote.price}, "
@@ -353,8 +368,8 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 ann_fetcher = CninfoFetcher()
                 _em_lines = []
 
-                # 1. EastMoney 个股新闻
-                _resp = em_provider.search(code, max_results=2, days=1)
+                # 1. EastMoney 个股新闻（按权威媒体优先排序）
+                _resp = em_provider.search(code, max_results=8, days=1)
                 if _resp and _resp.success and _resp.results:
                     qc = self._build_query_context(query_id=query_id)
                     self.db.save_news_intel(
@@ -364,10 +379,11 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                         response=_resp, query_context=qc,
                     )
                     logger.info(f"[{code}] 盘中情报: EastMoney 已存储 {len(_resp.results)} 条")
-                    for _item in _resp.results[:2]:
+                    for _item in _resp.results[:5]:
+                        source_tag = f"[{_item.source}]" if _item.source and _item.source != "东方财富" else ""
                         _t = (_item.title or "")[:60]
                         _s = (_item.snippet or "")[:80]
-                        _em_lines.append(f"- [{_t}] {_s}")
+                        _em_lines.append(f"- {source_tag} {_t} {_s}")
 
                 # 2. 巨潮公告
                 _anns = asyncio.run(ann_fetcher.fetch(code, page_size=2))
@@ -394,7 +410,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                             logger.info(f"[{code}] 盘中情报: Cninfo 已存储 {_stored} 条公告")
 
                 if _em_lines:
-                    _daily_intel_eastmoney_digest = "## 📰 近日要闻（盘中情报）\n" + "\n".join(_em_lines[:4])
+                    _daily_intel_eastmoney_digest = "## 📰 近日要闻（盘中情报）\n" + "\n".join(_em_lines[:8])
             except Exception as e:
                 logger.debug(f"[{code}] 盘中 EastMoney+Cninfo 搜集失败: {e}")
 
@@ -528,6 +544,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 result.change_pct = realtime_data.get("change_pct")
                 # 同步设置 volume_ratio 到 result，供通知推送使用
                 result.volume_ratio_5d = realtime_data.get("volume_ratio")
+                result.volume_ratio_is_daily = getattr(realtime_quote, "_vr_is_daily", False)
 
             # Step 7.6: chip_structure fallback (Issue #589)
             if result and chip_data:
@@ -756,6 +773,11 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             enhanced["regime_prompt"] = regime_text
 
         # P4: portfolio allocation
+
+        # P2+: inject LY quantitative signal (zero-intrusion, disk-file read only)
+        ly_text = getattr(self, "_ly_signals", {}).get(code, "")
+        if ly_text:
+            enhanced["ly_signal"] = ly_text
         allocation_text = getattr(self, "_allocation_prompt", "")
         if allocation_text:
             enhanced["allocation_prompt"] = allocation_text
@@ -771,17 +793,13 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 price = context["today"].get("close")
             if price and price > 0:
                 close_arr = []
-                rows = (
-                    self.db.session_scope()
-                    .__enter__()
-                    .execute(
+                with self.db.session_scope() as _session:
+                    rows = _session.execute(
                         __import__("sqlalchemy").text(
                             "SELECT close, high, low FROM stock_daily WHERE code=:code ORDER BY date DESC LIMIT 30"
                         ),
                         {"code": code},
-                    )
-                    .fetchall()
-                )
+                    ).fetchall()
                 if rows and len(rows) >= 14:
                     for r in reversed(rows):
                         close_arr.append(float(r[0]))
@@ -797,7 +815,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     ps = compute_position_size(float(price), atr_val, atr_multiplier=atr_mult)
                     enhanced["position_prompt"] = build_position_prompt(ps)
         except Exception:
-            pass
+            logger.debug("[pipeline] 仓位大小计算失败(code=%s)", code)
 
         try:
             ood_warning = getattr(self, "_ood_warnings", {}).get(code)
@@ -860,7 +878,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 if sr_text:
                     enhanced["sr_levels"] = sr_text
         except Exception:
-            pass
+            logger.debug("[pipeline] 支撑压力位(support_resistance)计算失败(code=%s)", code)
 
         # O6: inject recent daily intelligence if available
         try:
@@ -925,6 +943,201 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             pass
 
         return enhanced
+    def _load_ly_signals(self, stock_codes: list[str]) -> dict[str, str]:
+        """
+        Load LY quantitative model signals from data/realtime/ JSON files.
+
+        Zero-intrusion: reads disk files only, no import from lynx_vnpy.
+        Returns dict[code] → formatted prompt text, or empty string on failure.
+        Silently degrades if files are missing or stale (>1 day old).
+        """
+        from pathlib import Path
+        import json
+        from datetime import datetime, timedelta
+        from typing import Any
+
+        result: dict[str, dict] = {}
+        realtime_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "realtime"
+
+        # ── Source 1: RF model (ly_signal.json) ──
+        rf_path = realtime_dir / "ly_signal.json"
+        rf_data: dict[str, dict] = {}
+        if rf_path.exists():
+            try:
+                raw = json.loads(rf_path.read_text(encoding="utf-8"))
+                updated = raw.get("updated_at", "")
+                # Staleness check: skip if older than 36 hours
+                try:
+                    updated_dt = datetime.strptime(updated[:10], "%Y-%m-%d")
+                    if (datetime.now() - updated_dt) > timedelta(hours=36):
+                        logger.debug("[LY] ly_signal.json stale (updated %s), skipping", updated)
+                    else:
+                        rf_data = raw.get("stocks", {})
+                except (ValueError, TypeError):
+                    rf_data = raw.get("stocks", {})
+            except Exception as e:
+                logger.debug("[LY] Failed to read ly_signal.json: %s", e)
+
+        # ── Source 2: Alpha158 LGB model (ly_alpha_signal.json) ──
+        lgb_path = realtime_dir / "ly_alpha_signal.json"
+        lgb_data: dict[str, dict] = {}
+        if lgb_path.exists():
+            try:
+                raw = json.loads(lgb_path.read_text(encoding="utf-8"))
+                lgb_data = raw.get("stocks", {})
+            except Exception as e:
+                logger.debug("[LY] Failed to read ly_alpha_signal.json: %s", e)
+
+        # ── Source 3: prob_up_log.csv (ensemble + individual probabilities) ──
+        csv_path = realtime_dir / "prob_up_log.csv"
+        csv_latest: dict[str, dict] = {}
+        if csv_path.exists():
+            try:
+                import csv
+                with open(csv_path, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    rows = list(reader)
+                if rows:
+                    latest_date = rows[-1].get("date", "")
+                    for row in rows:
+                        if row.get("date") == latest_date:
+                            code = row.get("stock_code", "").strip()
+                            if code:
+                                csv_latest[code] = {
+                                    "prob_up_rf": row.get("prob_up_rf", ""),
+                                    "prob_up_lgb": row.get("prob_up_lgb", ""),
+                                    "prob_up_ensemble": row.get("prob_up_ensemble", ""),
+                                    "l7_score_rf": row.get("l7_score_rf", ""),
+                                    "l7_score_lgb": row.get("l7_score_lgb", ""),
+                                }
+            except Exception as e:
+                logger.debug("[LY] Failed to read prob_up_log.csv: %s", e)
+
+        # ── Merge per code ──
+        for code in stock_codes:
+            rf = rf_data.get(code, {})
+            lgb = lgb_data.get(code, {})
+            csv_row = csv_latest.get(code, {})
+
+            if not rf and not lgb and not csv_row:
+                continue
+
+            ly_info: dict[str, Any] = {}
+
+            # Ensemble prob (prefer CSV, fallback to average of RF+LGB probs)
+            ensemble = csv_row.get("prob_up_ensemble", "")
+            if not ensemble:
+                prf = csv_row.get("prob_up_rf") or rf.get("prob_up")
+                plgb = csv_row.get("prob_up_lgb") or lgb.get("prob_up")
+                try:
+                    if prf != "" and plgb != "":
+                        ensemble = f"{(float(prf) + float(plgb)) / 2:.1f}"
+                except (ValueError, TypeError):
+                    pass
+            if ensemble:
+                ly_info["prob_up_ensemble"] = ensemble
+
+            # Individual model probabilities
+            for key, src_key in [("prob_up_rf", "prob_up"), ("prob_up_lgb", "prob_up")]:
+                val = csv_row.get(key, "") or (rf if key == "prob_up_rf" else lgb).get(src_key, "")
+                if val != "":
+                    ly_info[key] = val
+
+            # L7 scores
+            for key, src in [("l7_score_rf", rf), ("l7_score_lgb", lgb)]:
+                val = csv_row.get(key, "") or src.get("score", "")
+                if val != "":
+                    try:
+                        ly_info[key] = f"{float(val):+.2f}"
+                    except (ValueError, TypeError):
+                        pass
+
+            # Signal labels
+            signal_label = rf.get("signal", "")
+            if signal_label:
+                ly_info["signal_rf"] = signal_label
+
+            # Model disagreement
+            try:
+                pr = float(csv_row.get("prob_up_rf") or rf.get("prob_up", 0) or 0)
+                pl = float(csv_row.get("prob_up_lgb") or lgb.get("prob_up", 0) or 0)
+                if pr and pl:
+                    ly_info["model_disagreement"] = f"{abs(pr - pl):.1f}%"
+            except (ValueError, TypeError):
+                pass
+
+            # Confidence band (strength)
+            try:
+                prob = float(ly_info.get("prob_up_ensemble", 0) or 0)
+                if prob >= 70:
+                    strength = "强 🟢"
+                elif prob >= 55:
+                    strength = "中 🟡"
+                else:
+                    strength = "弱 🔴"
+                ly_info["strength"] = strength
+            except (ValueError, TypeError):
+                pass
+
+            if ly_info:
+                result[code] = ly_info
+
+        # ── Format per-code strings ──
+        formatted: dict[str, str] = {}
+        for code, info in result.items():
+            lines = [
+                "## 🤖 量化信号（LY 双模型预判）",
+                "",
+                "以下信号由 lynx_vnpy 的 RandomForest + Alpha158 LightGBM 双模型独立计算，仅供参考。",
+                "两模型基于的技术指标：RSI、MACD、ATR、布林带、CCI 等 15+ 特征。",
+                "",
+                "| 指标 | 数值 | 解读 |",
+                "|------|------|------|",
+            ]
+            ensemble = info.get("prob_up_ensemble", "N/A")
+            prob_rf = info.get("prob_up_rf", "N/A")
+            prob_lgb = info.get("prob_up_lgb", "N/A")
+
+            lines.append(f"| **综合上涨概率** | **{ensemble}%** | RF+LGB 双模型集成 |")
+            lines.append(f"| RF 上涨概率 | {prob_rf}% | RandomForest 分类器（15+ 技术指标特征） |")
+            lines.append(f"| LGB 上涨概率 | {prob_lgb}% | Alpha158 LightGBM（158 因子增强） |")
+
+            l7_rf = info.get("l7_score_rf", "")
+            l7_lgb = info.get("l7_score_lgb", "")
+            if l7_rf:
+                lines.append(f"| L7 决策得分(RF) | {l7_rf} | 范围 [-3,+3]，正值偏多，负值偏空 |")
+            if l7_lgb:
+                lines.append(f"| L7 决策得分(LGB) | {l7_lgb} | 范围 [-3,+3]，正值偏多，负值偏空 |")
+
+            signal = info.get("signal_rf", "")
+            if signal:
+                lines.append(f"| RF 信号标签 | {signal} | 7 级信号分类 |")
+
+            strength = info.get("strength", "")
+            if strength:
+                lines.append(f"| 综合置信度 | {strength} | 强(≥70%) / 中(55-70%) / 弱(<55%) |")
+
+            disagreement = info.get("model_disagreement", "")
+            if disagreement:
+                try:
+                    dval = float(disagreement.replace("%", ""))
+                    level = "⚠️ 高分歧（需结合其他信号综合判断）" if dval > 15 else "✅ 低分歧（模型共识较好）"
+                except (ValueError, TypeError):
+                    level = "判断中"
+                lines.append(f"| 模型分歧度 | {disagreement} | {level} |")
+
+            lines.append("")
+            lines.append("> ⚠️ 量化信号仅反映技术面统计概率，不构成投资建议。请结合基本面、消息面综合判断。")
+            lines.append("> 当 RF 与 LGB 分歧较大(>15%)时，说明技术形态信号不明确，建议降低此维度权重。")
+
+            formatted[code] = "\n".join(lines)
+
+        if formatted:
+            logger.info("[LY] Loaded signal data for %d/%d stocks", len(formatted), len(stock_codes))
+        else:
+            logger.debug("[LY] No LY signal data available (files missing or stale)")
+
+        return formatted
 
     def _attach_belong_boards_to_fundamental_context(
         self,
@@ -1033,6 +1246,19 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
 
             if realtime_quote:
                 initial_context["realtime_quote"] = self._safe_to_dict(realtime_quote)
+                # ⚡ 如果实时数据中量比缺失，从日K线数据自行计算（与 _enhance_context 相同逻辑）
+                if getattr(realtime_quote, "volume_ratio", None) is None:
+                    try:
+                        rows = self.db.get_latest_data(code, days=6)
+                        if rows and len(rows) >= 2:
+                            today_vol = float(getattr(rows[0], "volume", 0) or 0)
+                            vols = [float(getattr(r, "volume", 0) or 0) for r in rows[1:]]
+                            avg_5d = sum(vols) / len(vols) if vols else 0
+                            if today_vol > 0 and avg_5d > 0:
+                                vr = round(today_vol / avg_5d, 2)
+                                initial_context["realtime_quote"]["volume_ratio"] = vr
+                    except Exception as e:
+                        logger.debug(f"[pipeline] 整点量比计算失败({code}): {e}")
             if chip_data:
                 initial_context["chip_distribution"] = self._safe_to_dict(chip_data)
             if trend_result:
@@ -1085,7 +1311,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                         existing = initial_context.get("news_context", "")
                         initial_context["news_context"] = daily_intel + ("\n\n" + existing if existing else "")
             except Exception:
-                pass
+                logger.debug("[pipeline] 每日情报(daily_intel)注入失败(code=%s)", code)
 
             # Inject market background into agent message
             try:
@@ -1177,17 +1403,13 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     price = getattr(trend_result, "current_price", None)
                 if price and price > 0:
                     # Compute ATR from DB (matching traditional path at line 676-700)
-                    rows = (
-                        self.db.session_scope()
-                        .__enter__()
-                        .execute(
+                    with self.db.session_scope() as _session:
+                        rows = _session.execute(
                             __import__("sqlalchemy").text(
                                 "SELECT close, high, low FROM stock_daily WHERE code=:code ORDER BY date DESC LIMIT 30"
                             ),
                             {"code": code},
-                        )
-                        .fetchall()
-                    )
+                        ).fetchall()
                     atr_val = 0.0
                     if rows and len(rows) >= 15:
                         from src.core.indicators import atr as _atr_indicator
@@ -1209,6 +1431,11 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 initial_context["fundamental_calibration"] = cal_text
 
             # 运行 Agent
+
+            # 注入 LY 量化信号（与 traditional path 共用 _ly_signals）
+            ly_text = getattr(self, "_ly_signals", {}).get(code, "")
+            if ly_text:
+                initial_context["ly_signal"] = ly_text
             if report_language == "en":
                 message = f"Analyze stock {code} ({stock_name}) and return the full decision dashboard JSON in English."
             else:
@@ -1349,6 +1576,9 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 if isinstance(realtime_data, dict):
                     result.current_price = realtime_data.get("price")
                     result.change_pct = realtime_data.get("change_pct")
+                    # 同步设置 volume_ratio 到 result，供通知推送使用（与 _enhance_context 相同逻辑）
+                    result.volume_ratio_5d = realtime_data.get("volume_ratio")
+                    result.volume_ratio_is_daily = getattr(realtime_quote, "_vr_is_daily", False)
                 stabilize_decision_with_structure(result, trend_result, fundamental_context)
 
             # 注入量化摘要到 dashboard（移动端推送用）
@@ -1372,23 +1602,19 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     if quant_extra and result.dashboard:
                         result.dashboard.setdefault("quant_summary", {}).update(quant_extra)
                 except Exception:
-                    pass
+                    logger.debug("[pipeline] 量化摘要注入失败(code=%s)", code)
 
                 # 注入支撑/压力位
                 try:
                     from src.core.support_resistance import compute_levels, format_levels
 
-                    rows = (
-                        self.db.session_scope()
-                        .__enter__()
-                        .execute(
+                    with self.db.session_scope() as _session:
+                        rows = _session.execute(
                             __import__("sqlalchemy").text(
                                 "SELECT close, high, low, volume FROM stock_daily WHERE code=:code ORDER BY date"
                             ),
                             {"code": code},
-                        )
-                        .fetchall()
-                    )
+                        ).fetchall()
                     if rows and len(rows) >= 20:
                         c = [float(r[0]) for r in rows]
                         h = [float(r[1]) for r in rows]
@@ -2220,7 +2446,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
 
             # 数据完整性评分 (0-100)
             _completeness = 50  # baseline: data fetched
-            if hasattr(self, '_factor_scores') and self._factor_scores.get(code):
+            if hasattr(self, '_factor_scores') and code in self._factor_scores:
                 _completeness += 20  # factor computed
             if self.search_service and self.search_service.is_available:
                 _completeness += 15  # news search available
@@ -2230,7 +2456,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 _completeness += 5   # PE/PB calibration
             logger.info("[数据完整性] %s: %d/100 (行情+%.0f+新闻+%d+体制+%d+估值+%d)",
                         code, _completeness,
-                        20 if hasattr(self, '_factor_scores') and self._factor_scores.get(code) else 0,
+                        20 if hasattr(self, '_factor_scores') and code in self._factor_scores else 0,
                         15 if self.search_service and self.search_service.is_available else 0,
                         10 if getattr(self, '_regime_prompt', None) else 0,
                         5 if getattr(self, '_fundamental_calibration', {}).get(code) else 0)
@@ -2347,6 +2573,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
         self._factor_distributions: dict[str, dict] = {}
         self._ood_warnings: dict[str, str] = {}
         self._regime_prompt: str = ""
+        self._ly_signals: dict[str, str] = {}
         try:
             from sqlalchemy import text
 
@@ -2382,8 +2609,12 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                         for r in rows
                     ]
                     stock_data[code] = {"close": close_arr, "volume": volume_arr}
-                    r = engine.compute_for_stock(code, df)
-                    all_results.append(r)
+                    try:
+                        r = engine.compute_for_stock(code, df)
+                        all_results.append(r)
+                    except Exception as exc:
+                        logger.warning("[FactorEngine] compute_for_stock(%s) failed: %s", code, exc)
+                        continue
                     # Per-stock regime classification (correct: single-stock price series)
                     if len(close_arr) >= 40:
                         try:
@@ -2458,6 +2689,8 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 if code in self._factor_profiles:
                     self._factor_profiles[code] += f"\n> 因子计算时间: {_ts}（基于此前60个交易日数据）"
             logger.info("[FactorEngine] computed factors for %d stocks", len(all_results))
+            if not self._factor_scores:
+                logger.warning("[FactorEngine] _factor_scores 为空 — 所有股票因子锚定将静默退化到0.0")
 
             # Multicollinearity check: diagnostic monitoring, not automatic correction.
             # Factor weights are already IC/IR calibrated (1658-sample Spearman) —
@@ -2484,30 +2717,26 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             from src.core.uncertainty import UncertaintyQuantifier
 
             uq = UncertaintyQuantifier()
-            for code in stock_codes:
-                rows = (
-                    self.db.session_scope()
-                    .__enter__()
-                    .execute(
+            with self.db.session_scope() as _session:
+                for code in stock_codes:
+                    rows = _session.execute(
                         __import__("sqlalchemy").text(
                             "SELECT close, volume, high, low, pct_chg FROM stock_daily WHERE code=:code ORDER BY date"
                         ),
                         {"code": code},
-                    )
-                    .fetchall()
-                )
-                if rows and len(rows) >= 30:
-                    df = [
-                        {
-                            "close": float(r[0]),
-                            "volume": float(r[1]),
-                            "high": float(r[2]),
-                            "low": float(r[3]),
-                            "pct_chg": float(r[4]),
-                        }
-                        for r in rows
-                    ]
-                    self._factor_distributions[code] = uq.compute_distribution(code, df)
+                    ).fetchall()
+                    if rows and len(rows) >= 30:
+                        df = [
+                            {
+                                "close": float(r[0]),
+                                "volume": float(r[1]),
+                                "high": float(r[2]),
+                                "low": float(r[3]),
+                                "pct_chg": float(r[4]),
+                            }
+                            for r in rows
+                        ]
+                        self._factor_distributions[code] = uq.compute_distribution(code, df)
         except Exception:
             pass
 
@@ -2589,6 +2818,13 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
         except Exception as exc:
             logger.debug("Portfolio optimizer unavailable: %s", exc)
 
+
+        # === 载入 LY 量化信号 (零侵入: 仅读 JSON 文件) ===
+        try:
+            self._ly_signals = self._load_ly_signals(stock_codes)
+        except Exception as e:
+            logger.debug("[LY] LY signal loading failed (non-fatal): %s", e)
+            self._ly_signals = {}
         # 收集个股分析结果
         results: list[AnalysisResult] = []
 

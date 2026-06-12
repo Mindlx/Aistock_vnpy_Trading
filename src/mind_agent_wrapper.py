@@ -28,6 +28,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,28 +147,42 @@ class MindTradingAgentWrapper:
 
         logger.info(f"TradingAgent: 分析 {resolved_name}({stock_code}) → {yf_ticker} @ {trade_date}")
 
-        # ── 快速降级：主数据源不可用时直接走技术评分，跳过 LLM ──
-        if data_check.get("fast_degrade", False):
-            logger.info(f"TradingAgent [{stock_code}]: 主数据源不可用，启用快速降级")
-            fb = self._fallback_akshare(stock_code, trade_date, resolved_name, error="快速降级")
-            if fb.get("_fallback_data"):
-                return {
-                    "code": stock_code,
-                    "name": resolved_name,
-                    "yf_ticker": yf_ticker,
-                    "rating": fb["rating"],
-                    "final_decision": f"技术信号: {fb['rating']} (快速降级)",
-                    "trade_date": trade_date,
-                    "success": True,
-                    "error": None,
-                    "is_degraded": True,
-                }
+        # ── 数据注入 + LLM 辩论路径 ──
+        # 当主数据源不可用时，从 LY/ML 缓存注入预加载数据，
+        # 让 AT 的 LLM 辩论仍然可以运行（不跳过 LLM）。
+        # 如果注入后 AT 仍然失败，走快速降级。
+        should_inject = data_check.get("fast_degrade", False)
+
+        if should_inject:
+            logger.info(f"TradingAgent [{stock_code}]: 主数据源不可用，尝试数据注入")
 
         try:
-            # 调用 TradingAgent（可能耗时数分钟，含 LLM 推理）
-            final_state, signal = self._ta.propagate(yf_ticker, trade_date)
+            if should_inject:
+                preloaded = self._get_preloaded_context(stock_code)
+                orig_create = self._ta.propagator.create_initial_state
 
-            # 提取最终决策
+                def _injected_create(company_name, trade_date, asset_type="stock", past_context=""):
+                    state = orig_create(company_name, trade_date, asset_type, past_context)
+                    from langchain_core.messages import AIMessage
+                    content = (
+                        f"[预加载数据] 以下数据从外部缓存获取，可直接用于分析。\n\n"
+                        f"=== 行情与技术指标 ===\n{preloaded['market_context']}\n\n"
+                        f"=== 基本面 ===\n{preloaded['fundamentals_context']}\n\n"
+                        f"=== 情绪 ===\n{preloaded['sentiment_context']}\n\n"
+                        f"=== 新闻 ===\n{preloaded['news_context']}\n\n"
+                        f"(数据来源: LY UnifiedCache + ML stock_analysis.db)"
+                    )
+                    state["messages"].append(AIMessage(content=content))
+                    return state
+
+                self._ta.propagator.create_initial_state = _injected_create
+                try:
+                    final_state, signal = self._ta.propagate(yf_ticker, trade_date)
+                finally:
+                    self._ta.propagator.create_initial_state = orig_create
+            else:
+                final_state, signal = self._ta.propagate(yf_ticker, trade_date)
+
             rating = signal if isinstance(signal, str) else "Hold"
             final_decision = final_state.get("final_trade_decision", "")
 
@@ -179,13 +195,15 @@ class MindTradingAgentWrapper:
                 "trade_date": trade_date,
                 "success": True,
                 "error": None,
+                "_injected": should_inject,
             }
-            logger.info(f"TradingAgent [{stock_code}]: {rating}")
+            logger.info(f"TradingAgent [{stock_code}]: {rating}" +
+                        (" (数据注入)" if should_inject else ""))
             return result
 
         except Exception as e:
-            logger.error(f"TradingAgent [{stock_code}] 分析失败: {e}")
-            # 尝试降级到数据分析（不含 LLM 推理）
+            logger.error(f"TradingAgent [{stock_code}] 分析失败: {e}" +
+                         (" (已尝试数据注入)" if should_inject else ""))
             return self._fallback_akshare(stock_code, trade_date, resolved_name, error=str(e))
 
     def _fallback_akshare(
@@ -413,6 +431,175 @@ class MindTradingAgentWrapper:
             "trade_date": "",
             "success": False,
             "error": error,
+        }
+
+    def _get_preloaded_context(self, stock_code: str) -> Dict[str, str]:
+        """从 LY(UnifiedCache) + ML(stock_analysis.db) 提取预加载数据。
+
+        返回格式化为 markdown 的上下文文本，供 AT 分析师 LLM 直接使用。
+        包含: OHLCV/技术指标/基本面/新闻情报，覆盖AT的4位分析师需求。
+        """
+        market_md = "**行情数据:** 缓存数据不可用"
+        tech_md = "**技术指标:** 缓存数据不可用"
+        ml_md = "**ML分析:** 数据不可用"
+        news_md = "**新闻公告:** 无近期新闻"
+        fund_md = "**基本面:** 数据不可用"
+
+        _ML_DB = "systems/MindLynx-Aistock/data/stock_analysis.db"
+        _has_ml_db = Path(_ML_DB).exists()
+
+        # 1. 从 UnifiedCache 取 OHLCV + 全量技术指标
+        try:
+            from src.unified_cache import get_cache
+            cache = get_cache()
+            df = cache.get_daily_ohlcv(stock_code, days=60)
+            if df is not None and len(df) >= 10:
+                recent = df.tail(5)
+                lines = ["日期|开盘|最高|最低|收盘|成交量"]
+                lines.append("---|---|---|---|---|---")
+                for _, r in recent.iterrows():
+                    try:
+                        date = str(r.get("date", r.name))[:10]
+                        o = f"{float(r['open']):.2f}" if "open" in r else "-"
+                        h = f"{float(r['high']):.2f}" if "high" in r else "-"
+                        l_ = f"{float(r['low']):.2f}" if "low" in r else "-"
+                        c = f"{float(r['close']):.2f}" if "close" in r else "-"
+                        v = f"{int(r['volume']):,}" if "volume" in r else "-"
+                        lines.append(f"{date}|{o}|{h}|{l_}|{c}|{v}")
+                    except Exception:
+                        continue
+                market_md = "**OHLCV (最近5天):**\n" + "\n".join(lines)
+
+                closes = df["close"].values if "close" in df.columns else None
+                if closes is not None and len(closes) >= 20:
+                    import pandas as pd
+                    s = pd.Series(closes)
+                    ma5 = np.mean(closes[-5:])
+                    ma10 = np.mean(closes[-10:])
+                    ma20 = np.mean(closes[-20:])
+                    # RSI(14)
+                    delta = np.diff(closes)
+                    gain = np.where(delta > 0, delta, 0)
+                    loss = np.where(delta < 0, -delta, 0)
+                    ag = np.mean(gain[-14:]) if len(gain) >= 14 else 0
+                    al = np.mean(loss[-14:]) if len(loss) >= 14 else 1e-6
+                    rsi = 100 - (100 / (1 + ag / max(al, 1e-10)))
+                    # MACD
+                    ema12 = s.ewm(span=12).mean().values
+                    ema26 = s.ewm(span=26).mean().values
+                    macd = ema12 - ema26
+                    macd_hist = macd[-1] - np.mean(macd[-9:]) if len(macd) >= 9 else macd[-1]
+                    # Bollinger Bands (20,2)
+                    bb_mid = ma20
+                    bb_std = np.std(closes[-20:])
+                    bb_up = bb_mid + 2 * bb_std
+                    bb_down = bb_mid - 2 * bb_std
+                    bb_pos = (closes[-1] - bb_down) / (bb_up - bb_down) if bb_up > bb_down else 0.5
+                    # ATR(14)
+                    highs = df["high"].values if "high" in df.columns else closes
+                    lows = df["low"].values if "low" in df.columns else closes
+                    tr = np.maximum(highs[1:] - lows[1:],
+                                    np.abs(highs[1:] - closes[:-1]),
+                                    np.abs(lows[1:] - closes[:-1]))
+                    atr = np.mean(tr[-14:]) if len(tr) >= 14 else np.mean(tr)
+                    # Volume ratio
+                    vols = df["volume"].values if "volume" in df.columns else None
+                    vol_ratio = (vols[-1] / np.mean(vols[-5:])) if vols is not None and len(vols) >= 5 else None
+
+                    parts = [
+                        f"MA5={ma5:.2f}", f"MA10={ma10:.2f}", f"MA20={ma20:.2f}",
+                        f"RSI(14)={rsi:.1f}",
+                        f"MACD柱={macd_hist:.4f}",
+                        f"布林带={bb_mid:.2f}(±{bb_std:.2f})", f"BB位置={bb_pos:.0%}",
+                        f"ATR(14)={atr:.4f}",
+                    ]
+                    if vol_ratio is not None:
+                        parts.append(f"量比={vol_ratio:.2f}")
+                    tech_md = "**技术指标:** " + " | ".join(parts)
+        except Exception as e:
+            logger.debug(f"[preload] UnifiedCache 读取失败({stock_code}): {e}")
+
+        # 2. 从 ML 数据库取最新分析和基本面
+        if _has_ml_db:
+            try:
+                import sqlite3
+                conn = sqlite3.connect(_ML_DB)
+                conn.row_factory = sqlite3.Row
+
+                # 2a. 最新分析记录
+                row = conn.execute(
+                    "SELECT operation_advice, sentiment_score, trend_prediction, "
+                    "analysis_summary, created_at FROM analysis_history "
+                    "WHERE code=? ORDER BY created_at DESC LIMIT 1",
+                    (stock_code,),
+                ).fetchone()
+                if row:
+                    ts = str(row["created_at"])[:19] if row["created_at"] else ""
+                    summary = (row["analysis_summary"] or "")[:300]
+                    ml_md = (
+                        f"**ML分析 ({ts}):** "
+                        f"建议={row['operation_advice']} | "
+                        f"评分={row['sentiment_score']} | "
+                        f"趋势={row['trend_prediction']}\n"
+                        f"{summary}"
+                    )
+
+                # 2b. 基本面快照 (PE/PB/板块)
+                fs = conn.execute(
+                    "SELECT payload FROM fundamental_snapshot "
+                    "WHERE code=? ORDER BY id DESC LIMIT 1",
+                    (stock_code,),
+                ).fetchone()
+                if fs:
+                    import json
+                    try:
+                        p = json.loads(fs["payload"])
+                        boards = p.get("belong_boards", [])
+                        board_str = ", ".join(b["name"] for b in boards[:5]) if boards else ""
+                        val = p.get("valuation", {})
+                        val_data = val.get("data", {}) if isinstance(val, dict) else {}
+                        pe = val_data.get("pe_ratio")
+                        pb = val_data.get("pb_ratio")
+                        mv = val_data.get("total_mv")
+                        fund_parts = []
+                        if board_str:
+                            fund_parts.append(f"板块={board_str}")
+                        if pe is not None:
+                            fund_parts.append(f"PE={pe}")
+                        if pb is not None:
+                            fund_parts.append(f"PB={pb}")
+                        if mv is not None:
+                            fund_parts.append(f"市值={mv:.0f}亿" if mv > 1e8 else "")
+                        if fund_parts:
+                            fund_md = "**基本面:** " + " | ".join(fund_parts)
+                    except Exception:
+                        pass
+
+                # 2c. 新闻公告 (最近3条)
+                news_rows = conn.execute(
+                    "SELECT title, source, importance, created_at FROM news_intel "
+                    "WHERE code=? AND dimension IN ('daily_intel','weekend_intel') "
+                    "ORDER BY id DESC LIMIT 3",
+                    (stock_code,),
+                ).fetchall()
+                if news_rows:
+                    news_lines = ["**近期新闻:**"]
+                    for nr in news_rows:
+                        t = (nr["title"] or "")[:60]
+                        s = nr["source"] or ""
+                        imp = nr["importance"] or 0
+                        news_lines.append(f"  - [{s}](重要{imp}) {t}")
+                    news_md = "\n".join(news_lines)
+
+                conn.close()
+            except Exception as e:
+                logger.debug(f"[preload] ML DB 查询失败({stock_code}): {e}")
+
+        return {
+            "market_context": market_md + "\n\n" + tech_md,
+            "fundamentals_context": fund_md + "\n\n" + ml_md,
+            "sentiment_context": ml_md,
+            "news_context": news_md,
         }
 
     @staticmethod
