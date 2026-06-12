@@ -336,6 +336,48 @@ def _run_weekend_intel(config: Config, is_refresh: bool = False, no_push: bool =
     importance_threshold = 7
     collected: list[dict] = []
 
+    # ── 0. 宏观情报：全球财经资讯 + 财经早餐 ──
+    try:
+        import akshare as ak
+        today_str = datetime.now().strftime("%Y%m%d")
+
+        # 全球财经资讯
+        try:
+            df_global = ak.stock_info_global_em()
+            if df_global is not None and not df_global.empty:
+                for _, row in df_global.head(20).iterrows():
+                    title = str(row.get("标题", ""))
+                    collected.append({
+                        "code": "__market__", "title": title,
+                        "url": str(row.get("链接", "")),
+                        "snippet": str(row.get("摘要", ""))[:200],
+                        "importance": 6,
+                        "source": "全球财经",
+                    })
+                logger.info("周末情报: 全球财经资讯 %d 条", min(len(df_global), 20))
+        except Exception as e:
+            logger.debug("周末情报: 全球财经资讯获取失败: %s", e)
+
+        # 财经早餐
+        try:
+            df_breakfast = ak.stock_info_cjzc_em()
+            if df_breakfast is not None and not df_breakfast.empty:
+                for _, row in df_breakfast.head(5).iterrows():
+                    title = str(row.get("标题", ""))
+                    collected.append({
+                        "code": "__market__", "title": title,
+                        "url": str(row.get("链接", "")),
+                        "snippet": str(row.get("摘要", ""))[:200],
+                        "importance": 7,
+                        "source": "财经早餐",
+                    })
+                logger.info("周末情报: 财经早餐 %d 条", min(len(df_breakfast), 5))
+        except Exception as e:
+            logger.debug("周末情报: 财经早餐获取失败: %s", e)
+
+    except Exception as e:
+        logger.debug("周末情报: 宏观情报获取失败: %s", e)
+
     # Populate stock name map for push formatting
     for code in stock_codes:
         try:
@@ -360,7 +402,7 @@ def _run_weekend_intel(config: Config, is_refresh: bool = False, no_push: bool =
             )
             if response and response.success and response.results:
                 for item in response.results:
-                    importance = _score_weekend_importance(item.title, item.snippet)
+                    importance = _score_importance(item.title, item.snippet)
                     collected.append({
                         "code": code,
                         "title": item.title,
@@ -447,24 +489,15 @@ def _run_weekend_intel(config: Config, is_refresh: bool = False, no_push: bool =
     return 0
 
 
-_HIGH_IMPORTANCE_KEYWORDS = [
-    ("重组", 9), ("并购", 8), ("减持", 8), ("增持", 7), ("回购", 7),
-    ("业绩预增", 8), ("业绩预减", 8), ("预亏", 9), ("亏损", 8),
-    ("ST", 10), ("退市", 10), ("立案", 10), ("处罚", 9),
-    ("政策", 7), ("新规", 7), ("改革", 7), ("利好", 7),
-    ("中标", 7), ("合同", 6), ("定增", 7), ("分红", 6),
-    ("停牌", 8), ("复牌", 7), ("问询函", 8), ("监管函", 8),
-]
+def _score_importance(title: str, snippet: str = "") -> int:
+    """统一情报重要性评分（使用 EventClassifier 体系）。
 
-
-def _score_weekend_importance(title: str, snippet: str = "") -> int:
-    """Simple keyword-based importance scoring for weekend news."""
-    text = f"{title} {snippet}".lower()
-    score = 3  # base score
-    for keyword, weight in _HIGH_IMPORTANCE_KEYWORDS:
-        if keyword in text:
-            score = max(score, weight)
-    return min(score, 10)
+    与 event_monitor.py 的 EventClassifier 保持一致的分类标准。
+    重要性≥7的新闻才会被推送。
+    """
+    from src.services.event_monitor import EventClassifier
+    event_type, base = EventClassifier.classify_announcement(title)
+    return EventClassifier.adjust_importance(event_type, base, title, snippet)
 
 
 def _push_highlights(
@@ -477,26 +510,54 @@ def _push_highlights(
     log_label: str,
     title_max: int = 45,
 ) -> None:
-    """通用推送函数：将 highlights 按股票分组后推送。"""
     import hashlib
     import re as _re
+    import html as _html
 
     lines = [f"📰 {title_text}"]
     grouped: dict[str, dict] = {}
     for h in sorted(highlights, key=lambda x: -x["importance"]):
         code = h.get("code", "")
-        title = _re.sub(r"<[^>]+>", "", h.get("title", ""))[:title_max]
-        sentiment = _score_sentiment(title, h.get("snippet", ""))
-        if code not in grouped:
-            imp = h.get("importance", 0)
-            imp_icon = get_importance_emoji(imp)
+        if code == "__market__":
+            name = "市场情报"
+        else:
             name = _STOCK_NAME_MAP.get(code, code)
-            grouped[code] = {"icon": imp_icon, "name": name, "items": [], "max_importance": imp}
-        grouped[code]["items"].append(f"{title}-{sentiment}")
+        raw_title = _html.unescape(h.get("title", ""))
+        title = _re.sub(r"<[^>]+>", "", raw_title).strip()[:title_max]
+        url = h.get("url", "")
+
+        # 清理标题中重复的股票名称/代码前缀
+        if name != code and title.startswith(name):
+            title = title[len(name):].strip().lstrip("，,、：: ")
+        if title.startswith(code):
+            title = title[len(code):].strip().lstrip("，,、：: ")
+
+        if not title:
+            continue
+
+        imp = h.get("importance", 0)
+        if imp >= 8:
+            sentiment = _score_sentiment(title, h.get("snippet", ""))
+            sentiment_tag = f" [{sentiment}]" if sentiment != "中性" else ""
+        else:
+            sentiment_tag = ""
+
+        if code not in grouped:
+            grouped[code] = {"name": name, "items": []}
+
+        source = h.get("source", "")
+        if url and url.startswith("http") and source != "公告":
+            clean_url = url.split("&")[0] if "?" in url else url
+            item_text = f"[{title}]({clean_url}){sentiment_tag}"
+        else:
+            item_text = f"{title}{sentiment_tag}"
+        grouped[code]["items"].append(item_text)
 
     for code, entry in grouped.items():
-        summaries = " | ".join(entry["items"])
-        lines.append(f"{entry['icon']} {entry['name']}({code}) | {summaries}")
+        sep = "\n  "
+        items = sep.join(entry["items"])
+        lines.append(f"• {entry['name']}({code})")
+        lines.append(f"  {items}")
     lines.append(f"📊 {len(highlights)}条 | {footer_text}")
 
     content = "\n".join(lines)
@@ -578,9 +639,20 @@ def _run_daily_intel(config: Config, slot: str = "midday") -> int:
     ann_fetcher = CninfoFetcher()
 
     max_results = 3 if slot == "evening" else 2
-    importance_threshold = 6
+    importance_threshold = 7
     collected: list[dict] = []
     days_lookback = 2 if slot == "preopen" else 1
+
+    # 填充股票名称映射（用于推送格式化）
+    for code in stock_codes:
+        try:
+            from data_provider.base import DataFetcherManager
+            mgr = DataFetcherManager()
+            name = mgr.get_stock_name(code)
+            if name and name != code:
+                _STOCK_NAME_MAP[code] = name
+        except Exception:
+            pass
 
     # ── 0. 市场级情报搜集（非个股，政策/板块/宏观） ──
     # 使用 akshare 免费源，替代质量不佳的 SearXNG 搜索
@@ -644,6 +716,40 @@ def _run_daily_intel(config: Config, slot: str = "midday") -> int:
         except Exception as e:
             logger.debug("市场情报: 风险提示公告获取失败: %s", e)
 
+        # 0d. 全球财经资讯（东方财富聚合，免费200条）
+        try:
+            df_global = ak.stock_info_global_em()
+            if df_global is not None and not df_global.empty:
+                for _, row in df_global.head(15).iterrows():
+                    title = str(row.get("标题", ""))
+                    collected.append({
+                        "code": "__market__", "title": title,
+                        "url": str(row.get("链接", "")),
+                        "snippet": str(row.get("摘要", ""))[:200],
+                        "importance": 6,
+                        "source": "全球财经",
+                    })
+                logger.info("市场情报: 全球财经资讯 %d 条", min(len(df_global), 15))
+        except Exception as e:
+            logger.debug("市场情报: 全球财经资讯获取失败: %s", e)
+
+        # 0e. 东方财富财经早餐（免费400条）
+        try:
+            df_breakfast = ak.stock_info_cjzc_em()
+            if df_breakfast is not None and not df_breakfast.empty:
+                for _, row in df_breakfast.head(5).iterrows():
+                    title = str(row.get("标题", ""))
+                    collected.append({
+                        "code": "__market__", "title": title,
+                        "url": str(row.get("链接", "")),
+                        "snippet": str(row.get("摘要", ""))[:200],
+                        "importance": 7,
+                        "source": "财经早餐",
+                    })
+                logger.info("市场情报: 财经早餐 %d 条", min(len(df_breakfast), 5))
+        except Exception as e:
+            logger.debug("市场情报: 财经早餐获取失败: %s", e)
+
     except ImportError:
         logger.warning("akshare 未安装，跳过市场情报搜集")
     except Exception as e:
@@ -657,7 +763,7 @@ def _run_daily_intel(config: Config, slot: str = "midday") -> int:
             response = news_provider.search(code, max_results=max_results, days=days_lookback)
             if response and response.success and response.results:
                 for item in response.results:
-                    importance = _score_weekend_importance(item.title, item.snippet)
+                    importance = _score_importance(item.title, item.snippet)
                     collected.append({
                         "code": code, "title": item.title, "url": item.url,
                         "snippet": (item.snippet or "")[:200], "importance": importance,
@@ -1331,7 +1437,11 @@ def main() -> int:
             return 0
 
         # 模式0d: 事件驱动分析服务
-        event_monitor_flag = getattr(args, "event_monitor", False) or getattr(config, "event_monitor_enabled", False)
+        # 当 --schedule 时，event_monitor_enabled 注册为后台任务而非劫持模式
+        _is_schedule_mode = getattr(args, "schedule", False) or getattr(config, "schedule_enabled", False)
+        event_monitor_flag = getattr(args, "event_monitor", False) or (
+            getattr(config, "event_monitor_enabled", False) and not _is_schedule_mode
+        )
         event_monitor_daemon_flag = getattr(args, "event_monitor_daemon", False)
 
         if event_monitor_flag or event_monitor_daemon_flag:
@@ -1469,6 +1579,35 @@ def main() -> int:
                         "run_immediately": True,
                         "name": "threshold_event_monitor",
                     })
+
+            # EventMonitor 作为后台任务（在 scheduler 内周期运行，不劫持模式）
+            if getattr(config, "event_monitor_enabled", False):
+                _em_interval = getattr(config, "event_monitor_check_interval", 300)
+                _em_codes = getattr(config, "event_monitor_stock_codes", [])
+                if not _em_codes:
+                    _em_codes = scheduled_stock_codes or config.stock_list
+
+                def _event_monitor_background():
+                    try:
+                        import asyncio
+                        from src.services.event_monitor import (
+                            create_event_monitor, run_event_monitor_cli,
+                        )
+                        _cfg = _reload_runtime_config()
+                        asyncio.run(run_event_monitor_cli(
+                            stock_codes=_em_codes,
+                            config=_cfg,
+                            daemon=False,  # 单次 check_once()
+                        ))
+                    except Exception as e:
+                        logger.exception("EventMonitor后台任务执行失败: %s", e)
+
+                background_tasks.append({
+                    "task": _event_monitor_background,
+                    "interval_seconds": _em_interval,
+                    "run_immediately": True,
+                    "name": "event_monitor",
+                })
 
             # DB maintenance: weekly TTL purge + VACUUM
             def db_maintenance_task():
