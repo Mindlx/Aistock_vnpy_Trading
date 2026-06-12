@@ -12,6 +12,8 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+import math
+
 from src.normalizer import SignalNormalizer
 
 logger = logging.getLogger(__name__)
@@ -138,6 +140,8 @@ class ConfidenceCalibrator:
         predict_proba() 是校准概率，距离 50% 中性点直接编码置信度。
         prob_up=85 -> c=0.70, prob_up=50 -> c=0 (最大不确定性)
         """
+        if math.isnan(prob_up):
+            return 0.0
         return min(1.0, abs(prob_up - 50.0) / 50.0)
 
     @staticmethod

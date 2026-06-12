@@ -47,7 +47,6 @@ class Alpha158Service:
 
     def __init__(self):
         self._model = None
-        self._db_conn = None
         self._last_hash: Optional[int] = None
 
     @property
@@ -56,20 +55,15 @@ class Alpha158Service:
             self._model = lgb.Booster(model_file=str(MODEL_PATH))
         return self._model
 
-    @property
-    def db(self):
-        if self._db_conn is None:
-            import sqlite3
-            self._db_conn = sqlite3.connect(str(DB_PATH))
-        return self._db_conn
-
     def compute_all(self) -> Dict[str, Any]:
         """计算所有股票的Alpha158因子+LGB预测"""
+        import sqlite3
+        conn = sqlite3.connect(str(DB_PATH))
         results = {}
 
         for code in STOCK_CODES:
             try:
-                rows = self.db.execute(
+                rows = conn.execute(
                     "SELECT date, open, high, low, close, volume "
                     "FROM stock_daily WHERE code=? ORDER BY date", (code,)
                 ).fetchall()
@@ -100,6 +94,7 @@ class Alpha158Service:
             except Exception as e:
                 continue
 
+        conn.close()
         return {
             "stocks": results,
             "updated_at": datetime.now().isoformat(),

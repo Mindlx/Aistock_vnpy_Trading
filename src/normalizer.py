@@ -8,13 +8,13 @@
     级别        ly (概率)         ml (操作)      at (研报)
     +3 强烈看多  prob_up≥75%      买入           Buy
     +2 看多      prob_up≥65%      加仓           Overweight
-    +1 谨慎看多  prob_up≥55%      —              —
-     0 中性/持有 prob_up≈50%      持有/观望      Hold
-    -1 谨慎看空  prob_up≥35%      减仓           Underweight
-    -2 看空      prob_up≥25%      卖出           —
-    -3 强烈看空  prob_up<25%      —              Sell
+     +1 谨慎看多  prob_up≥59%      —              —
+      0 中性/持有 prob_up≈50%      持有/观望      Hold
+     -1 谨慎看空  prob_up≥35%      减仓           Underweight
+     -2 看空      prob_up≥25%      卖出           —
+     -3 强烈看空  prob_up<25%      —              Sell
 
-映射方式: 分段线性（flat 中性区 45~55%→0.00，锚点间线性插值）
+映射方式: 分段线性（flat 中性区 42~52%→0.00，锚点间线性插值）
 vs v3.0: 从 logit+tanh 改为分段线性，ml/at 值对齐设计目标
 
 关键语义修正: "持有"映射到 L7=0（中性），不再当作弱看多信号。
@@ -42,7 +42,7 @@ L7_STRONG_SELL = -3.0
 L7_THRESHOLDS = {
     "strong_bullish": 2.5,
     "bullish": 1.5,
-    "cautious_bullish": 0.5,
+    "cautious_bullish": 1.0,
     "cautious_bearish": -0.5,
     "bearish": -1.5,
     "strong_bearish": -2.5,
@@ -173,12 +173,14 @@ class SignalNormalizer:
           prob_up  0% → L7 -3.00 (钳位)
           prob_up 25% → L7 -2.06 (S6 看空)
           prob_up 35% → L7 -1.13 (S5 谨慎看空)
-          prob_up 45% → L7  0.00 (S4 中性边界)
-          prob_up 55% → L7  0.00 (S4 中性边界, flat zone)
+          prob_up 42% → L7  0.00 (S4 中性边界)
+          prob_up 52% → L7  0.00 (S4 中性边界, flat zone)
+          prob_up 59% → L7 +1.00 (S3 谨慎看多, L7阈值上调后首个看多信号)
           prob_up 65% → L7 +2.06 (S2 看多)
           prob_up 75% → L7 +3.00 (S1 强烈看多, 其后钳位)
 
-        flat zone 45~55%: prob_up 在 50% 附近的信号无方向性倾向。
+        flat zone 42~52%: prob_up 在此区间的信号无方向性倾向。
+        prob_up 52~59% 经数据验证为反指(真实上涨率<40%)，仍归中性。
         参数:
             signal: 原始信号（兼容旧格式，当前仅用于有效性判断）
             prob_up: 上涨概率 0-100
@@ -194,8 +196,8 @@ class SignalNormalizer:
             (0, -3.00),    # 钳位下限
             (25, -2.06),   # S6
             (35, -1.13),   # S5
-            (45, 0.00),    # S4 中性边界
-            (55, 0.00),    # S4 中性边界 (flat zone)
+            (42, 0.00),    # S4 中性边界 (flat zone 下界)
+            (52, 0.00),    # S4 中性边界 (flat zone 上界)
             (65, 2.06),    # S2
             (75, 3.00),    # S1
             (100, 3.00),   # 钳位上限
@@ -241,6 +243,8 @@ class SignalNormalizer:
         返回:
             L7 得分 (-3 ~ +3)
         """
+        if math.isnan(sentiment_score):
+            return 0.0
         base = cls.ML_BASE.get(operation_advice, 0.0)
         factor = cls.ML_SENTIMENT_FACTOR.get(operation_advice, 0.3)
         modulation = factor * (sentiment_score - 50.0) / 50.0
@@ -312,34 +316,34 @@ class SignalNormalizer:
 
     @classmethod
     def map_normalized_to_label(cls, score: float) -> str:
-        """将 L7 得分映射到可读标签"""
-        if score >= 2.5:
+        """将 L7 得分映射到可读标签 (阈值与 L7_THRESHOLDS / _get_final_decision 一致)"""
+        if score > 2.5:
             return "strong_bullish"
-        elif score >= 1.5:
+        elif score > 1.5:
             return "bullish"
-        elif score >= 0.5:
+        elif score > 1.0:
             return "cautious_bullish"
-        elif score >= -0.5:
+        elif score > -0.5:
             return "neutral"
-        elif score >= -1.5:
+        elif score > -1.5:
             return "cautious_bearish"
-        elif score >= -2.5:
+        elif score > -2.5:
             return "bearish"
         else:
             return "strong_bearish"
 
     @classmethod
     def score_to_l7_integer(cls, score: float) -> int:
-        """将连续 L7 得分映射到 7 级整数"""
-        if score >= 2.5:
+        """将连续 L7 得分映射到 7 级整数 (阈值与 L7_THRESHOLDS 一致)"""
+        if score > 2.5:
             return 3
-        elif score >= 1.5:
+        elif score > 1.5:
             return 2
-        elif score >= 0.5:
+        elif score > 1.0:
             return 1
-        elif score >= -0.5:
+        elif score > -0.5:
             return 0
-        elif score >= -1.5:
+        elif score > -1.5:
             return -1
         elif score >= -2.5:
             return -2
@@ -368,6 +372,26 @@ class SignalNormalizer:
         if "清仓" in position or "0成" in position:
             return position
         return "0.5成以内"
+
+    # ────────── v4.0 统一仓位接口（百分比，替代旧版"成"） ──────────
+
+    @staticmethod
+    def l7_target_pct(signal_label: str) -> float:
+        """L7 信号 → 建议仓位百分比（% of 总资金）。"""
+        from src.position import L7_TARGET_PCT
+        return L7_TARGET_PCT.get(signal_label, 0.0)
+
+    @staticmethod
+    def l7_target_label(signal_label: str) -> str:
+        """L7 信号 → 仓位中文标签。"""
+        from src.position import L7_TARGET_LABEL
+        return L7_TARGET_LABEL.get(signal_label, "空仓")
+
+    @staticmethod
+    def l7_target_range(signal_label: str) -> tuple[float, float]:
+        """L7 信号 → 仓位百分比范围 (min, max)。"""
+        from src.position import L7_TARGET_PCT_RANGE
+        return L7_TARGET_PCT_RANGE.get(signal_label, (0, 0))
 
     # ────────── 概率空间映射（贝叶斯融合） ──────────
 

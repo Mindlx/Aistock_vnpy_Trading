@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import os
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -97,7 +98,8 @@ class RealtimeFusion:
         if self._notifier is None:
             try:
                 import yaml
-                cfg = yaml.safe_load(open("config/settings.yaml"))
+                with open("config/settings.yaml", encoding="utf-8") as _f:
+                    cfg = yaml.safe_load(_f)
                 wc = cfg.get("wecom", {})
                 # 优先读取环境变量（项目根 .env），兼容旧版 yaml 配置
                 webhook_url = os.getenv("WECOM_WEBHOOK_URL") or wc.get("webhook_url", "")
@@ -126,19 +128,33 @@ class RealtimeFusion:
         valid_count = sum([ly_available, ml_available, at_available])
         is_degraded = valid_count < 3
 
+        # 权重重分配：子系统缺失时，权重重新归一化到有效系统
+        # 例如 ML 缺失时 ly:at 权重从 0.30:0.30 变为 0.50:0.50
+        _avail = {"lynx": ly_available, "mindlynx": ml_available, "tradingagent": at_available}
+        _total = sum(self.WEIGHTS[k] for k, v in _avail.items() if v)
+        if _total > 0:
+            adj_weights = {k: (self.WEIGHTS[k] / _total if v else 0.0) for k, v in _avail.items()}
+        else:
+            adj_weights = self.WEIGHTS  # 所有系统无数据，此分支实际不会进入（all_codes为空）
+
         # 所有出现过的股票代码
         all_codes = set(ly_stocks) | set(ml_stocks) | set(at_stocks)
 
         changes = []
         for code in sorted(all_codes):
-            ly_score = ly_stocks.get(code, {}).get("score", 0) if ly_available else 0
-            ml_score = ml_stocks.get(code, {}).get("l7_score", 0) if ml_available else 0
-            at_score = at_stocks.get(code, {}).get("score", 0) if at_available else 0
+            ly_score = (ly_stocks.get(code) or {}).get("score", 0) if ly_available else 0
+            ml_score = (ml_stocks.get(code) or {}).get("l7_score", 0) if ml_available else 0
+            at_score = (at_stocks.get(code) or {}).get("score", 0) if at_available else 0
+
+            # 防御: 任一score为NaN则清零（防止NaN传播导致全线崩溃）
+            if math.isnan(ly_score): ly_score = 0.0
+            if math.isnan(ml_score): ml_score = 0.0
+            if math.isnan(at_score): at_score = 0.0
 
             score = (
-                ly_score * self.WEIGHTS["lynx"]
-                + ml_score * self.WEIGHTS["mindlynx"]
-                + at_score * self.WEIGHTS["tradingagent"]
+                ly_score * adj_weights["lynx"]
+                + ml_score * adj_weights["mindlynx"]
+                + at_score * adj_weights["tradingagent"]
             )
             score = round(max(-3.0, min(3.0, score)), 3)
 

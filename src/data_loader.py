@@ -331,84 +331,84 @@ class MindLynxDataLoader:
             """, (date_str,)).fetchall()
             conn.close()
 
+            import json
             signals = {}
             for row in rows:
                 code = row["code"]
                 raw = row["raw_result"] or ""
                 ctx = row["context_snapshot"] or ""
-            try:
-                import json
-                raw = row["raw_result"] or "{}"
-                parsed = json.loads(raw) if isinstance(raw, str) else raw
-                dashboard = parsed.get("dashboard", {}) if isinstance(parsed, dict) else {}
-
-                # Extract dashboard numeric fields
-                dp = dashboard.get("data_perspective", {})
-                ts = dp.get("trend_status", {})
-                pp = dp.get("price_position", {})
-                va = dp.get("volume_analysis", {})
-                intel = dashboard.get("intelligence", {})
-                battle = dashboard.get("battle_plan", {})
-                sniper = battle.get("sniper_points", {}) if battle else {}
-
-                # Compute factor_baseline from context_snapshot factor_zscores
-                factor_baseline: float | None = None
                 try:
-                    ctx_parsed = json.loads(ctx) if isinstance(ctx, str) else {}
-                    if isinstance(ctx_parsed, dict):
-                        fz = ctx_parsed.get("factor_zscores", {}) or {}
-                        stock_z = fz.get(code, {}) if isinstance(fz, dict) else {}
-                        if stock_z and isinstance(stock_z, dict):
-                            z_vals = [v for v in stock_z.values() if isinstance(v, (int, float))]
-                            if z_vals:
-                                avg_z = sum(z_vals) / len(z_vals)
-                                # Map z-score [-3,+3] to [0,100]
-                                factor_baseline = round(50.0 + avg_z * 50.0 / 3.0, 1)
-                except (json.JSONDecodeError, Exception):
-                    pass
+                    raw = row["raw_result"] or "{}"
+                    parsed = json.loads(raw) if isinstance(raw, str) else raw
+                    dashboard = parsed.get("dashboard", {}) if isinstance(parsed, dict) else {}
 
-                signals[code] = {
-                    "code": code,
-                    "name": row["name"] or "",
-                    "signal": row["operation_advice"] or "观望",
-                    "score": row["sentiment_score"] or 50,
-                    "trend": row["trend_prediction"] or "",
-                    "sentiment_score": row["sentiment_score"],
-                    "trend_prediction": row["trend_prediction"] or "",
-                    "operation_advice": row["operation_advice"] or "观望",
-                    "analysis_summary": row["analysis_summary"] or "",
-                    "ideal_buy": row["ideal_buy"],
-                    "stop_loss": row["stop_loss"],
-                    "take_profit": row["take_profit"],
-                    # Factor baseline for hallucination detection
-                    "factor_baseline": factor_baseline,
-                    # Dashboard-extracted fields
-                    "ml_trend_score": ts.get("trend_score"),
-                    "ml_support_level": pp.get("support_level"),
-                    "ml_resistance_level": pp.get("resistance_level"),
-                    "ml_volume_ratio_dash": va.get("volume_ratio"),
-                    "ml_turnover_rate": va.get("turnover_rate"),
-                    "ml_risk_alert_count": len(intel.get("risk_alerts", [])),
-                    "ml_catalyst_count": len(intel.get("positive_catalysts", [])),
-                    "source": "analysis_db",
-                }
-            except (json.JSONDecodeError, AttributeError, TypeError):
-                # Fallback: simple fields without dashboard
-                signals[code] = {
-                    "code": code,
-                    "name": row["name"] or "",
-                    "signal": row["operation_advice"] or "观望",
-                    "score": row["sentiment_score"] or 50,
-                    "trend": row["trend_prediction"] or "",
-                    "sentiment_score": row["sentiment_score"],
-                    "trend_prediction": row["trend_prediction"] or "",
-                    "operation_advice": row["operation_advice"] or "观望",
-                    "analysis_summary": row["analysis_summary"] or "",
-                    "ideal_buy": row["ideal_buy"],
-                    "stop_loss": row["stop_loss"],
-                    "take_profit": row["take_profit"],
-                    "source": "analysis_db",
-                }
+                    # Extract dashboard numeric fields
+                    dp = dashboard.get("data_perspective", {})
+                    ts = dp.get("trend_status", {})
+                    pp = dp.get("price_position", {})
+                    va = dp.get("volume_analysis", {})
+                    intel = dashboard.get("intelligence", {})
+                    battle = dashboard.get("battle_plan", {})
+                    sniper = battle.get("sniper_points", {}) if battle else {}
+
+                    # Compute factor_baseline from context_snapshot factor_zscores
+                    factor_baseline: float | None = None
+                    try:
+                        ctx_parsed = json.loads(ctx) if isinstance(ctx, str) else {}
+                        if isinstance(ctx_parsed, dict):
+                            fz = ctx_parsed.get("factor_zscores", {}) or {}
+                            stock_z = fz.get(code, {}) if isinstance(fz, dict) else {}
+                            if stock_z and isinstance(stock_z, dict):
+                                z_vals = [v for v in stock_z.values() if isinstance(v, (int, float))]
+                                if z_vals:
+                                    avg_z = sum(z_vals) / len(z_vals)
+                                    # Map z-score [-3,+3] to [0,100]
+                                    factor_baseline = round(50.0 + avg_z * 50.0 / 3.0, 1)
+                    except Exception:
+                        logger.debug("[MindLynx] factor_baseline 计算失败(code=%s): 可能是factor_zscores缺失或格式异常", code)
+
+                    signals[code] = {
+                        "code": code,
+                        "name": row["name"] or "",
+                        "signal": row["operation_advice"] or "观望",
+                        "score": row["sentiment_score"] or 50,
+                        "trend": row["trend_prediction"] or "",
+                        "sentiment_score": row["sentiment_score"],
+                        "trend_prediction": row["trend_prediction"] or "",
+                        "operation_advice": row["operation_advice"] or "观望",
+                        "analysis_summary": row["analysis_summary"] or "",
+                        "ideal_buy": row["ideal_buy"],
+                        "stop_loss": row["stop_loss"],
+                        "take_profit": row["take_profit"],
+                        # Factor baseline for hallucination detection
+                        "factor_baseline": factor_baseline,
+                        # Dashboard-extracted fields
+                        "ml_trend_score": ts.get("trend_score"),
+                        "ml_support_level": pp.get("support_level"),
+                        "ml_resistance_level": pp.get("resistance_level"),
+                        "ml_volume_ratio_dash": va.get("volume_ratio"),
+                        "ml_turnover_rate": va.get("turnover_rate"),
+                        "ml_risk_alert_count": len(intel.get("risk_alerts", [])),
+                        "ml_catalyst_count": len(intel.get("positive_catalysts", [])),
+                        "source": "analysis_db",
+                    }
+                except (json.JSONDecodeError, AttributeError, TypeError):
+                    # Fallback: simple fields without dashboard
+                    signals[code] = {
+                        "code": code,
+                        "name": row["name"] or "",
+                        "signal": row["operation_advice"] or "观望",
+                        "score": row["sentiment_score"] or 50,
+                        "trend": row["trend_prediction"] or "",
+                        "sentiment_score": row["sentiment_score"],
+                        "trend_prediction": row["trend_prediction"] or "",
+                        "operation_advice": row["operation_advice"] or "观望",
+                        "analysis_summary": row["analysis_summary"] or "",
+                        "ideal_buy": row["ideal_buy"],
+                        "stop_loss": row["stop_loss"],
+                        "take_profit": row["take_profit"],
+                        "source": "analysis_db",
+                    }
             return signals
         except Exception as e:
             logger.debug(f"MindLynx DB 查询失败: {e}")
@@ -506,21 +506,22 @@ class MindLynxDataLoader:
                 try:
                     return path.read_text(encoding="utf-8")
                 except IOError:
-                    pass
+                    logger.warning(f"读取市场复盘报告失败: {path}")
         return None
 
     def get_latest_available_date(self) -> Optional[str]:
-        """获取最新可用报告的日期"""
-        latest = None
-        for f in sorted(self.reports_dir.glob("report_*.md"), reverse=True):
+        """获取最新可用报告的日期（按实际日期排序，非文件名）"""
+        dates = []
+        for f in self.reports_dir.glob("report_*.md"):
             match = re.search(r"report_(\d{8}|\d{4}-\d{2}-\d{2})\.md", f.name)
             if match:
-                date_raw = match.group(1)
-                if len(date_raw) == 8:
-                    date_raw = f"{date_raw[:4]}-{date_raw[4:6]}-{date_raw[6:8]}"
-                latest = date_raw
-                break
-        return latest
+                raw = match.group(1)
+                if len(raw) == 8:
+                    raw = f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+                dates.append(raw)
+        if not dates:
+            return None
+        return max(dates)
 
 
 # ══════════════════════════════════════════════
@@ -804,7 +805,7 @@ class MLFactorLoader:
                 if l7 is not None:
                     results[code] = {
                         "ml_factor_l7": float(l7),
-                        "ml_factor_score": float(info.get("composite_score", 0)),
+                        "ml_factor_score": float(info.get("composite_score") or 0),
                         "ml_factor_label": info.get("composite_label", ""),
                     }
             logger.debug(f"ml_factor: {len(results)} 只股票")
@@ -975,7 +976,7 @@ class UnifiedDataLoader:
                             pct_chg = round((price - prev_close) / prev_close * 100, 2)
                             price_fetched = True
             except Exception:
-                pass
+                logger.debug("Sina实时行情获取失败: %s", code)
 
             # 降级：实时行情失败时，从 lynx 日K线获取（收盘后安全，有内容校验）
             if not price_fetched and self.lynx._ensure_imported():
@@ -1023,9 +1024,9 @@ class UnifiedDataLoader:
                     "ma10": ma10,
                     "ma20": ma20,
                     "lynx_signal": lynx_signal_raw if lynx_signal_raw else "观望",
-                    "lynx_prob_up": float(lynx_prob_up) if lynx_prob_up else 50.0,
+                    "lynx_prob_up": float(lynx_prob_up) if lynx_prob_up is not None else 50.0,
                     "mindlynx_advice": mindlynx_advice if mindlynx_advice else "观望",
-                    "mindlynx_score": int(mindlynx_score) if mindlynx_score else 50,
+                    "mindlynx_score": int(mindlynx_score) if mindlynx_score is not None else 50,
                     "mindlynx_valid": mindlynx_has_data,
                     "mindlynx_trend": mindlynx.get("trend", ""),
                     "mindlynx_sentiment": mindlynx.get("sentiment_score"),
@@ -1038,7 +1039,6 @@ class UnifiedDataLoader:
                     "tradingagent_rating": ta_rating if ta_rating else "Hold",
                     "tradingagent_valid": ta_has_data,
                     "ta_debate_state": ta.get("debate_state", {}),
-                    "mindlynx_trend": mindlynx.get("trend", ""),
                     # ml_factor 因子层信号
                     "ml_factor_l7": ml_factor_l7,
                     "ml_factor_valid": ml_factor_has_data,
