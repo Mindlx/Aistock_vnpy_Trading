@@ -1,0 +1,10 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 东方财富评级阈值校测定时器（每月1日 10:00）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=*-*-1 10:00:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

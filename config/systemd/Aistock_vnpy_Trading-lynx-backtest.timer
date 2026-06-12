@@ -1,0 +1,10 @@
+[Unit]
+Description=Aistock_vnpy_Trading — lynx 量化信号回测定时器（每周日 10:00）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=Sun 10:00:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

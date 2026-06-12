@@ -1,7 +1,7 @@
 [Unit]
-Description=Aistock_vnpy_Trading — mind_TradingAgent 深度论证
+Description=Aistock_vnpy_Trading — mind_TradingAgent 深度论证（工作日 09:31/13:00）
 Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
-After=network-online.target Aistock_vnpy_Trading-fusion.service
+After=network-online.target Aistock_vnpy_Trading-realtime-fusion.service
 Wants=network-online.target
 
 [Service]
