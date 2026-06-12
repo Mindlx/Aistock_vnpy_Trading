@@ -151,28 +151,49 @@ class MindTradingAgentWrapper:
         # 当主数据源不可用时，从 LY/ML 缓存注入预加载数据，
         # 让 AT 的 LLM 辩论仍然可以运行（不跳过 LLM）。
         # 如果注入后 AT 仍然失败，走快速降级。
-        should_inject = data_check.get("fast_degrade", False)
+        should_inject = True  # 始终注入，确保 AT Agent 获得 LY/ML 信号
 
         if should_inject:
-            logger.info(f"TradingAgent [{stock_code}]: 主数据源不可用，尝试数据注入")
+            logger.info(f"TradingAgent [{stock_code}]: 尝试数据注入 (LY信号 + ML因子 + 缓存数据)")
 
         try:
             if should_inject:
                 preloaded = self._get_preloaded_context(stock_code)
+                ly_md = preloaded.get("ly_signals_context", "")
+                ml_factor_md = preloaded.get("ml_factor_context", "")
                 orig_create = self._ta.propagator.create_initial_state
 
                 def _injected_create(company_name, trade_date, asset_type="stock", past_context=""):
                     state = orig_create(company_name, trade_date, asset_type, past_context)
-                    from langchain_core.messages import AIMessage
-                    content = (
+                    from langchain_core.messages import AIMessage, SystemMessage
+                    # Option A+: 注入到 system prompt 头部（最高权威层级）
+                    sys_inject = (
+                        "\n\n[系统注入] 以下数据来自本平台量化模型(LY)和AI分析(ML)系统，"
+                        "权威性高于原始行情数据。请首先参考以下预加载数据进行判断:\n\n"
+                    )
+                    if ly_md:
+                        sys_inject += f"--- LY 量化信号 ---\n{ly_md}\n\n"
+                    if ml_factor_md:
+                        sys_inject += f"--- ML 因子信号 ---\n{ml_factor_md}\n\n"
+                    sys_inject += (
+                        "--- 行情与技术指标 ---\n"
+                        f"{preloaded.get('market_context', '')}\n\n"
+                        "--- 基本面 ---\n"
+                        f"{preloaded.get('fundamentals_context', '')}\n"
+                    )
+                    state["messages"].insert(0, SystemMessage(content=sys_inject))
+                    # 同时注入 AIMessage（补充详细分析上下文）
+                    aiml = (
                         f"[预加载数据] 以下数据从外部缓存获取，可直接用于分析。\n\n"
+                        f"=== LY 量化信号 ===\n{ly_md}\n\n"
+                        f"=== ML 因子信号 ===\n{ml_factor_md}\n\n"
                         f"=== 行情与技术指标 ===\n{preloaded['market_context']}\n\n"
                         f"=== 基本面 ===\n{preloaded['fundamentals_context']}\n\n"
                         f"=== 情绪 ===\n{preloaded['sentiment_context']}\n\n"
                         f"=== 新闻 ===\n{preloaded['news_context']}\n\n"
                         f"(数据来源: LY UnifiedCache + ML stock_analysis.db)"
                     )
-                    state["messages"].append(AIMessage(content=content))
+                    state["messages"].append(AIMessage(content=aiml))
                     return state
 
                 self._ta.propagator.create_initial_state = _injected_create
@@ -195,7 +216,7 @@ class MindTradingAgentWrapper:
                 "trade_date": trade_date,
                 "success": True,
                 "error": None,
-                "_injected": should_inject,
+                "_injected": True,
             }
             logger.info(f"TradingAgent [{stock_code}]: {rating}" +
                         (" (数据注入)" if should_inject else ""))
@@ -433,17 +454,174 @@ class MindTradingAgentWrapper:
             "error": error,
         }
 
+    def _load_ly_signals_for_at(self, stock_code: str) -> str:
+        """读取 LY 双模型信号并格式化为 Markdown 文本。
+
+        读取 data/realtime/ly_signal.json + ly_alpha_signal.json + prob_up_log.csv，
+        对齐 pipeline.py:_load_ly_signals() 的逻辑。
+        返回格式化 Markdown 字符串，文件缺失或过时时返回空字符串。
+        """
+        import json
+        from datetime import datetime, timedelta
+        from pathlib import Path
+
+        realtime_dir = Path("data/realtime")
+        result: dict = {}
+
+        # Source 1: ly_signal.json (RF)
+        rf_data = {}
+        rf_path = realtime_dir / "ly_signal.json"
+        if rf_path.exists():
+            try:
+                raw = json.loads(rf_path.read_text(encoding="utf-8"))
+                updated = raw.get("updated_at", "")
+                try:
+                    updated_dt = datetime.strptime(updated[:10], "%Y-%m-%d")
+                    if (datetime.now() - updated_dt) <= timedelta(hours=36):
+                        rf_data = raw.get("stocks", {})
+                except (ValueError, TypeError):
+                    rf_data = raw.get("stocks", {})
+            except Exception:
+                pass
+
+        # Source 2: ly_alpha_signal.json (LGB)
+        lgb_data = {}
+        lgb_path = realtime_dir / "ly_alpha_signal.json"
+        if lgb_path.exists():
+            try:
+                raw = json.loads(lgb_path.read_text(encoding="utf-8"))
+                lgb_data = raw.get("stocks", {})
+            except Exception:
+                pass
+
+        # Source 3: prob_up_log.csv (ensemble)
+        csv_latest = {}
+        csv_path = realtime_dir / "prob_up_log.csv"
+        if csv_path.exists():
+            try:
+                import csv
+                with open(csv_path, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    rows = list(reader)
+                if rows:
+                    latest_date = rows[-1].get("date", "")
+                    for row in rows:
+                        if row.get("date") == latest_date:
+                            code = row.get("stock_code", "").strip()
+                            if code:
+                                csv_latest[code] = {
+                                    "prob_up_rf": row.get("prob_up_rf", ""),
+                                    "prob_up_lgb": row.get("prob_up_lgb", ""),
+                                    "prob_up_ensemble": row.get("prob_up_ensemble", ""),
+                                    "l7_score_rf": row.get("l7_score_rf", ""),
+                                    "l7_score_lgb": row.get("l7_score_lgb", ""),
+                                }
+            except Exception:
+                pass
+
+        # Merge
+        rf = rf_data.get(stock_code, {})
+        lgb = lgb_data.get(stock_code, {})
+        csv_row = csv_latest.get(stock_code, {})
+        if not rf and not lgb and not csv_row:
+            return ""
+
+        ensemble = csv_row.get("prob_up_ensemble", "")
+        if not ensemble:
+            prf = csv_row.get("prob_up_rf") or rf.get("prob_up")
+            plgb = csv_row.get("prob_up_lgb") or lgb.get("prob_up")
+            try:
+                if prf != "" and plgb != "":
+                    ensemble = f"{(float(prf) + float(plgb)) / 2:.1f}"
+            except (ValueError, TypeError):
+                pass
+
+        prob_rf = csv_row.get("prob_up_rf", "") or rf.get("prob_up", "")
+        prob_lgb = csv_row.get("prob_up_lgb", "") or lgb.get("prob_up", "")
+
+        # Model disagreement
+        disagreement = ""
+        try:
+            pr = float(prob_rf) if prob_rf else 0
+            pl = float(prob_lgb) if prob_lgb else 0
+            if pr and pl:
+                disagreement = f"{abs(pr - pl):.1f}%"
+        except (ValueError, TypeError):
+            pass
+
+        # Strength
+        strength = ""
+        try:
+            prob = float(ensemble) if ensemble else 0
+            if prob >= 70: strength = "强"
+            elif prob >= 55: strength = "中"
+            else: strength = "弱"
+        except (ValueError, TypeError):
+            pass
+
+        # Format
+        lines = [
+            f"| 综合上涨概率 | {ensemble}% | RF+LGB 双模型集成 |",
+            f"| RF 上涨概率 | {prob_rf}% | RandomForest（15+ 技术指标） |",
+            f"| LGB 上涨概率 | {prob_lgb}% | Alpha158 LightGBM（158 因子） |",
+        ]
+        l7_rf = csv_row.get("l7_score_rf", "") or rf.get("score", "")
+        if l7_rf:
+            lines.append(f"| L7 得分(RF) | {l7_rf} | 范围[-3,+3] 正值偏多 |")
+        l7_lgb = csv_row.get("l7_score_lgb", "") or lgb.get("score", "")
+        if l7_lgb:
+            lines.append(f"| L7 得分(LGB) | {l7_lgb} | 范围[-3,+3] 正值偏多 |")
+        if strength:
+            lines.append(f"| 综合置信度 | {strength} | 强(≥70%) 中(55-70%) 弱(<55%) |")
+        if disagreement:
+            level = "高分歧" if float(disagreement.replace("%","")) > 15 else "低分歧"
+            lines.append(f"| 模型分歧 | {disagreement} | {level} |")
+        return "\n".join(lines)
+
     def _get_preloaded_context(self, stock_code: str) -> Dict[str, str]:
         """从 LY(UnifiedCache) + ML(stock_analysis.db) 提取预加载数据。
 
         返回格式化为 markdown 的上下文文本，供 AT 分析师 LLM 直接使用。
-        包含: OHLCV/技术指标/基本面/新闻情报，覆盖AT的4位分析师需求。
+        包含: LY量化信号/ML因子/OHLCV/技术指标/基本面/新闻情报。
         """
+        ly_signals_md = ""
+        ml_factor_md = ""
         market_md = "**行情数据:** 缓存数据不可用"
         tech_md = "**技术指标:** 缓存数据不可用"
         ml_md = "**ML分析:** 数据不可用"
         news_md = "**新闻公告:** 无近期新闻"
         fund_md = "**基本面:** 数据不可用"
+
+        # 0. LY 双模型信号
+        ly_signals_md = self._load_ly_signals_for_at(stock_code)
+
+        # 0b. ML 因子信号 (data/realtime/ml_signal.json)
+        try:
+            mf_path = Path("data/realtime/ml_signal.json")
+            if mf_path.exists():
+                import json
+                raw = json.loads(mf_path.read_text(encoding="utf-8"))
+                mf_stock = raw.get("stocks", {}).get(stock_code, {})
+                if mf_stock:
+                    parts = []
+                    cs = mf_stock.get("composite_score")
+                    if cs is not None:
+                        parts.append(f"综合评分={cs}")
+                    l7 = mf_stock.get("l7_score")
+                    if l7 is not None:
+                        parts.append(f"L7={l7}")
+                    cl = mf_stock.get("composite_label")
+                    if cl:
+                        parts.append(f"标签={cl}")
+                    factors = mf_stock.get("factors", {})
+                    if factors:
+                        sorted_f = sorted(factors.items(), key=lambda x: abs(x[1] if isinstance(x[1], (int,float)) else 0), reverse=True)[:3]
+                        top3 = " | ".join(f"{k}={v}" for k,v in sorted_f)
+                        parts.append(f"前三因子: {top3}")
+                    if parts:
+                        ml_factor_md = " | ".join(parts)
+        except Exception:
+            pass
 
         _ML_DB = "systems/MindLynx-Aistock/data/stock_analysis.db"
         _has_ml_db = Path(_ML_DB).exists()
@@ -596,6 +774,8 @@ class MindTradingAgentWrapper:
                 logger.debug(f"[preload] ML DB 查询失败({stock_code}): {e}")
 
         return {
+            "ly_signals_context": ly_signals_md,
+            "ml_factor_context": ml_factor_md,
             "market_context": market_md + "\n\n" + tech_md,
             "fundamentals_context": fund_md + "\n\n" + ml_md,
             "sentiment_context": ml_md,
