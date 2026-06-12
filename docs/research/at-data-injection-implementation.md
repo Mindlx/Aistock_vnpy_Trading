@@ -6,6 +6,10 @@
 
 ---
 
+> **零侵入说明**: 本次实施虽然拥有规则豁免权，但实际**未对 AT 子系统（systems/mind_TradingAgent/）做任何代码修改**。
+> 所有改动均在 Fusion 引擎层的 `src/mind_agent_wrapper.py` 中通过运行时 monkey-patch 实现。
+> 即使没有豁免规则，本次实施也是合规的。
+
 ## 一、背景
 
 ### 1.1 问题
