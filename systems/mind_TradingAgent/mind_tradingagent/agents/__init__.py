@@ -9,8 +9,7 @@ from .analysts.sentiment_analyst import (
     create_social_media_analyst,  # deprecated alias kept for back-compat
 )
 
-from .researchers.bear_researcher import create_bear_researcher
-from .researchers.bull_researcher import create_bull_researcher
+from .researchers.researcher import create_researcher  # 精简: 替代 bull+bear+manager
 
 from .risk_mgmt.aggressive_debator import create_aggressive_debator
 from .risk_mgmt.conservative_debator import create_conservative_debator
