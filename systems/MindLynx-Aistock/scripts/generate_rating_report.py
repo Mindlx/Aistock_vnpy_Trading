@@ -43,6 +43,7 @@ DEFAULT_STOCK_POOL = PROJECT_ROOT.parent.parent / "config" / "stock_pool.csv"
 
 # ── 报告输出目录 ───────────────────────────────────────────
 REPORTS_DIR = PROJECT_ROOT / "reports"
+FUSION_ROOT = PROJECT_ROOT.parent.parent  # Aistock_vnpy_Trading
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -66,17 +67,50 @@ def _focus_level(val: float) -> str:
     if val >= 20: return "冷门"
     return "极度冷清"
 
+def _conclusion_short(w: float, f: float) -> str:
+    """统一结论文字（仅结论，不含意愿/关注前缀）。"""
+    if w >= 80:
+        return "强烈做多"
+    if w >= 55:
+        if f >= 65:
+            return "谨慎偏多"
+        return "做多良好"
+    if w >= 45:
+        if f >= 80:
+            return "防范回调"
+        if f >= 65:
+            return "风险较大"
+        if f >= 55:
+            return "观望为主"
+        return "等待确认"
+    if w >= 20:
+        if f >= 65:
+            return "抛压加剧"
+        return "减仓为主"
+    return "坚决离场"
+
 def _combined_grade(w: float, f: float, is_st: bool = False) -> tuple[str, str]:
-    """综合评级: (图标, 结论描述)"""
+    """
+    综合评级: (图标) — 结论文字统一由意愿+关注+结论模板生成。
+
+    分级依据 — 参与意愿 w 反映多空倾向，关注指数 f 反映拥挤程度：
+      ✅ +3 强烈做多  w≥80
+      📈 +2/+1 做多  55≤w<80
+      💤  0 中性     45≤w<55
+      📉 -2/-1 看空  20≤w<45
+      ❌ -3 强烈看空  w<20
+    """
     if is_st:
         return "❌", "ST股风险，建议规避"
-    if w >= 65 or (w >= 55 and f < 65):
-        return "✅", f"意愿{_desire_level(w)}，关注{_focus_level(f)}，同步积极"
-    if (w >= 55 and f >= 65) or (45 <= w < 55 and f < 65):
-        return "📈", f"意愿{_desire_level(w)}，关注{_focus_level(f)}，谨慎偏多"
-    if (45 <= w < 55 and f >= 65) or (35 <= w < 45 and f < 65):
-        return "📉", f"意愿{_desire_level(w)}，关注{_focus_level(f)}，注意风险"
-    return "❌", f"意愿{_desire_level(w)}，关注{_focus_level(f)}，危险信号"
+    if w >= 80:
+        return "✅", f"意愿{_desire_level(w)} 关注{_focus_level(f)} {_conclusion_short(w,f)}"
+    if w >= 55:
+        return "📈", f"意愿{_desire_level(w)} 关注{_focus_level(f)} {_conclusion_short(w,f)}"
+    if w >= 45:
+        return "💤", f"意愿{_desire_level(w)} 关注{_focus_level(f)} {_conclusion_short(w,f)}"
+    if w >= 20:
+        return "📉", f"意愿{_desire_level(w)} 关注{_focus_level(f)} {_conclusion_short(w,f)}"
+    return "❌", f"意愿{_desire_level(w)} 关注{_focus_level(f)} {_conclusion_short(w,f)}"
 
 
 def load_stock_pool(stock_pool_path: str | Path | None = None) -> list[dict]:
@@ -381,21 +415,103 @@ def generate_summary_rows(stocks: list[dict]) -> list[dict]:
         f = focus_val or 50
         is_st = name.startswith("*ST")
         icon, conclusion = _combined_grade(w, f, is_st)
+        short_line = f"{_desire_level(w)} {_focus_level(f)} {_conclusion_short(w,f)}"
 
         rows.append({
             "code": code,
             "name": name,
             "desire_val": f"{desire_val:.2f}" if desire_val else "--",
+            "focus_val": f"{focus_val:.1f}" if focus_val else "--",
             "desire_change": desire_change_str,
             "focus_trend": focus_trend,
             "icon": icon,
             "conclusion": conclusion,
+            "short_line": short_line,
         })
 
         if i < len(stocks) - 1:
             time.sleep(0.5)
 
     return rows
+
+
+def generate_brief_text(rows: list[dict]) -> str:
+    """生成简短微信推送文本（简讯，不带PDF附件指引）。"""
+    now = datetime.now().strftime("%H:%M")
+    lines = [f"💰 {now} 东方财富评级"]
+
+    # 按图标排序: ✅→📈→💤→📉→❌
+    _ICON_ORDER = {"✅": 0, "📈": 1, "💤": 2, "📉": 3, "❌": 4}
+    rows = sorted(rows, key=lambda r: _ICON_ORDER.get(r.get("icon", ""), 99))
+
+    for r in rows:
+        icon = r["icon"]
+        name = r["name"]
+        dv = r.get("desire_val", "--")
+        fv = r.get("focus_val", "--")
+        short_line = r.get("short_line", "")
+        lines.append(f"{icon} {name}｜{dv}/{fv}｜{short_line}")
+
+    lines.append("")
+    lines.append("📎 详情见PDF报告")
+
+    return "\n".join(lines)
+
+
+def save_wf_full_history(stocks: list[dict], log_path: Path) -> int:
+    """
+    保存参与意愿和关注指数的完整历史（含5日趋势）到 CSV。
+    每次运行约写入 10股×(5条意愿+20条关注)=250行，加速数据积累。
+    """
+    import csv
+    header_needed = not log_path.exists()
+    written = 0
+    try:
+        with open(log_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if header_needed:
+                writer.writerow(["date", "stock_code", "stock_name", "type",
+                                 "value_date", "value", "ma5", "change", "ma5_change"])
+            for stock in stocks:
+                code = stock["code"]
+                name = stock["name"]
+                # 参与意愿（返回5条，含5日趋势）
+                try:
+                    df = fetch_desire(code)
+                    if df is not None and not df.empty:
+                        for _, row in df.iterrows():
+                            writer.writerow([
+                                datetime.now().strftime("%Y-%m-%d"), code, name,
+                                "desire",
+                                row.get("交易日期", ""),
+                                row.get("参与意愿", ""),
+                                row.get("5日平均参与意愿", ""),
+                                row.get("参与意愿变化", ""),
+                                row.get("5日平均变化", ""),
+                            ])
+                            written += 1
+                except Exception:
+                    pass
+                time.sleep(0.3)
+                # 关注指数（返回约20条）
+                try:
+                    df = fetch_focus(code)
+                    if df is not None and not df.empty:
+                        for _, row in df.iterrows():
+                            writer.writerow([
+                                datetime.now().strftime("%Y-%m-%d"), code, name,
+                                "focus",
+                                row.get("交易日", ""),
+                                row.get("用户关注指数", ""),
+                                "", "", "",
+                            ])
+                            written += 1
+                except Exception:
+                    pass
+                time.sleep(0.3)
+    except Exception as e:
+        logger.warning("完整历史 CSV 写入失败: %s", e)
+    return written
 
 
 def parse_args() -> argparse.Namespace:
@@ -456,6 +572,45 @@ def main():
     pdf_path.write_bytes(pdf_data)
     logger.info("PDF 已保存: %s (%d bytes)", pdf_path, len(pdf_data))
 
+    # ══════════════════════════════════════════════════════════════
+    # 记录 w/f 到 CSV（供未来回测校准 flat zone 阈值）
+    # 目的：收集参与意愿(w)和关注指数(f)的历史数据，与次日涨跌幅
+    # 对比，验证当前阈值分档（80/65/55/45/20）是否合理。
+    # 详见 docs/research/eastmoney-rating-backtest.md
+    # ══════════════════════════════════════════════════════════════
+    summary_rows = []
+    try:
+        summary_rows = generate_summary_rows(stocks) or []
+        wf_log = FUSION_ROOT / "data" / "realtime" / "eastmoney_wf_log.csv"
+        header_needed = not wf_log.exists()
+        with open(wf_log, "a") as f:
+            if header_needed:
+                f.write("date,stock_code,stock_name,willingness,focus,icon,conclusion,l7_level\n")
+            for r in summary_rows:
+                lvl = ""
+                try:
+                    wv = float(r.get("desire_val", 0))
+                    if wv >= 80: lvl = "+3"
+                    elif wv >= 55: lvl = "+2/+1"
+                    elif wv >= 45: lvl = "0"
+                    elif wv >= 20: lvl = "-2/-1"
+                    else: lvl = "-3"
+                except (ValueError, TypeError):
+                    pass
+                f.write(f"{date_str},{r['code']},{r['name']},{r.get('desire_val','')},"
+                        f"{r.get('focus_val','')},{r['icon']},{r['conclusion']},{lvl}\n")
+        logger.info("w/f 已追加到 %s (%d 条)", wf_log, len(summary_rows))
+    except Exception as e:
+        logger.warning("w/f CSV 写入失败: %s", e)
+
+    # ═══ 保存完整5日历史（加速数据积累，每次约250行） ═══
+    try:
+        hist_log = FUSION_ROOT / "data" / "realtime" / "eastmoney_wf_history.csv"
+        n = save_wf_full_history(stocks, hist_log)
+        logger.info("w/f 完整历史已追加到 %s (%d 行)", hist_log, n)
+    except Exception as e:
+        logger.warning("w/f 完整历史写入失败: %s", e)
+
     # 5. 推送企业微信（除非 --no-push）
     if args.no_push:
         logger.info("--no-push 指定，跳过企业微信推送")
@@ -469,11 +624,25 @@ def main():
             sys.exit(1)
 
         sender = WechatSender(config)
+
+        # 5a. 先推送简讯文本
+        if summary_rows:
+            try:
+                brief_text = generate_brief_text(summary_rows)
+                text_ok = sender.send_to_wechat(brief_text)
+                if text_ok:
+                    logger.info("✅ 简讯已推送 (%d 只股票)", len(summary_rows))
+                else:
+                    logger.warning("简讯推送失败，继续推送 PDF")
+            except Exception as e:
+                logger.warning("简讯推送失败: %s", e)
+
+        # 5b. 再推送 PDF 详情
         ok = sender.send_to_wechat_file(pdf_data, pdf_filename)
         if ok:
-            logger.info("✅ 评级报告已成功推送到企业微信: %s", pdf_filename)
+            logger.info("✅ 评级报告 PDF 已成功推送: %s", pdf_filename)
         else:
-            logger.error("❌ 企业微信推送失败")
+            logger.error("❌ 评级报告 PDF 推送失败")
             sys.exit(1)
 
     logger.info("=" * 60)
