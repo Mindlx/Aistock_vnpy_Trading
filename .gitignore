@@ -43,3 +43,14 @@ systems/lynx_vnpy/lynx_env
 
 # Backtest runtime data (auto-generated)
 data/backtest/
+
+# ML factor learning / LGB artifacts
+data/vnpy_lab/
+data/vnpy_alpha_tmp/
+data/stock_analysis.db
+
+# Generated reports
+reports/
+
+# Backup files
+*.bak
