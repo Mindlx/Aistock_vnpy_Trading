@@ -62,6 +62,28 @@ def _prefix(code: str) -> str:
 
 def fetch_daily_bars(code: str, days: int = 120, retries: int = 3) -> pd.DataFrame | None:
     """从新浪财经获取个股日K线。自带本地缓存，避免重复请求。"""
+    # ── 数据仓库缓存优先 (零侵入: ImportError 时自动回退) ──
+    try:
+        from services.data_warehouse import WarehouseReader
+        reader = WarehouseReader()
+        if reader.is_fresh(code, "daily_ohlcv"):
+            df = reader.get_daily_df(code, days=days)
+            if df is not None and not df.empty:
+                # 映射回中文列名（lynx 特征工程依赖中文列名）
+                df = df.rename(columns={
+                    "date": "日期", "open": "开盘", "high": "最高",
+                    "low": "最低", "close": "收盘", "volume": "成交量",
+                })
+                # 写入本地 parquet 缓存（兼容原有逻辑）
+                cache_file = os.path.join(CACHE_DIR, f"lynx_{code}_{days}d.parquet")
+                os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+                df.to_parquet(cache_file)
+                df["股票名称"] = code
+                return df
+    except ImportError:
+        pass  # 仓库不可用 → 走原始 Sina API
+    except Exception:
+        pass
     # ── 检查本地缓存 ──
     cache_file = os.path.join(CACHE_DIR, f"lynx_{code}_{days}d.parquet")
     if os.path.exists(cache_file):

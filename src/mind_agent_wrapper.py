@@ -140,6 +140,17 @@ class MindTradingAgentWrapper:
             yf_ticker = f"{stock_code}{suffix}"
             resolved_name = stock_name or stock_code
 
+        # ── 数据仓库预热 (零侵入: 不可用时自动跳过) ──
+        try:
+            from services.data_warehouse import WarehouseReader
+            _wr = WarehouseReader()
+            if not _wr.is_fresh(stock_code, "daily_ohlcv"):
+                _wr.get_daily(stock_code, days=120)  # 触发缓存填充
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
         # A 股数据前置验证：akshare → efinance → yfinance 降级
         from src.ashare_data import AshareDataProvider
         provider = AshareDataProvider()

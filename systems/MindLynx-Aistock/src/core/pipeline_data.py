@@ -60,6 +60,22 @@ class DataMixin:
                 logger.info(f"{stock_name}({code}) {target_date} 数据已存在，跳过获取（断点续传）")
                 return True, None
 
+            # ── 数据仓库缓存优先 (零侵入: ImportError 时自动回退) ──
+            try:
+                from services.data_warehouse import WarehouseReader
+                reader = WarehouseReader()
+                if reader.is_fresh(code, "daily_ohlcv"):
+                    df = reader.get_daily_df(code, days=30)
+                    if df is not None and not df.empty:
+                        source_name = "data_warehouse"
+                        saved_count = self.db.save_daily_data(df, code, source_name)
+                        logger.info(f"{stock_name}({code}) 数据仓库命中，来源: {source_name}，新增 {saved_count} 条")
+                        return True, None
+            except ImportError:
+                pass
+            except Exception as exc:
+                logger.debug(f"{stock_name}({code}) 数据仓库检查失败: {exc}")
+
             # 从数据源获取数据
             logger.info(f"{stock_name}({code}) 开始从数据源获取数据...")
             df, source_name = self.fetcher_manager.get_daily_data(code, days=30)
