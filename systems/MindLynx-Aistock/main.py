@@ -523,7 +523,8 @@ def _push_highlights(
         else:
             name = _STOCK_NAME_MAP.get(code, code)
         raw_title = _html.unescape(h.get("title", ""))
-        title = _re.sub(r"<[^>]+>", "", raw_title).strip()[:title_max]
+        title = _re.sub(r"<[^>]+>", "", raw_title)
+        title = _re.sub(r"\s+", " ", title).strip()[:title_max]
         url = h.get("url", "")
 
         # 清理标题中重复的股票名称/代码前缀
@@ -531,6 +532,9 @@ def _push_highlights(
             title = title[len(name):].strip().lstrip("，,、：: ")
         if title.startswith(code):
             title = title[len(code):].strip().lstrip("，,、：: ")
+        # 通用清理：去除标题中重复出现的挂盘信息/html残留
+        title = _re.sub(r"【.*?】", "", title).strip()
+        title = _re.sub(r"\s+", " ", title).strip()[:title_max]
 
         if not title:
             continue
@@ -554,9 +558,12 @@ def _push_highlights(
         grouped[code]["items"].append(item_text)
 
     for code, entry in grouped.items():
+        name = entry["name"]
+        # 名称未知时显示纯代码（避免 code(code) 重复）
+        header = f"• {code}" if name == code else f"• {name}({code})"
+        lines.append(header)
         sep = "\n  "
         items = sep.join(entry["items"])
-        lines.append(f"• {entry['name']}({code})")
         lines.append(f"  {items}")
     lines.append(f"📊 {len(highlights)}条 | {footer_text}")
 
@@ -653,6 +660,11 @@ def _run_daily_intel(config: Config, slot: str = "midday") -> int:
                 _STOCK_NAME_MAP[code] = name
         except Exception:
             pass
+    # 确保 _STOCK_NAME_MAP 对常见前缀的股票也覆盖（A股6位代码）
+    import re as _re_ss
+    for code in stock_codes:
+        if code not in _STOCK_NAME_MAP and _re_ss.match(r'^\d{6}$', code):
+            _STOCK_NAME_MAP[code] = code  # 标记位, _push_highlights 会格式化为纯代码
 
     # ── 0. 市场级情报搜集（非个股，政策/板块/宏观） ──
     # 使用 akshare 免费源，替代质量不佳的 SearXNG 搜索

@@ -902,15 +902,21 @@ class EventMonitor:
                 self.stats["low_importance"] += 1
                 continue
 
+            # 严格执行重要性阈值：低于阈值的事件全部跳过（不推送、不触发分析）
+            if event.importance < self.importance_threshold:
+                self.stats["low_importance"] += 1
+                logger.debug(
+                    "EventMonitor: 重要性%d低于阈值%d, 跳过 %s",
+                    event.importance, self.importance_threshold, event.title[:50]
+                )
+                continue
+
             if event.is_high_importance:
                 self.stats["high_importance"] += 1
                 triggered.append(event)
                 self._handle_high_importance(event)
             elif event.is_medium_importance:
                 self.stats["medium_importance"] += 1
-                # 尊重 importance_threshold: 重要性低于阈值的不推送简报
-                if event.importance < self.importance_threshold:
-                    continue
                 self._handle_medium_importance(event)
 
         self.stats["total_events"] += len(triggered)
