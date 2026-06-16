@@ -325,6 +325,39 @@ python -m services.data_warehouse.warmer
 python -m services.data_warehouse.warmer --codes 600519,000001 --years 2
 ```
 
+### 5.3 手动填充缓存
+
+如果东方财富源触发反爬导致预热失败，可以使用 Sina 接口直接填充：
+
+```python
+# 通过 LY 已验证的 Sina API 直连填充日K线缓存
+cd ~/workspace/Aistock_vnpy_Trading
+.venv/bin/python -c "
+from services.data_warehouse.storage import DataLake
+import requests, time, random
+
+STOCKS = ['001390','300652','600372','605368','000592','603189','603557','688202','601801','300676']
+session = requests.Session()
+session.headers.update({'Referer': 'https://finance.sina.com.cn'})
+lake = DataLake()
+
+for i, code in enumerate(STOCKS):
+    prefix = 'sh' if code.startswith(('6','5','9')) else 'sz'
+    resp = session.get(
+        'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData',
+        params={'symbol': f'{prefix}{code}', 'scale': 240, 'ma': 'no', 'datalen': 365},
+        timeout=15
+    )
+    rows = [{**d, 'date': d['day'].replace('-','')[:8], 'source': 'sina',
+             'amount': 0.0, 'pct_chg': 0.0, 'turnover': 0.0} for d in resp.json() if d]
+    if rows:
+        lake.upsert_ohlcv(code, rows)
+    time.sleep(2 + random.uniform(0, 1))
+"
+```
+
+> **说明**: Sina API 比东方财富接口限流宽松得多，适合作为首次预热的数据源。其他数据类型（财务、资金流等）会由调度器每小时/每日通过受控刷新逐步填充。
+
 ### 5.3 systemd 服务配置
 
 ```ini

@@ -47,12 +47,33 @@ class DailyFetcher:
 
     @_get_limiter().retry("sina")
     def fetch_akshare_sina(self, code: str, days: int = 365) -> list[dict]:
-        """Sina 源 (akshare)"""
-        import akshare as ak
-        df = ak.stock_zh_a_daily(symbol=code, start_date=None, end_date=None,
-                                  adjust="qfq")
-        df = df.tail(days)
-        return self._df_to_rows(df, code, "akshare_sina")
+        """Sina 源 (LY 已验证的 HTTP 直连, 比 akshare 包装更稳定)"""
+        import requests as _req
+        prefix = f"sh{code}" if code.startswith(("6", "5", "9")) else f"sz{code}"
+        url = ("https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+               "CN_MarketData.getKLineData")
+        session = _req.Session()
+        session.headers.update({"Referer": "https://finance.sina.com.cn"})
+        resp = session.get(url, params={"symbol": prefix, "scale": 240,
+                                        "ma": "no", "datalen": days}, timeout=15)
+        data = resp.json()
+        if not data:
+            return []
+        rows = []
+        for d in data:
+            rows.append({
+                "date": str(d["day"]).replace("-", "")[:8],
+                "open": float(d["open"]),
+                "high": float(d["high"]),
+                "low": float(d["low"]),
+                "close": float(d["close"]),
+                "volume": float(d["volume"]),
+                "amount": float(d.get("amount", 0)),
+                "pct_chg": 0.0,
+                "turnover": 0.0,
+                "source": "sina",
+            })
+        return rows
 
     @_get_limiter().retry("tencent")
     def fetch_efinance(self, code: str, days: int = 365) -> list[dict]:
