@@ -927,6 +927,31 @@ class EventMonitor:
             self.stats["low_importance"],
         )
 
+        # ── 写入数据湖 (零侵入: ImportError 时跳过) ──
+        if all_events:
+            try:
+                from services.data_warehouse.storage import DataLake
+                lake = DataLake()
+                news_items = []
+                for ev in all_events:
+                    news_items.append({
+                        "stock_code": ev.code,
+                        "title": ev.title[:200],
+                        "url": ev.url,
+                        "summary": ev.content[:200],
+                        "source": ev.source,
+                        "category": ev.type.value if ev.type else "事件",
+                        "importance": min(3, ev.importance // 3),
+                        "published_at": datetime.fromtimestamp(ev.event_time).strftime("%Y-%m-%d %H:%M") if ev.event_time else "",
+                    })
+                if news_items:
+                    lake.insert_news(news_items)
+                    logger.debug("EventMonitor: 写入 %d 条事件到数据湖", len(news_items))
+            except ImportError:
+                pass
+            except Exception as exc:
+                logger.debug("EventMonitor: 数据湖写入失败: %s", exc)
+
         return triggered
 
     async def _check_stock(self, code: str) -> list[StockEvent]:

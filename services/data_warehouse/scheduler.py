@@ -291,5 +291,34 @@ def run_scheduler_daemon():
     scheduler.run_forever()
 
 
+def main():
+    """python -m services.data_warehouse.scheduler [--daemon] [--oneshot]"""
+    import argparse
+    parser = argparse.ArgumentParser(description="数据仓库调度器")
+    parser.add_argument("--daemon", action="store_true", default=True,
+                        help="守护进程模式 (默认)")
+    parser.add_argument("--oneshot", action="store_true",
+                        help="单次执行全量刷新后退出")
+    args = parser.parse_args()
+
+    if args.oneshot:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        )
+        reader = WarehouseReader()
+        scheduler = RefreshScheduler(reader)
+        logger.info("[Scheduler] 单次全量刷新...")
+        result = scheduler.refresh_all(force=True)
+        for dtype, data in result.items():
+            if isinstance(data, dict):
+                logger.info("  %s: %s", dtype, {k: v for k, v in list(data.items())[:3]})
+            else:
+                logger.info("  %s: %s", dtype, data)
+        logger.info("[Scheduler] 单次刷新完成")
+    else:
+        run_scheduler_daemon()
+
+
 if __name__ == "__main__":
-    run_scheduler_daemon()
+    main()

@@ -1,0 +1,19 @@
+[Unit]
+Description=Aistock Data Warehouse — 统一数据缓存+限流+调度
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python -m services.data_warehouse.scheduler --daemon
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+Environment=DATA_WAREHOUSE_DIR=/home/bluekuma/workspace/Aistock_vnpy_Trading/data
+
+[Install]
+WantedBy=default.target
