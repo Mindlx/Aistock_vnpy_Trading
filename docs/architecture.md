@@ -1,7 +1,7 @@
 # Aistock_vnpy_Trading 系统架构文档
 
-> 最后更新: 2026-06-09
-> 覆盖: 三系统融合 + ly双模型集成 + alpha158独立因子通道 + 设计决策D8
+> 最后更新: 2026-06-16
+> 覆盖: 三系统融合 + ly双模型集成 + alpha158独立因子通道 + 设计决策D8 + 数据仓库服务层
 
 ---
 
@@ -12,7 +12,16 @@
 │                     Aistock_vnpy_Trading                          │
 │              三系统融合决策平台 (MIT License)                       │
 │                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐       │
+│  ┌──────────────────── Data Warehouse ──────────────────────┐    │
+│  │  services/data_warehouse/ (Phase 0-5)                    │    │
+│  │  ├─ warehouse.py → WarehouseReader 统一读接口             │    │
+│  │  ├─ limiter.py   → 跨进程令牌桶 (EM 15/min)              │    │
+│  │  ├─ storage.py   → SQLite数据湖 8张表 (WAL模式)          │    │
+│  │  ├─ scheduler.py → 定时刷新守护进程 (systemd)             │    │
+│  │  └─ fetchers.py  → 多级降级链(EM→Sina→efinance)          │    │
+│  └────────────────────────┬─────────────────────────────────┘    │
+│                           │                                      │
+│  ┌──────────────┐  ┌──────┴──────┐  ┌──────────────────┐       │
 │  │  lynx_vnpy   │  │MindLynx-    │  │ mind_            │       │
 │  │  (量化信号)   │  │Aistock      │  │ TradingAgent     │       │
 │  │  ly          │  │(AI分析)     │  │ (多智能体辩论)    │       │
@@ -47,6 +56,8 @@
 │                    📱 企业微信推送                              │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+> **数据仓库数据流**: 系统中所有子系统在获取数据时, 优先通过 `WarehouseReader` 检查 `data_warehouse.db` 缓存; 缓存命中且未过期则直接返回 (零 API 调用), 否则降级调用原始 API 并回写缓存。所有 API 调用受令牌桶限流器保护。详见 [`docs/data-warehouse-implementation.md`](data-warehouse-implementation.md)。
 
 ---
 

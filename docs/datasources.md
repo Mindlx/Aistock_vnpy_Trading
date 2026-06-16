@@ -1,6 +1,6 @@
 # 数据源配置
 
-三系统各自独立管理数据源，互不依赖。融合层提供可选统一缓存。
+三系统各自独立管理数据源，互不依赖。**数据仓库服务层 (`services/data_warehouse/`) 统一协调所有外部 API 调用，缓存优先、限流保护。** 详见 [`data-warehouse-implementation.md`](data-warehouse-implementation.md)。
 
 ---
 
@@ -46,19 +46,32 @@
 
 ---
 
-## 统一缓存 (Unified Cache)
+## 数据仓库服务层 (Data Warehouse)
 
-融合层提供 SQLite 共享缓存，用于减少 API 调用：
+`services/data_warehouse/` 模块包取代了原有的统一缓存，提供：
 
-| 数据类型 | TTL | 说明 |
-|---------|-----|------|
-| daily_ohlcv | 24h | 日K线（次日交易日前有效） |
-| daily_ohlcv_intraday | 15min | 盘中日K线 |
-| realtime_quote | 15min | 实时行情 |
-| fundamentals | 7d | 基本面数据 |
-| news | 1h | 新闻数据 |
+### 跨进程令牌桶限流
 
-配置: `config/settings.yaml → unified_cache`
+| API 源 | 速率 | 重试策略 |
+|--------|------|---------|
+| EastMoney | **15 次/分钟** | 3次指数退避 1s→2s→4s, ±30% 抖动 |
+| Sina | 60 次/分钟 | 3次退避, 2s 基础 |
+| Tencent | 120 次/分钟 | 3次退避, 0.5s 基础 |
+| CNINFO | 30 次/分钟 | 3次退避, 1s 基础 |
+| TuShare | 50 次/分钟 | 3次退避, 1s 基础 |
+
+### 数据湖缓存 TTL
+
+| 数据类型 | TTL | 刷新策略 |
+|---------|-----|---------|
+| daily_ohlcv | 24h | 15:30 工作日统一批量(1次/天) |
+| realtime_quotes | 5min | 盘中每5分钟轮询 |
+| financial_indicators | 24h | 16:00 工作日 |
+| capital_flows | 24h | 16:30 工作日 |
+| news_events | 1h | EventMonitor 实时写入 + 每小时定时刷新 |
+| fundamentals | 7d | 周一09:00 |
+
+对比旧统一缓存: 新增限流协调(令牌桶)、多数据类型(财务/资金流/新闻)、跨进程共享(SQLite WAL)。
 
 ---
 
@@ -66,7 +79,7 @@
 
 | 系统 | 缓存 | 限速保护 | 熔断 |
 |------|------|---------|------|
-| ly | ✅ 统一缓存(SQLite) + API 直连 | 3次重试+退避 | — |
-| ml | ✅ 文件缓存+内存缓存 | 2-5s 随机 sleep | ✅ circuit breaker |
-| at | ✅ yfinance 本地缓存 | 3次重试+退避 | — |
-| fusion | ✅ 统一缓存(SQLite, WAL模式) | — | — |
+| ly | ✅ 数据仓库(WarehouseReader → parquet) | 仓库令牌桶 + 3次退避 | — |
+| ml | ✅ 数据仓库(WarehouseReader + 原有DB) | 仓库令牌桶 + 2-5s jitter | ✅ circuit breaker |
+| at | ✅ 数据仓库(WarehouseReader → akshare) | 仓库令牌桶 + 3次退避 | — |
+| fusion | ✅ 数据仓库(SQLite WAL) | 仓库令牌桶 | — |
