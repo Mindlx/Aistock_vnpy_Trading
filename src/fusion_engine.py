@@ -743,6 +743,19 @@ class FusionEngine:
         constrained = constraint.apply(positions)
         portfolio = constraint.summary(constrained)
 
+        # ── 方向偏倚监控（c1skill P0: 追踪各系统方向分布）──
+        def _direction_bias(scores: list, threshold: float = 0.5) -> dict:
+            bullish = sum(1 for s in scores if s is not None and s > threshold)
+            bearish = sum(1 for s in scores if s is not None and s < -threshold)
+            neutral = sum(1 for s in scores if s is not None and -threshold <= s <= threshold)
+            total = bullish + bearish + neutral
+            return {
+                "bullish_pct": round(bullish / total * 100, 1) if total else 0,
+                "bearish_pct": round(bearish / total * 100, 1) if total else 0,
+                "neutral_pct": round(neutral / total * 100, 1) if total else 0,
+                "count": total,
+            } if total else {"bullish_pct": 0, "bearish_pct": 0, "neutral_pct": 0, "count": 0}
+
         return {
             "total_valid": len(valid_results),
             "total_results": len(results),
@@ -752,6 +765,12 @@ class FusionEngine:
                 "neutral": len(neutral),
                 "weak_bearish": len(weak_bearish),
                 "strong_bearish": len(strong_bearish),
+            },
+            "direction_bias": {
+                "fusion": _direction_bias([r.get("score", 0) for r in valid_results]),
+                "ly": _direction_bias([r.get("ly_score") for r in valid_results]),
+                "ml": _direction_bias([r.get("ml_score") for r in valid_results]),
+                "at": _direction_bias([r.get("at_score") for r in valid_results]),
             },
             "degraded_count": sum(1 for r in valid_results if r.get("is_degraded", False)),
             "disagreement_count": sum(1 for r in valid_results if r.get("has_disagreement", False)),
