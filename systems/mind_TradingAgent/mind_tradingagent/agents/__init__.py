@@ -25,8 +25,7 @@ __all__ = [
     "create_msg_delete",
     "InvestDebateState",
     "RiskDebateState",
-    "create_bear_researcher",
-    "create_bull_researcher",
+    "create_researcher",            # Bear/Bull 精简为单一 Researcher
     "create_research_manager",
     "create_fundamentals_analyst",
     "create_market_analyst",
