@@ -327,7 +327,7 @@ def _build_atr_alert_text(
     now_str = datetime.now().strftime("%H:%M")
     change_sign = "+" if change_pct >= 0 else ""
     score_str = f"｜评分{score}" if score > 0 else ""
-    return f"🚨 {now_str} ATR止损{score_str}\n**{name}({code})** ¥{price:.2f} {change_sign}{change_pct:.1f}% 跌破{multiplier}×ATR ¥{stop_price:.2f}"
+    return f"🚨 {now_str} ATR止损{score_str}\n**{name}** ¥{price:.2f} {change_sign}{change_pct:.1f}% 跌破{multiplier}×ATR ¥{stop_price:.2f}"
 
 
 def _build_volume_alert_text(
@@ -359,7 +359,7 @@ def _build_volume_alert_text(
 
     now_str = datetime.now().strftime("%H:%M")
     score_str = f"｜评分{score}" if score > 0 else ""
-    return f"{emoji} {now_str} 异动预警{score_str}\n**{name}({code})** ¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
+    return f"{emoji} {now_str} 异动预警{score_str}\n**{name}** ¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
 
 
 def _build_ma_cross_alert_text(
@@ -390,7 +390,7 @@ def _build_ma_cross_alert_text(
     change_sign = "+" if change_pct >= 0 else ""
     tip_suffix = f"｜{tip}" if tip else ""
     score_str = f"｜评分{score}" if score > 0 else ""
-    return f"{emoji} {now_str} 均线{cross_type}{score_str}\n**{name}({code})** ¥{price:.2f} {change_sign}{change_pct:.1f}% {cross_type}{ma_period}(¥{ma_value:.2f})"
+    return f"{emoji} {now_str} 均线{cross_type}{score_str}\n**{name}** ¥{price:.2f} {change_sign}{change_pct:.1f}% {cross_type}{ma_period}(¥{ma_value:.2f})"
 
 
 # ============================================================

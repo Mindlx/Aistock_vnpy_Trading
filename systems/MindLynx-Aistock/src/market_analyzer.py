@@ -1571,7 +1571,7 @@ Market conditions can change quickly. The data above is for reference only and d
                             # 也尝试补实时价
                             price_str = self._fetch_realtime_price_str(code)
                             price_col = f"  现价{price_str}" if price_str else ""
-                            lines.append(f"- {name}({code})  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}{price_col}")
+                            lines.append(f"- **{name}**  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}{price_col}")
                         return "\n".join(lines)
         except Exception as e:
             logger.debug(f"[大盘] 自选股融合数据加载失败: {e}")
@@ -1603,7 +1603,7 @@ Market conditions can change quickly. The data above is for reference only and d
                     name = q.name or code
                     chg = f"{q.change_pct:+.2f}%" if q.change_pct is not None else ""
                     vol_r = f"  量比{q.volume_ratio:.2f}" if q.volume_ratio is not None else ""
-                    lines.append(f"- {name}({code})  ¥{q.price:.2f}  {chg}{vol_r}")
+                    lines.append(f"- **{name}**  ¥{q.price:.2f}  {chg}{vol_r}")
                 else:
                     lines.append(f"- {code}  行情暂不可用")
             except Exception:
