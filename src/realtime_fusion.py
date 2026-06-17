@@ -256,7 +256,7 @@ class RealtimeFusion:
             chg_str = f"{pct:+.2f}%" if pct else ""
             vr_str = f"量比{vr:.2f}" if vr else ""
             extras = ' '.join(x for x in [price_str, chg_str, vr_str] if x)
-            line = f"{emoji}**{name}** {extras} {signal_display} Δ{score:+.2f}"
+            line = f"{emoji}**{name}**｜{extras} {signal_display} Δ{score:+.2f}"
             lines.append(line)
         lines.append("")
         lines.append("📡 ly昨日｜ml实时｜at盘中")

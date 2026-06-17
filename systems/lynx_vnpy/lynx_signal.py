@@ -425,7 +425,7 @@ def push_wecom(signals: list[dict]):
         _emoji = _sig.split()[0] if ' ' in _sig else '⚪'
         _label = _sig[len(_emoji):].strip()
         parts = [
-            f"{_emoji} **{s['name']}** ¥{s['price']:.2f} {s['change_pct']:+.2f}%",
+            f"{_emoji} **{s['name']}**｜¥{s['price']:.2f} {s['change_pct']:+.2f}%",
             f"L7{s['l7_score']:+0.2f}",
             f"置信{s['prob_up']}%",
         ]

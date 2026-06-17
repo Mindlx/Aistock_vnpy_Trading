@@ -143,7 +143,7 @@ class WeComNotifier:
         extra_str = f"｜{' '.join(extras)}" if extras else ""
 
         return (
-            f"{emoji} **{name}** {price_str} {chg_str}"
+            f"{emoji} **{name}**｜{price_str} {chg_str}"
             f"｜{sys_str}"
             f"｜仓位{pos}"
             f"{extra_str}"
