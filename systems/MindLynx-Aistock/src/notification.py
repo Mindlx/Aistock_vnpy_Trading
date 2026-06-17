@@ -733,10 +733,10 @@ class NotificationService(
             for r in sorted_results:
                 _, emoji, _ = self._get_signal_level(r)
                 report_lines.append(
-                    f"{emoji} **{self._get_display_name(r, report_language)}({r.code})**: "
-                    f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
-                    f"{labels['score_label']} {r.sentiment_score} ｜ "
-                    f"{localize_trend_prediction(r.trend_prediction, report_language)}"
+f"{emoji} **{self._get_display_name(r, report_language)}**: "
+f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
+f"{labels['score_label']} {r.sentiment_score} ｜ "
+f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 )
         else:
             report_lines.extend([f"## 📈 {labels['report_title']}", ""])
@@ -748,7 +748,7 @@ class NotificationService(
                 report_lines.extend(
                     [
                         "",
-                        f"**{self._get_display_name(result, report_language)}**({result.code})",
+                        f"**{self._get_display_name(result, report_language)}**",
                         f"¥{result.current_price:.2f} {result.change_pct:+.1f}%",
                         "",
                     ]
@@ -1049,7 +1049,7 @@ class NotificationService(
                 _, signal_emoji, _ = self._get_signal_level(r)
                 display_name = self._get_display_name(r, report_language)
                 report_lines.append(
-                    f"{signal_emoji} **{display_name}({r.code})**: "
+                    f"{signal_emoji} **{display_name}**: "
                     f"¥{r.current_price:.2f} {r.change_pct:+.1f}% ｜ "
                     f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
                     f"{labels['score_label']} {r.sentiment_score} ｜ "
@@ -1075,7 +1075,7 @@ class NotificationService(
                 report_lines.extend(
                     [
                         "",
-                        f"**{stock_name}**({result.code})",
+                        f"**{stock_name}**",
                         f"¥{result.current_price:.2f} {result.change_pct:+.1f}%",
                         "",
                     ]
@@ -1435,7 +1435,7 @@ class NotificationService(
                 _, signal_emoji, _ = self._get_signal_level(r)
                 stock_name = self._get_display_name(r, report_language)
                 lines.append(
-                    f"{signal_emoji} **{stock_name}({r.code})**: "
+                    f"{signal_emoji} **{stock_name}**: "
                     f"{localize_operation_advice(r.operation_advice, report_language)}｜"
                     f"{labels['score_label']} {r.sentiment_score}｜"
                     f"{localize_trend_prediction(r.trend_prediction, report_language)}"
@@ -1451,7 +1451,7 @@ class NotificationService(
                 stock_name = self._get_display_name(result, report_language)
 
                 # 股票名称行（加上信号标签）
-                lines.append(f"{signal_emoji} **{stock_name}({result.code})**｜{signal_text}")
+                lines.append(f"{signal_emoji} **{stock_name}**｜{signal_text}")
                 # 股价涨跌幅行（行情方向 + 量比）
                 price_str = ""
                 if result.current_price:
@@ -1614,7 +1614,7 @@ class NotificationService(
             _, emoji, _ = self._get_signal_level(result)
 
             # 核心信息行
-            lines.append(f"### {emoji} **{self._get_display_name(result, report_language)}({result.code})**")
+            lines.append(f"### {emoji} **{self._get_display_name(result, report_language)}**")
             lines.append(
                 f"**{localize_operation_advice(result.operation_advice, report_language)}**｜"
                 f"{labels['score_label']}:{result.sentiment_score}｜"
@@ -1717,7 +1717,7 @@ class NotificationService(
                 if fs:
                     quant_line = f" ｜ {fs}"
             lines.append(
-                f"**{name}({r.code})** {emoji} "
+                f"**{name}** {emoji} "
                 f"¥{r.current_price:.2f} {r.change_pct:+.1f}% ｜ "
                 f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
                 f"{labels['score_label']} {r.sentiment_score} ｜ {one}{quant_line}"
@@ -1757,7 +1757,7 @@ class NotificationService(
         stock_name = self._get_display_name(result, report_language)
 
         lines = [
-            f"## {signal_emoji} **{stock_name} ({result.code})**",
+            f"## {signal_emoji} **{stock_name}**",
             "",
             f"> {report_date} ｜ ¥{result.current_price:.2f} {result.change_pct:+.1f}% ｜ {labels['score_label']}: **{result.sentiment_score}** ｜ {localize_trend_prediction(result.trend_prediction, report_language)}",
             "",
@@ -2299,7 +2299,7 @@ class NotificationBuilder:
             _, emoji, _ = get_signal_level(r.operation_advice, r.sentiment_score, report_language)
             name = get_localized_stock_name(r.name, r.code, report_language)
             lines.append(
-                f"{emoji} **{name}({r.code})**: {localize_operation_advice(r.operation_advice, report_language)} ｜ "
+                f"{emoji} **{name}**: {localize_operation_advice(r.operation_advice, report_language)} ｜ "
                 f"{labels['score_label']} {r.sentiment_score}"
             )
 
