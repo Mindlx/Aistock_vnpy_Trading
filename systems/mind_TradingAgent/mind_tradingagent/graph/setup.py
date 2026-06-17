@@ -57,9 +57,10 @@ class GraphSetup:
         researcher_node = create_researcher(self.quick_thinking_llm)
         trader_node = create_trader(self.quick_thinking_llm)
 
-        # Create risk analysis nodes (精简: 去保守, 留激进+中性)
+        # Create risk analysis nodes (恢复保守派, 激进↔中性↔保守 三角辩论, 限制1轮)
         aggressive_analyst = create_aggressive_debator(self.quick_thinking_llm)
         neutral_analyst = create_neutral_debator(self.quick_thinking_llm)
+        conservative_analyst = create_conservative_debator(self.quick_thinking_llm)
         portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm)
 
         # Create workflow
@@ -71,11 +72,12 @@ class GraphSetup:
             workflow.add_node(spec.clear_node, create_msg_delete())
             workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
 
-        # Add other nodes (精简: Bull+Bear→单Researcher, 去Conservative Risk)
+        # Add other nodes (恢复Conservative Risk, 三角辩论)
         workflow.add_node("Researcher", researcher_node)
         workflow.add_node("Trader", trader_node)
         workflow.add_node("Aggressive Analyst", aggressive_analyst)
         workflow.add_node("Neutral Analyst", neutral_analyst)
+        workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
         # Define edges
@@ -102,7 +104,7 @@ class GraphSetup:
             else:
                 workflow.add_edge(current_clear, "Researcher")
 
-        # Add remaining edges (精简后: Bull+Bear辩论→单Researcher, 3Risk→2Risk)
+        # Add remaining edges (恢复Conservative, 三角风险辩论 A↔N↔C, 限制1轮)
         workflow.add_edge("Researcher", "Trader")
         workflow.add_edge("Trader", "Aggressive Analyst")
         workflow.add_conditional_edges(
@@ -115,6 +117,14 @@ class GraphSetup:
         )
         workflow.add_conditional_edges(
             "Neutral Analyst",
+            self.conditional_logic.should_continue_risk_analysis,
+            {
+                "Conservative Analyst": "Conservative Analyst",
+                "Portfolio Manager": "Portfolio Manager",
+            },
+        )
+        workflow.add_conditional_edges(
+            "Conservative Analyst",
             self.conditional_logic.should_continue_risk_analysis,
             {
                 "Aggressive Analyst": "Aggressive Analyst",

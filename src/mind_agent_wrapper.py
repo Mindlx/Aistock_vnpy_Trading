@@ -98,7 +98,7 @@ class MindTradingAgentWrapper:
             # ── A 股精简: 关闭 Sentiment Analyst（雪球/股吧情绪已由 News + 注入覆盖）──
             self._ta = TradingAgentsGraph(
                 debug=self.debug, config=config,
-                selected_analysts=["market", "news", "fundamentals"],
+                selected_analysts=["market", "social", "news", "fundamentals"],
             )
             self._imported = True
             logger.info("mind_TradingAgent 已加载 (TradingAgentsGraph)")

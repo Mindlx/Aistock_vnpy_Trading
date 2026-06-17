@@ -11,16 +11,31 @@ def create_researcher(llm):
         market_report = state.get("market_report", "")
         news_report = state.get("news_report", "")
         fundamentals_report = state.get("fundamentals_report", "")
+        sentiment_report = state.get("sentiment_report", "")
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
+
+        # 提取外部信号注入（来自 mind_agent_wrapper 的 LY/ML 数据注入）
+        external_signals = state.get("external_signals", "")
+        if not external_signals:
+            for msg in state.get("messages", []):
+                if getattr(msg, "type", None) == "system":
+                    content = getattr(msg, "content", "") or ""
+                    if "[系统注入]" in content:
+                        external_signals = content
+                        break
 
         prompt = f"""You are a research analyst covering a {target_label} on China's A-share market. \
 Your task: weigh the bull case and bear case side by side, then commit to a clear stance.
 
 **Analyst reports available:**
-- Market / Technical: {market_report[:800]}
-- News & Policy: {news_report[:800]}
-- Fundamentals: {fundamentals_report[:800]}
+- Market / Technical: {market_report}
+- News & Policy: {news_report}
+- Fundamentals: {fundamentals_report}
+- Social Sentiment: {sentiment_report or "(not available)"}
+
+**External reference signals (from quantitative models):**
+{external_signals or "No external reference signals available."}
 
 **A-share analysis priorities (when evidence exists):**
 1. 政策方向 (Policy direction) — is the sector government-favored?

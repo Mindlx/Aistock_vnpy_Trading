@@ -50,11 +50,14 @@ class ConditionalLogic:
         return "Msg Clear Fundamentals"
 
     def should_continue_risk_analysis(self, state: AgentState) -> str:
-        """Determine if risk analysis should continue (精简: 激进↔中性双循环)."""
+        """Determine if risk analysis should continue (三角辩论: 激进↔中性↔保守, 限制1轮)."""
         if (
-            state["risk_debate_state"]["count"] >= 2 * self.max_risk_discuss_rounds
-        ):  # 2 agents × rounds
+            state["risk_debate_state"]["count"] >= 3 * self.max_risk_discuss_rounds
+        ):  # 3 agents × rounds
             return "Portfolio Manager"
-        if state["risk_debate_state"]["latest_speaker"].startswith("Aggressive"):
+        latest = state["risk_debate_state"]["latest_speaker"]
+        if latest.startswith("Aggressive"):
             return "Neutral Analyst"
+        if latest.startswith("Neutral"):
+            return "Conservative Analyst"
         return "Aggressive Analyst"
