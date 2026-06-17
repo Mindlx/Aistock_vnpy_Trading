@@ -95,7 +95,6 @@ class WeComNotifier:
         """单只股票一行（微信自动换行）"""
         emoji = L7_EMOJI.get(r.get("signal", "neutral"), "⚪")
         name = r.get('stock_name', '')
-        code = r['stock_code']
         price = r.get('price', 0)
         pct = r.get('pct_chg', 0)
         vr = r.get('volume_ratio', 0)
@@ -105,16 +104,14 @@ class WeComNotifier:
         ls = r.get("lynx_score", 0)
         ms = r.get("mindlynx_score", 0)
         ts = r.get("tradingagent_score", 0)
-        sig = r.get('signal_name', '中性')
         # v4.0: 优先用 unified_position，否则从信号标签计算百分比
         up = r.get('unified_position')
         if up and isinstance(up, dict) and up.get('pct', 0) > 0:
-            pos = f"{up['pct']:.0f}% ({up.get('label', '')})"
+            pos = f"{up['pct']:.0f}%"
         else:
             sig_label = r.get('signal', 'neutral')
             pct = SignalNormalizer.l7_target_pct(sig_label)
-            label = SignalNormalizer.l7_target_label(sig_label)
-            pos = f"{pct:.0f}% ({label})" if pct > 0 else "空仓"
+            pos = f"{pct:.0f}%" if pct > 0 else "持有"
 
         # 股价和涨跌幅
         price_str = f"¥{price:.2f}" if price else "-"
@@ -146,9 +143,9 @@ class WeComNotifier:
         extra_str = f"｜{' '.join(extras)}" if extras else ""
 
         return (
-            f"{emoji} **{name}({code})** {price_str} {chg_str}"
+            f"{emoji} **{name}** {price_str} {chg_str}"
             f"｜{sys_str}"
-            f"｜{sig}｜仓位{pos}"
+            f"｜仓位{pos}"
             f"{extra_str}"
         )
 
@@ -175,11 +172,11 @@ class WeComNotifier:
         bear_count = sum(1 for r in valid if r.get("signal") in ("cautious_bearish", "bearish", "strong_bearish"))
         overview = []
         if bull_count:
-            overview.append(f"看好{bull_count}只")
+            overview.append(f"看好{bull_count}")
         if neut_count:
-            overview.append(f"中立{neut_count}只")
+            overview.append(f"中立{neut_count}")
         if bear_count:
-            overview.append(f"看空{bear_count}只")
+            overview.append(f"看空{bear_count}")
         if overview:
             lines.append("📊 " + " ｜".join(overview))
             lines.append("")
@@ -210,7 +207,7 @@ class WeComNotifier:
             all_stocks = bucket["consensus"] + bucket["disagreement"]
             if not all_stocks:
                 continue
-            lines.append(f"**{title}** ({len(all_stocks)}只)")
+            lines.append(f"**{title}** ({len(all_stocks)})")
             for r in all_stocks:
                 lines.append(self._stock_line(r))
             lines.append("")
@@ -227,7 +224,7 @@ class WeComNotifier:
         ml_ok = sum(1 for r in valid if r.get("mindlynx_valid", False))
         at_ok = sum(1 for r in valid if r.get("tradingagent_valid", False))
         health = f"ly{ly_ok}/{len(valid)} ml{ml_ok}/{len(valid)} at{at_ok}/{len(valid)}"
-        lines.append(f"⚠ {health}")
+        lines.append(f"🛟 {health}")
 
         return "\n".join(lines)
 
