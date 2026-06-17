@@ -77,6 +77,19 @@ Fusion Engine 通过两种方式集成：
 1. **零侵入数据加载** (`src/data_loader.py`) — 读子系统输出文件，不调子系统 API
 2. **文件交换区** (`data/realtime/`) — 准实时融合通过 JSON 文件交换信号
 
+### LLM 模型配置
+
+AT 系统默认使用本地模型 (Qwen3.6-27B, 2×RTX 3090, llama.cpp)：
+- 配置文件: `systems/mind_TradingAgent/.env`
+- 推理端点: `http://localhost:15433/v1` (llama.cpp server, Docker)
+- 结构化输出: 不原生支持, 系统自动回退到 free-text 生成
+
+**如需切回 DeepSeek API**:
+```bash
+cp systems/mind_TradingAgent/.env.deepseek-backup systems/mind_TradingAgent/.env
+```
+> `.env` 文件不提交到 Git (含 API Key), 备份为 `.env.deepseek-backup`。
+
 ---
 
 ## 三、部署架构
