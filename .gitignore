@@ -52,5 +52,11 @@ data/stock_analysis.db
 # Generated reports
 reports/
 
+# Data warehouse runtime (auto-generated)
+data/data_warehouse.db*
+
+# Runtime logs (auto-generated)
+config/logs/fusion_history.csv
+
 # Backup files
 *.bak
