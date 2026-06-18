@@ -3,6 +3,10 @@
 两种模式:
   1. 嵌入式: 在现有进程中调用 refresh_all() / refresh_stale()
   2. 独立进程: run_forever() 后台常驻, 按策略矩阵定时刷新
+
+失败补拉队列:
+  每种数据类型的失败股票自动加入重试队列, 间隔递增直到成功。
+  重试间隔: 5分钟 → 15分钟 → 30分钟 → 1小时 → 2小时(上限)
 """
 from __future__ import annotations
 
@@ -16,6 +20,10 @@ from services.data_warehouse.config import DataWarehouseConfig
 from services.data_warehouse.warehouse import WarehouseReader
 
 logger = logging.getLogger(__name__)
+
+# 失败补拉重试间隔（秒），递增到上限后保持最大间隔
+_FAILED_RETRY_INTERVALS = [300, 900, 1800, 3600, 7200]  # 5min, 15min, 30min, 1h, 2h
+_MAX_RETRY_INTERVAL = 7200  # 最大间隔2小时
 
 # 交易时段 (北京时间)
 _MARKET_OPEN = (9, 30)
@@ -48,19 +56,74 @@ class RefreshScheduler:
         self._cfg = DataWarehouseConfig.get_instance()
         self._reader = reader or WarehouseReader()
         self._stock_codes = self._cfg.stock_pool
+        # 失败补拉队列: {data_type: [(code, next_retry_at, attempt_count), ...]}
+        self._failed_queue: dict[str, list[tuple[str, float, int]]] = {}
+
+    # ═══════════════════════════════════════
+    # 失败补拉队列管理
+    # ═══════════════════════════════════════
+
+    def _enqueue_failed(self, dtype: str, code: str, attempt: int = 0):
+        """加入失败补拉队列, 计算下次重试时间"""
+        now = time.time()
+        interval = _FAILED_RETRY_INTERVALS[attempt] if attempt < len(_FAILED_RETRY_INTERVALS) else _MAX_RETRY_INTERVAL
+        next_retry = now + interval
+        if dtype not in self._failed_queue:
+            self._failed_queue[dtype] = []
+        # 去重: 先移除旧记录
+        self._failed_queue[dtype] = [(c, t, a) for c, t, a in self._failed_queue[dtype] if c != code]
+        self._failed_queue[dtype].append((code, next_retry, attempt + 1))
+        logger.info("[RetryQueue] %s %s 入队, 第%d次重试, 下次 %.0fs 后", dtype, code, attempt + 1, interval)
+
+    def _dequeue_success(self, dtype: str, code: str):
+        """成功拉取, 移出队列"""
+        if dtype not in self._failed_queue:
+            return
+        before = len(self._failed_queue[dtype])
+        self._failed_queue[dtype] = [(c, t, a) for c, t, a in self._failed_queue[dtype] if c != code]
+        removed = before - len(self._failed_queue[dtype])
+        if removed:
+            logger.info("[RetryQueue] %s %s 补拉成功, 移出队列", dtype, code)
+        if not self._failed_queue[dtype]:
+            del self._failed_queue[dtype]
+
+    def _process_failed_queue(self):
+        """处理所有到期的失败补拉任务"""
+        now = time.time()
+        for dtype in list(self._failed_queue.keys()):
+            pending = [(c, t, a) for c, t, a in self._failed_queue[dtype] if t <= now]
+            if not pending:
+                continue
+            codes_to_retry = [c for c, _, _ in pending]
+            logger.info("[RetryQueue] %s: %d 条待补拉 → %s", dtype, len(codes_to_retry), codes_to_retry)
+            try:
+                if dtype == "daily_ohlcv":
+                    self.refresh_daily_ohlcv(force=True, codes=codes_to_retry)
+                elif dtype == "financial_indicators":
+                    self.refresh_financial(force=True, codes=codes_to_retry)
+                elif dtype == "capital_flows":
+                    self.refresh_capital_flows(force=True, codes=codes_to_retry)
+                elif dtype == "fundamentals":
+                    self.refresh_fundamentals(force=True, codes=codes_to_retry)
+                elif dtype == "news_events":
+                    self.refresh_news(force=True, codes=codes_to_retry)
+            except Exception as exc:
+                logger.warning("[RetryQueue] %s 批量补拉异常: %s", dtype, exc)
 
     # ═══════════════════════════════════════
     # 按数据类型刷新
     # ═══════════════════════════════════════
 
-    def refresh_daily_ohlcv(self, force: bool = False) -> dict[str, int]:
+    def refresh_daily_ohlcv(self, force: bool = False, codes: list[str] | None = None) -> dict[str, int]:
         """刷新日K线 (建议收盘后15:30执行)"""
         results: dict[str, int] = {}
         from services.data_warehouse.fetchers import DailyFetcher
         fetcher = DailyFetcher()
-        for i, code in enumerate(self._stock_codes):
+        target_codes = codes or self._stock_codes
+        for i, code in enumerate(target_codes):
             try:
                 if not force and self._reader.is_fresh(code, "daily_ohlcv"):
+                    self._dequeue_success("daily_ohlcv", code)
                     continue
                 rows = fetcher.fetch(code, days=365)
                 if rows:
@@ -68,11 +131,14 @@ class RefreshScheduler:
                     lake = DataLake()
                     cnt = lake.upsert_ohlcv(code, rows)
                     results[code] = cnt
+                    self._dequeue_success("daily_ohlcv", code)
                     logger.info("[Scheduler] OHLCV %s: %d rows", code, cnt)
+                else:
+                    self._enqueue_failed("daily_ohlcv", code)
             except Exception as exc:
                 logger.warning("[Scheduler] OHLCV %s 失败: %s", code, exc)
-            # 受控延迟, 避免触发东财反爬
-            if i < len(self._stock_codes) - 1:
+                self._enqueue_failed("daily_ohlcv", code)
+            if i < len(target_codes) - 1:
                 time.sleep(3 + random.uniform(0, 2))
         return results
 
@@ -87,14 +153,16 @@ class RefreshScheduler:
             logger.warning("[Scheduler] 实时行情刷新失败: %s", exc)
             return 0
 
-    def refresh_financial(self, force: bool = False) -> dict[str, int]:
+    def refresh_financial(self, force: bool = False, codes: list[str] | None = None) -> dict[str, int]:
         """刷新财务指标 (建议收盘后16:00)"""
         results: dict[str, int] = {}
         from services.data_warehouse.fetchers import FinancialFetcher
         fetcher = FinancialFetcher()
-        for code in self._stock_codes:
+        target_codes = codes or self._stock_codes
+        for code in target_codes:
             try:
                 if not force and self._reader.is_fresh(code, "financial_indicators"):
+                    self._dequeue_success("financial_indicators", code)
                     continue
                 data = fetcher.fetch(code)
                 if data:
@@ -103,19 +171,25 @@ class RefreshScheduler:
                     for period, indicators in data.items():
                         lake.upsert_financial(code, period, indicators)
                     results[code] = sum(len(v) for v in data.values())
+                    self._dequeue_success("financial_indicators", code)
+                else:
+                    self._enqueue_failed("financial_indicators", code)
             except Exception as exc:
                 logger.warning("[Scheduler] 财务 %s 失败: %s", code, exc)
+                self._enqueue_failed("financial_indicators", code)
             time.sleep(5 + random.uniform(0, 3))
         return results
 
-    def refresh_capital_flows(self, force: bool = False) -> dict[str, int]:
+    def refresh_capital_flows(self, force: bool = False, codes: list[str] | None = None) -> dict[str, int]:
         """刷新资金流向 (建议收盘后16:30)"""
         results: dict[str, int] = {}
         from services.data_warehouse.fetchers import CapitalFlowFetcher
         fetcher = CapitalFlowFetcher()
-        for code in self._stock_codes:
+        target_codes = codes or self._stock_codes
+        for code in target_codes:
             try:
                 if not force and self._reader.is_fresh(code, "capital_flows"):
+                    self._dequeue_success("capital_flows", code)
                     continue
                 rows = fetcher.fetch(code, days=30)
                 if rows:
@@ -123,38 +197,50 @@ class RefreshScheduler:
                     lake = DataLake()
                     cnt = lake.upsert_capital_flows(code, rows)
                     results[code] = cnt
+                    self._dequeue_success("capital_flows", code)
+                else:
+                    self._enqueue_failed("capital_flows", code)
             except Exception as exc:
                 logger.warning("[Scheduler] 资金流 %s 失败: %s", code, exc)
+                self._enqueue_failed("capital_flows", code)
             time.sleep(3 + random.uniform(0, 2))
         return results
 
-    def refresh_news(self, force: bool = False) -> dict[str, int]:
+    def refresh_news(self, force: bool = False, codes: list[str] | None = None) -> dict[str, int]:
         """刷新新闻 (每小时)"""
         results: dict[str, int] = {}
         from services.data_warehouse.fetchers import NewsFetcher
         fetcher = NewsFetcher()
-        for code in self._stock_codes:
+        target_codes = codes or self._stock_codes
+        for code in target_codes:
             try:
                 if not force and self._reader.is_fresh(code, "news_events"):
+                    self._dequeue_success("news_events", code)
                     continue
                 items = fetcher.fetch(code, days=2)
                 if items:
                     from services.data_warehouse.storage import DataLake
                     lake = DataLake()
                     results[code] = lake.insert_news(items)
+                    self._dequeue_success("news_events", code)
+                else:
+                    self._enqueue_failed("news_events", code)
             except Exception as exc:
                 logger.warning("[Scheduler] 新闻 %s 失败: %s", code, exc)
+                self._enqueue_failed("news_events", code)
             time.sleep(2 + random.uniform(0, 1))
         return results
 
-    def refresh_fundamentals(self, force: bool = False) -> dict[str, int]:
+    def refresh_fundamentals(self, force: bool = False, codes: list[str] | None = None) -> dict[str, int]:
         """刷新基本面 (每周)"""
         results: dict[str, int] = {}
         from services.data_warehouse.fetchers import FundamentalsFetcher
         fetcher = FundamentalsFetcher()
-        for code in self._stock_codes:
+        target_codes = codes or self._stock_codes
+        for code in target_codes:
             try:
                 if not force and self._reader.is_fresh(code, "fundamentals"):
+                    self._dequeue_success("fundamentals", code)
                     continue
                 data = fetcher.fetch(code)
                 if data:
@@ -162,8 +248,12 @@ class RefreshScheduler:
                     lake = DataLake()
                     lake.upsert_fundamentals(code, data)
                     results[code] = 1
+                    self._dequeue_success("fundamentals", code)
+                else:
+                    self._enqueue_failed("fundamentals", code)
             except Exception as exc:
                 logger.warning("[Scheduler] 基本面 %s 失败: %s", code, exc)
+                self._enqueue_failed("fundamentals", code)
             time.sleep(5 + random.uniform(0, 3))
         return results
 
@@ -272,6 +362,9 @@ class RefreshScheduler:
                 if _is_trading_hour() and weekday <= 5:
                     if int(minute) % 5 == 0 and now - last_daily > 240:
                         self.refresh_realtime()
+
+                # 每次循环: 处理失败补拉队列
+                self._process_failed_queue()
 
             except Exception as exc:
                 logger.exception("[Scheduler] 循环异常: %s", exc)

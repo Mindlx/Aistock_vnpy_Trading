@@ -238,12 +238,12 @@ class RealtimeFusion:
         return L7_SIGNAL_NAMES.get(label, "中性/持有")
 
     def push_changes(self, changes: List[Dict[str, Any]]):
-        """推送信号变化到企业微信"""
+        """推送信号变化到企业微信（按融合得分降序排列，看多→看空）"""
         if not changes:
             return
         now = datetime.now().strftime("%H:%M")
         lines = [f"🛟 {now} 融合速报", ""]
-        for c in changes:
+        for c in sorted(changes, key=lambda x: x['score'], reverse=True):
             name = self._stock_names.get(c['code'], c['code'])
             signal_display = c.get('signal_name', c['signal'])
             score = c['score']

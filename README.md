@@ -290,6 +290,34 @@ systemctl --user list-units --all | grep aistock
 
 ---
 
+## 自选股管理
+
+增减自选股需同步更新以下三个文件（历史遗留，三处独立配置）：
+
+| 序号 | 文件 | 修改方式 | 作用域 |
+|------|------|---------|--------|
+| 1 | `config/stock_pool.csv` | 直接编辑CSV，追加或删除行（格式：`代码,名称,SH\|SZ`） | Fusion引擎（realtime_fusion、data_loader、run_daily） |
+| 2 | `src/mind_stock_config.py` | `A_SHARE_MARKET_MAP` 新增映射 + `DEFAULT_STOCK_CODES` 追加代码 | TA模块（yfinance ticker 转换） |
+| 3 | `systems/MindLynx-Aistock/.env` | `STOCK_LIST` 逗号分隔追加或删除代码 | MindLynx 子系统（pipeline、monitor） |
+
+**代码格式补充：**
+- 上海交易所（6/5/9开头）+ `.SS`
+- 深圳交易所（其他）+ `.SZ`
+
+**示例——新增昭衍新药(603127)和华润三九(000999)：**
+
+1. `config/stock_pool.csv` → 追加两行：`603127,昭衍新药,SH` 和 `000999,华润三九,SZ`
+2. `src/mind_stock_config.py` → `A_SHARE_MARKET_MAP` 加 `"603127": ("603127.SS", "SH", "昭衍新药")` 和 `"000999": ("000999.SZ", "SZ", "华润三九")`；`DEFAULT_STOCK_CODES` 追加 `"603127", "000999"`
+3. `systems/MindLynx-Aistock/.env` → 追加 `,603127,000999` 到 `STOCK_LIST` 末尾
+
+> 如仅需 Fusion 侧使用，至少更新第1、2项；如同时使用 MindLynx 整点分析/监控功能，还需更新第3项。
+>
+> **修改后需重启的服务：**
+> - `Aistock_vnpy_Trading-realtime-fusion.service` （`_stock_names` 仅在初始化加载，不重启的话新股票推送时会显示代码而非名称）
+> - 其他服务（run_daily、scheduler、monitor 等）均为每次新进程读取配置，无需重启
+
+---
+
 ## 目录结构
 
 ```
