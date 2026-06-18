@@ -41,3 +41,17 @@ This project is indexed by GitNexus as **Aistock_vnpy_Trading** (20819 symbols, 
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Default Workflow
+
+Every non-trivial analysis automatically follows the **c1skill 7 Stage** framework:
+1. **原架构理解** — Understand intent & constraints
+2. **事实声明** — List verifiable facts (code/logs/config)
+3. **证据验证** — Verify each fact
+4. **缺失分析** — Identify blind spots
+5. **反方论据** — 2-3 adversarial counter-points with responses
+6. **方案评估** — Compare options
+7. **风险监控** — Risks & tracking metrics
+8. **最终结论** — Executable conclusion
+
+Simple tasks may skip stages. The framework ensures completeness, not rigidity.
