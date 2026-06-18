@@ -137,14 +137,21 @@ data/realtime/
 
 ## 三、关键配置
 
-### 3.1 权重 (settings.yaml)
+### 3.1 权重 (settings.yaml) — 2026-06-18 Oracle验证更新
 
 | 系统 | 权重 | 说明 |
 |------|------|------|
-| ly (lynx_vnpy) | 0.30 | RF+LGB双模型 + alpha158增强 |
-| mindlynx | 0.40 | 12因子+策略+LLM混合模式 |
-| at (TradingAgent) | 0.25 | 多智能体辩论，主观判断 |
-| ml_factor | 0.05 | 纯12因子数学信号（无LLM） |
+| ly (lynx_vnpy) | **0.36** | RF+LGB双模型 + alpha158增强 |
+| mindlynx | **0.48** | 12因子+策略+LLM混合模式 |
+| at (TradingAgent) | **0.05** | 47%准确率(≈随机), Oracle建议降权至0.05 |
+| ~~ml_factor~~ | ~~0.06~~ | 已移除: 死配置, _compute_adjusted_weights从未加载 |
+
+**修正记录 (7358ce8)**:
+1. AT权重 0.10→0.05: 回测150样本AT 47.0%(31/66), z=-0.49不显著
+2. `ml_factor`死配置移除: 权重定义在settings.yaml但`_compute_adjusted_weights`的weight_map只有3个系统
+3. 分歧惩罚移除: `fusion_score -= penalty`改为`disagreement_capped`置信度标记。
+   Oracle验证: 加权平均在分歧时已退化看空输出, 惩罚反而加剧(分歧时融合仅34.6%)
+4. ML融合偏向 sentiment_score 80/20: 原50/50, Oracle验证sentiment_score方向准确率74% > 操作建议24%
 
 fusion_mode: "dual"（同时输出linear+bayesian，CSV暴露linear层字段）
 
@@ -395,6 +402,15 @@ ly的58因子提供体系化覆盖(K线形态/多窗口统计/分位数等)。
 | 东方财富w/f阈值校准 | 384样本 | ~6/10 |
 | prob_up + 融合回测 | 30交易日 | ~6月下旬 |
 | AT价值评估 | forward数据充足 | ~6/15 |
+
+### ✅ 已完成修复（2026-06-18 Oracle验证深度分析修复）
+
+| 变更 | 说明 | commit |
+|------|------|--------|
+| AT权重 0.10→0.05 | 回测150样本AT 47.0%(31/66)≈随机, 降权至0.05最小化噪声 | 7358ce8 |
+| 移除ml_factor死配置 | settings.yaml有定义但_compute_adjusted_weights从未加载, 清理 | 7358ce8 |
+| 移除分歧分数惩罚 | fusion_score -= penalty → disagreement_capped标记。Oracle验证: 惩罚在分歧时导致退化看空输出 | 7358ce8 |
+| ML融合80/20偏向 | 原50/50, Oracle验证sentiment_score 74% > operation_advice 24% | 7358ce8 |
 
 ### ✅ 已完成修复（2026-06-09 批量修复）
 
