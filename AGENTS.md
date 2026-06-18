@@ -55,3 +55,29 @@ Every non-trivial analysis automatically follows the **c1skill 7 Stage** framewo
 8. **最终结论** — Executable conclusion
 
 Simple tasks may skip stages. The framework ensures completeness, not rigidity.
+
+## Automation Chain (MANDATORY)
+
+The following chain activates automatically without user prompting:
+
+1. **Oracle triggers c1skill**: Whenever the user requests or you invoke Oracle for deep analysis, **automatically follow up with c1skill** after Oracle completes (no need to ask permission).
+2. **c1skill triggers trace capture**: Whenever c1skill is invoked and produces a conclusion, **automatically run trace_collect.py** to save the reasoning trace to `data/traces/`.
+
+Example flow:
+```
+user: "分析这个bug"
+→ 你: run Oracle → automatically chain c1skill → automatically save trace
+```
+
+The trace_collect.py command format:
+```bash
+python scripts/trace_collect.py \
+  --session-id "$SESSION_ID" \
+  --requirement "task description" \
+  --root-cause "oracle root cause" \
+  --oracle-recommendation "oracle initial recommendation" \
+  --counter-arguments "c1skill counter arguments" \
+  --conclusion "c1skill final conclusion" \
+  --outcome "code change summary" \
+  --commit "$COMMIT_HASH"
+```
