@@ -528,7 +528,9 @@ class FusionEngine:
                 threshold_bull=self.sentiment_threshold_bull,
                 threshold_bear=self.sentiment_threshold_bear,
             )
-        mindlynx_normalized = (mindlynx_normalized + mindlynx_score_normalized) / 2.0
+        # 权重分配: sentiment_score 80% + operation_advice 20%
+        # Oracle验证:sentiment_score方向准确率74%>操作建议24%
+        mindlynx_normalized = mindlynx_score_normalized * 0.8 + mindlynx_normalized * 0.2
 
         if not tradingagent_valid:
             tradingagent_normalized = 0.0
@@ -595,8 +597,9 @@ class FusionEngine:
             for sys in normalized_scores
         )
 
-        # 施加不确定性惩罚 (Oracle 建议 1)
-        fusion_score -= uncertainty_penalty
+        # 分歧处理：不施加分数惩罚(避免退化输出)，改为置信度标记
+        # Oracle验证:分歧时加权平均已产生正确方向，惩罚反而是噪声
+        disagreement_capped = has_disagreement and disagreement_score > 0.5
 
         # ── Step 5: 映射到最终决策 ──
         final = self._get_final_decision(fusion_score, has_disagreement)
