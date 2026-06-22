@@ -113,7 +113,7 @@ class PytdxFetcher(BaseFetcher):
     """
 
     name = "PytdxFetcher"
-    priority = int(os.getenv("PYTDX_PRIORITY", "2"))
+    priority = int(os.getenv("PYTDX_PRIORITY", "0"))  # TCP 7709, 永不封IP, 最高优先级
 
     # 默认通达信行情服务器列表
     DEFAULT_HOSTS = [

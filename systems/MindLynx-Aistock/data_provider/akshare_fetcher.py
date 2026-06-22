@@ -275,7 +275,7 @@ class AkshareFetcher(BaseFetcher):
     """
 
     name = "AkshareFetcher"
-    priority = int(os.getenv("AKSHARE_PRIORITY", "1"))
+    priority = int(os.getenv("AKSHARE_PRIORITY", "2"))  # 东财HTTP，排在Pytdx和Efinance之后
 
     def __init__(self, sleep_min: float = 2.0, sleep_max: float = 5.0):
         """

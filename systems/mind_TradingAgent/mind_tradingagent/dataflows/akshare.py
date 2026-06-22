@@ -32,6 +32,50 @@ def _bs_code(symbol: str) -> str:
     return f"sz.{code}"
 
 
+def _try_pytdx_ohlcv(symbol: str, start_date: str, end_date: str) -> Optional[str]:
+    """Fallback: fetch daily OHLCV via pytdx TCP (永不封IP)."""
+    try:
+        from pytdx.hq import TdxHq_API
+        code = _bare_code(symbol)
+        market = 1 if code.startswith(("6", "5", "9")) else 0
+        api = TdxHq_API(multithread=True)
+        hosts = [
+            ("119.147.212.81", 7709), ("112.74.214.43", 7727),
+            ("221.231.141.60", 7709), ("101.227.73.20", 7709),
+        ]
+        for host, port in hosts:
+            try:
+                api.connect(host, port)
+                break
+            except Exception:
+                continue
+        else:
+            return None
+        data = api.get_security_bars(9, market, code, 0, 800)
+        if not data:
+            return None
+        records = []
+        for d in data:
+            dt = str(d.get("datetime", ""))
+            if len(dt) >= 8 and dt[:8] >= start_date.replace("-", "") and dt[:8] <= end_date.replace("-", ""):
+                records.append({
+                    "date": dt[:4] + "-" + dt[4:6] + "-" + dt[6:8],
+                    "open": d["open"], "high": d["high"],
+                    "low": d["low"], "close": d["close"],
+                    "volume": d["volume"], "amount": d["amount"],
+                })
+        if not records:
+            return None
+        df = pd.DataFrame(records)
+        return _csv_string(df, f"Pytdx data for {code} ({symbol})")
+    except ImportError:
+        logger.debug("pytdx not installed, skipping")
+        return None
+    except Exception as e:
+        logger.warning(f"pytdx fallback failed for {symbol}: {e}")
+        return None
+
+
 def _try_baostock_ohlcv(symbol: str, start_date: str, end_date: str) -> Optional[str]:
     """Fallback: fetch daily OHLCV from baostock when akshare is unavailable."""
     try:
@@ -96,7 +140,11 @@ def get_stock_data(
         return _csv_string(df, f"A-share stock data for {code} ({symbol})")
     except Exception as e:
         logger.warning(f"akshare get_stock_data({symbol}) failed: {e}")
-        # Fallback to baostock before giving up
+        # Fallback chain: pytdx(TCP) → baostock
+        result = _try_pytdx_ohlcv(symbol, start_date, end_date)
+        if result is not None:
+            logger.info(f"pytdx fallback succeeded for {symbol}")
+            return result
         result = _try_baostock_ohlcv(symbol, start_date, end_date)
         if result is not None:
             logger.info(f"baostock fallback succeeded for {symbol}")

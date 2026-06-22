@@ -1019,10 +1019,10 @@ class DataFetcherManager:
         - 如果配置了 TUSHARE_TOKEN：实例化 TushareFetcher，并按其内部逻辑提升优先级
         - 如果配置了 Longbridge 凭据：实例化 LongbridgeFetcher 作为美股/港股兜底
         - 未配置的可选数据源不实例化，避免在批量拉取时反复探测无效源
-        - 默认优先级：
-          0. EfinanceFetcher (Priority 0) - 最高优先级
-          1. AkshareFetcher (Priority 1)
-          2. PytdxFetcher (Priority 2) - 通达信
+        - 默认优先级（2026-06-22 Oracle验证：TCP优先于HTTP）：
+          0. PytdxFetcher (Priority 0) - 🌟 TCP 7709 永不封IP
+          1. EfinanceFetcher (Priority 1) - 东财HTTP
+          2. AkshareFetcher (Priority 2) - 东财HTTP
           3. BaostockFetcher (Priority 3)
           4. YfinanceFetcher (Priority 4)
         """

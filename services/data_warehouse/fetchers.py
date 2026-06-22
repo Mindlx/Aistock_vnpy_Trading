@@ -31,9 +31,54 @@ def _get_limiter() -> TokenBucketLimiter:
 # ═══════════════════════════════════════════
 
 class DailyFetcher:
-    """日K线获取, 降级链: akshare(EM) → akshare(Sina) → efinance"""
+    """日K线获取, 降级链: pytdx(TCP) → Sina → akshare(EM) → efinance"""
 
-    FETCHERS = ["akshare_em", "akshare_sina", "efinance"]
+    FETCHERS = ["pytdx", "akshare_sina", "akshare_em", "efinance"]
+
+    def fetch_pytdx(self, code: str, days: int = 365) -> list[dict]:
+        """通达信TCP源(永不封IP), 使用pytdx direct"""
+        try:
+            from pytdx.hq import TdxHq_API
+            api = TdxHq_API(multithread=True)
+            market = 1 if code.startswith(("6", "5", "9")) else 0
+            hosts = [
+                ("119.147.212.81", 7709), ("112.74.214.43", 7727),
+                ("221.231.141.60", 7709), ("101.227.73.20", 7709),
+            ]
+            connected = False
+            for host, port in hosts:
+                try:
+                    api.connect(host, port)
+                    connected = True
+                    break
+                except Exception:
+                    continue
+            if not connected:
+                return []
+            count = min(days, 800)
+            data = api.get_security_bars(9, market, code, 0, count)
+            if not data:
+                return []
+            rows = []
+            for d in data:
+                rows.append({
+                    "date": str(d.get("datetime", ""))[:8],
+                    "open": float(d.get("open", 0)),
+                    "high": float(d.get("high", 0)),
+                    "low": float(d.get("low", 0)),
+                    "close": float(d.get("close", 0)),
+                    "volume": float(d.get("volume", 0)),
+                    "amount": float(d.get("amount", 0)),
+                    "pct_chg": 0.0,
+                    "turnover": 0.0,
+                    "source": "pytdx",
+                })
+            return rows
+        except ImportError:
+            logger.debug("pytdx not installed, skipping")
+            return []
+        except Exception:
+            return []  # fall through to next source
 
     @_get_limiter().retry("eastmoney")
     def fetch_akshare_em(self, code: str, days: int = 365) -> list[dict]:

@@ -27,6 +27,17 @@ from services.data_warehouse.config import DataWarehouseConfig
 
 logger = logging.getLogger(__name__)
 
+# 东财请求计数器 (Oracle验证: 监控反爬压力)
+_em_request_count = 0
+_em_success_count = 0
+_UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+]
+
 # 桶初始化 SQL（幂等 INSERT）
 _INIT_SOURCES_SQL = """
 INSERT OR IGNORE INTO rate_limit_state (source, tokens, last_refill, max_tokens, refill_rate)
@@ -189,10 +200,26 @@ class TokenBucketLimiter:
                             raise RateLimitError(
                                 f"[{source}] 令牌耗尽，等待超时"
                             )
+                        if source == "eastmoney":
+                            global _em_request_count, _em_success_count
+                            _em_request_count += 1
+                            _em_success_count += 1
+                            if _em_request_count % 10 == 0:
+                                logger.info(
+                                    "[EM counter] %d 请求, %d 成功, 当前源: pytdx优先",
+                                    _em_request_count, _em_success_count,
+                                )
                         return func(*args, **kwargs)
                     except RateLimitError:
                         raise  # 令牌耗尽直接抛，不重试
                     except Exception as exc:
+                        if source == "eastmoney":
+                            _em_request_count += 1
+                            if _em_request_count % 10 == 0:
+                                logger.info(
+                                    "[EM counter] %d 请求, 累计失败, 当前源: pytdx优先",
+                                    _em_request_count,
+                                )
                         last_exc = exc
                         if attempt < _max_retries:
                             delay = _base_delay * (2 ** attempt)
