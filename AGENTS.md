@@ -12,11 +12,13 @@ This project is indexed by GitNexus as **Aistock_vnpy_Trading** (20819 symbols, 
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- When debugging a behavioral regression, **trace the data pipeline, not just the output function**. `git grep` for all call sites → inspect data prep before each call → `git log -p` on pipeline files. The change is often in the input, not the renderer.
 
 ## Never Do
 
 - NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER search only the function body when tracking regression — the change may be in the **data pipeline before the call**. Always `git grep` all call sites and inspect the data preparation code feeding into each call. See also `git log -p` on all pipeline files, not just the renderer.
 - NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
 - NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
 
