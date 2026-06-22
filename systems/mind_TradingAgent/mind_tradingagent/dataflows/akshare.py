@@ -205,69 +205,80 @@ def get_indicators(
 
     code = _bare_code(symbol)
     start = (datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=look_back_days * 2)).strftime("%Y-%m-%d")
-    try:
-        df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start.replace("-", ""), adjust="qfq")
-        if df is None or df.empty:
-            return f"# No data for {symbol}\n"
+    end = curr_date
+    # Try pytdx first (TCP), fall back to akshare
+    raw = _try_pytdx_ohlcv(symbol, start, end)
+    if raw is not None:
+        import io
+        lines = [l for l in raw.strip().split("\n") if not l.startswith("#")]
+        csv_data = "\n".join(lines)
+        if csv_data.strip():
+            df = pd.read_csv(io.StringIO(csv_data))
+        else:
+            df = None
+    else:
+        try:
+            df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start.replace("-", ""), adjust="qfq")
+        except Exception:
+            df = None
+    if df is None or df.empty:
+        return f"# No data for {symbol}\n"
 
-        closes = df["收盘"].astype(float)
-        highs = df["最高"].astype(float)
-        lows = df["最低"].astype(float)
-        volumes = df["成交量"].astype(float)
+    closes = df["收盘"].astype(float)
+    highs = df["最高"].astype(float)
+    lows = df["最低"].astype(float)
+    volumes = df["成交量"].astype(float)
 
-        # Full technical indicators
-        rsi = _compute_rsi(closes)
-        macd = _compute_macd(closes)
-        boll = _compute_bollinger(closes)
+    # Full technical indicators
+    rsi = _compute_rsi(closes)
+    macd = _compute_macd(closes)
+    boll = _compute_bollinger(closes)
 
-        # ATR
-        tr = pd.concat([
-            highs - lows,
-            (highs - closes.shift(1)).abs(),
-            (lows - closes.shift(1)).abs(),
-        ], axis=1).max(axis=1)
-        atr = tr.rolling(14).mean().iloc[-1] if len(tr) >= 14 else float("nan")
+    # ATR
+    tr = pd.concat([
+        highs - lows,
+        (highs - closes.shift(1)).abs(),
+        (lows - closes.shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    atr = tr.rolling(14).mean().iloc[-1] if len(tr) >= 14 else float("nan")
 
-        result = [
-            f"# Technical Indicators for {code} ({symbol})",
-            f"# Analysis date: {curr_date}",
-            f"# Lookback: {look_back_days} days | Data records: {len(df)}",
-            "",
-            "## 1. Price Action",
-            f"Latest Close: {closes.iloc[-1]:.2f}",
-            f"Day Change: {(closes.iloc[-1] / closes.iloc[-2] - 1) * 100:.2f}%" if len(closes) >= 2 else "",
-            f"5-day Change: {((closes.iloc[-1] / closes.iloc[-5]) - 1) * 100:.2f}%" if len(closes) >= 5 else "",
-            f"20-day Change: {((closes.iloc[-1] / closes.iloc[-20]) - 1) * 100:.2f}%" if len(closes) >= 20 else "",
-            f"Max(20d): {closes.tail(20).max():.2f}  Min(20d): {closes.tail(20).min():.2f}",
-            "",
-            "## 2. Momentum",
-            f"RSI(14): {rsi:.1f}" if not np.isnan(rsi) else "",
-            f"MACD: {macd['macd']:.4f}  Signal: {macd['signal']:.4f}  Histogram: {macd['histogram']:.4f}",
-            f"MACD Crossover: {'BULLISH' if macd['macd'] > macd['signal'] else 'BEARISH'}",
-            "",
-            "## 3. Volatility",
-            f"Bollinger Upper: {boll['upper']:.2f}  Mid: {boll['mid']:.2f}  Lower: {boll['lower']:.2f}",
-            f"Bollinger Position: {((closes.iloc[-1] - boll['lower']) / (boll['upper'] - boll['lower']) * 100):.1f}%" if not np.isnan(boll['upper'] - boll['lower']) else "",
-            f"ATR(14): {atr:.4f}  ATR%: {atr / closes.iloc[-1] * 100:.2f}%" if not np.isnan(atr) else "",
-            "",
-            "## 4. Volume",
-            f"Latest Volume: {volumes.iloc[-1]:.0f}",
-            f"Avg Volume(20d): {volumes.tail(20).mean():.0f}",
-            f"Volume Ratio: {volumes.iloc[-1] / volumes.tail(20).mean():.2f}" if len(volumes) >= 20 else "",
-            "",
-            "## 5. Moving Averages",
-            f"SMA(5): {closes.rolling(5).mean().iloc[-1]:.2f}" if len(closes) >= 5 else "",
-            f"SMA(10): {closes.rolling(10).mean().iloc[-1]:.2f}" if len(closes) >= 10 else "",
-            f"SMA(20): {closes.rolling(20).mean().iloc[-1]:.2f}" if len(closes) >= 20 else "",
-            f"SMA(50): {closes.rolling(50).mean().iloc[-1]:.2f}" if len(closes) >= 50 else "",
-            f"SMA(200): {closes.rolling(200).mean().iloc[-1]:.2f}" if len(closes) >= 200 else "",
-            "",
-            f"Price vs SMA(20): {'ABOVE (bullish)' if closes.iloc[-1] > closes.rolling(20).mean().iloc[-1] else 'BELOW (bearish)'}" if len(closes) >= 20 else "",
-        ]
-        return "\n".join(filter(None, result))
-    except Exception as e:
-        logger.warning(f"akshare get_indicators({symbol}) failed: {e}")
-        return f"# Error computing indicators for {symbol}: {e}\n"
+    result = [
+        f"# Technical Indicators for {code} ({symbol})",
+        f"# Analysis date: {curr_date}",
+        f"# Lookback: {look_back_days} days | Data records: {len(df)}",
+        "",
+        "## 1. Price Action",
+        f"Latest Close: {closes.iloc[-1]:.2f}",
+        f"Day Change: {(closes.iloc[-1] / closes.iloc[-2] - 1) * 100:.2f}%" if len(closes) >= 2 else "",
+        f"5-day Change: {((closes.iloc[-1] / closes.iloc[-5]) - 1) * 100:.2f}%" if len(closes) >= 5 else "",
+        f"20-day Change: {((closes.iloc[-1] / closes.iloc[-20]) - 1) * 100:.2f}%" if len(closes) >= 20 else "",
+        f"Max(20d): {closes.tail(20).max():.2f}  Min(20d): {closes.tail(20).min():.2f}",
+        "",
+        "## 2. Momentum",
+        f"RSI(14): {rsi:.1f}" if not np.isnan(rsi) else "",
+        f"MACD: {macd['macd']:.4f}  Signal: {macd['signal']:.4f}  Histogram: {macd['histogram']:.4f}",
+        f"MACD Crossover: {'BULLISH' if macd['macd'] > macd['signal'] else 'BEARISH'}",
+        "",
+        "## 3. Volatility",
+        f"Bollinger Upper: {boll['upper']:.2f}  Mid: {boll['mid']:.2f}  Lower: {boll['lower']:.2f}",
+        f"Bollinger Position: {((closes.iloc[-1] - boll['lower']) / (boll['upper'] - boll['lower']) * 100):.1f}%" if not np.isnan(boll['upper'] - boll['lower']) else "",
+        f"ATR(14): {atr:.4f}  ATR%: {atr / closes.iloc[-1] * 100:.2f}%" if not np.isnan(atr) else "",
+        "",
+        "## 4. Volume",
+        f"Latest Volume: {volumes.iloc[-1]:.0f}",
+        f"Avg Volume(20d): {volumes.tail(20).mean():.0f}",
+        f"Volume Ratio: {volumes.iloc[-1] / volumes.tail(20).mean():.2f}" if len(volumes) >= 20 else "",
+        "",
+        "## 5. Moving Averages",
+        f"SMA(5): {closes.rolling(5).mean().iloc[-1]:.2f}" if len(closes) >= 5 else "",
+        f"SMA(10): {closes.rolling(10).mean().iloc[-1]:.2f}" if len(closes) >= 10 else "",
+        f"SMA(20): {closes.rolling(20).mean().iloc[-1]:.2f}" if len(closes) >= 20 else "",
+        f"SMA(50): {closes.rolling(50).mean().iloc[-1]:.2f}" if len(closes) >= 50 else "",
+        f"SMA(200): {closes.rolling(200).mean().iloc[-1]:.2f}" if len(closes) >= 200 else "",
+        "",
+        f"Price vs SMA(20): {'ABOVE (bullish)' if closes.iloc[-1] > closes.rolling(20).mean().iloc[-1] else 'BELOW (bearish)'}" if len(closes) >= 20 else "",
+    ]
+    return "\n".join(filter(None, result))
 
 
 def _append_capital_flow(result: list, code: str) -> None:
