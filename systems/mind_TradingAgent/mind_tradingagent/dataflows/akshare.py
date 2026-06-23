@@ -4,12 +4,19 @@ Provides OHLCV, fundamentals, and news data via the akshare library.
 Implements the same function signatures as y_finance.py for compatibility
 with the vendor routing system in interface.py.
 
+Data source priority (2026-06-23):
+  OHLCV:        akshare → pytdx(TCP) → tushare(付费) → baostock
+  Fundamentals: tushare(付费) → akshare(EM)
+  Capital flow: tushare(付费) → akshare(EM)
+  News:         akshare(EM) + baostock/cninfo
+
 Usage: set data_vendors.core_stock_apis = "akshare" in default_config.py
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Annotated, Optional
 
@@ -17,6 +24,25 @@ import akshare as ak
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# ── Tushare HTTP 客户端 (轻量, 无 SDK 依赖) ──
+_TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN", "")
+
+def _ts_post(api_name: str, params: dict) -> list[list]:
+    """调用 Tushare Pro HTTP API"""
+    if not _TUSHARE_TOKEN:
+        return []
+    import requests
+    try:
+        resp = requests.post("http://api.tushare.pro", json={
+            "api_name": api_name, "token": _TUSHARE_TOKEN, "params": params,
+        }, timeout=15)
+        data = resp.json()
+        if data.get("code") != 0:
+            return []
+        return data.get("data", {}).get("items", [])
+    except Exception:
+        return []
 
 
 def _bare_code(symbol: str) -> str:
@@ -74,6 +100,28 @@ def _try_pytdx_ohlcv(symbol: str, start_date: str, end_date: str) -> Optional[st
     except Exception as e:
         logger.warning(f"pytdx fallback failed for {symbol}: {e}")
         return None
+
+
+def _try_tushare_ohlcv(symbol: str, start_date: str, end_date: str) -> Optional[str]:
+    """Fallback: fetch daily OHLCV via Tushare Pro (付费, 200/min)."""
+    code = _bare_code(symbol)
+    ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
+    items = _ts_post("daily", {"ts_code": ts_code, "start_date": start_date.replace("-", ""), "end_date": end_date.replace("-", "")})
+    if not items:
+        return None
+    records = []
+    for item in items:
+        if len(item) < 9: continue
+        records.append({
+            "date": str(item[1]),
+            "open": float(item[2] or 0), "high": float(item[3] or 0),
+            "low": float(item[4] or 0), "close": float(item[5] or 0),
+            "volume": float(item[6] or 0), "amount": float(item[7] or 0),
+        })
+    if not records:
+        return None
+    df = pd.DataFrame(records)
+    return _csv_string(df, f"Tushare data for {code} ({symbol})")
 
 
 def _try_baostock_ohlcv(symbol: str, start_date: str, end_date: str) -> Optional[str]:
@@ -140,10 +188,14 @@ def get_stock_data(
         return _csv_string(df, f"A-share stock data for {code} ({symbol})")
     except Exception as e:
         logger.warning(f"akshare get_stock_data({symbol}) failed: {e}")
-        # Fallback chain: pytdx(TCP) → baostock
+        # Fallback chain: pytdx(TCP) → tushare(付费) → baostock
         result = _try_pytdx_ohlcv(symbol, start_date, end_date)
         if result is not None:
             logger.info(f"pytdx fallback succeeded for {symbol}")
+            return result
+        result = _try_tushare_ohlcv(symbol, start_date, end_date)
+        if result is not None:
+            logger.info(f"tushare fallback succeeded for {symbol}")
             return result
         result = _try_baostock_ohlcv(symbol, start_date, end_date)
         if result is not None:
@@ -319,8 +371,43 @@ def get_fundamentals(
     ticker: Annotated[str, "stock code, e.g. 601801.SS"],
     curr_date: Annotated[str, "current date"] = None,
 ) -> str:
-    """Get fundamental data for an A-share stock via akshare."""
+    """Get fundamental data via Tushare(付费) → akshare(EM) fallback."""
     code = _bare_code(ticker)
+    # Try Tushare first (paid, stable)
+    result = _try_tushare_fundamentals(code, ticker)
+    if result is not None:
+        return result
+    # Fallback to akshare EM
+    return _try_em_fundamentals(code, ticker)
+
+
+def _try_tushare_fundamentals(code: str, ticker: str) -> Optional[str]:
+    """Tushare fina_indicator + daily_basic for fundamentals."""
+    ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
+    items = _ts_post("fina_indicator", {"ts_code": ts_code, "limit": "1"})
+    if not items or len(items[0]) < 54:
+        return None
+    row = items[0]
+    lines = [
+        f"# Fundamentals for {code} ({ticker})",
+        f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"# Source: Tushare Pro",
+        "",
+        f"每股收益: {row[3] or 'N/A'}",        # eps
+        f"每股净资产: {row[35] or 'N/A'}",       # bps
+        f"净资产收益率(ROE): {row[53] or 'N/A'}",
+        f"每股经营现金流: {row[36] or 'N/A'}",    # ocfps
+    ]
+    # PE/PB from daily_basic
+    items2 = _ts_post("daily_basic", {"ts_code": ts_code, "limit": "1"})
+    if items2 and len(items2[0]) >= 9:
+        lines.append(f"市盈率(PE TTM): {items2[0][7] or 'N/A'}")
+        lines.append(f"市净率(PB): {items2[0][8] or 'N/A'}")
+    return "\n".join(lines)
+
+
+def _try_em_fundamentals(code: str, ticker: str) -> str:
+    """EM 基本面后备"""
     try:
         df = ak.stock_financial_analysis_indicator(symbol=code, start_year=datetime.now().year - 2)
         if df is not None and not df.empty:
@@ -334,14 +421,11 @@ def get_fundamentals(
                          "营业利润率", "营业收入增长率", "净利润增长率", "资产负债率"]:
                 if col in latest:
                     result.append(f"{col}: {latest[col]}")
-
-            # Append A-share specific capital flow data
             _append_capital_flow(result, code)
-
             return "\n".join(result)
         return f"# No fundamental data for {code}\n"
     except Exception as e:
-        logger.warning(f"akshare get_fundamentals({ticker}) failed: {e}")
+        logger.warning(f"EM fundamentals failed for {ticker}: {e}")
         return f"# Error fetching fundamentals for {ticker}: {e}\n"
 
 
