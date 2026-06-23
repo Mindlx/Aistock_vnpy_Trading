@@ -525,8 +525,9 @@ def main():
 
             notifier.push_daily_decision(results, today, extra_sections=extra_sections or None)
 
-            # ── 东方财富评级 PDF 报告（独立推送，直接在 MindLynx venv 中执行）──
+            # ── 东方财富评级 PDF 报告（独立推送，延迟 60s 避免与融合决策同时涌入）──
             if fc.get("xueqiu", {}).get("enabled") and not args.dry_run:
+                time.sleep(60)
                 _root = Path(__file__).resolve().parent.parent
                 _venv = _root / "systems/MindLynx-Aistock/.venv/bin/python"
                 _script = _root / "systems/MindLynx-Aistock/scripts/generate_rating_report.py"

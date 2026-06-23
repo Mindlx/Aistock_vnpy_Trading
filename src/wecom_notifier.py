@@ -34,7 +34,7 @@ class WeComNotifier:
         self.session.close()
 
     def send_markdown(self, content: str) -> Optional[Dict[str, Any]]:
-        """发送 Markdown 格式消息"""
+        """发送 Markdown 格式消息（3次指数退避重试）"""
         if not self.enabled or not self.webhook_url:
             print("⚠️  企业微信推送未配置或已禁用，跳过推送")
             return None
@@ -43,24 +43,36 @@ class WeComNotifier:
             "msgtype": "markdown",
             "markdown": {"content": content},
         }
+        payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
 
-        try:
-            resp = self.session.post(
-                self.webhook_url,
-                headers={"Content-Type": "application/json"},
-                data=json.dumps(data, ensure_ascii=False).encode("utf-8"),
-                timeout=10,
-            )
-            result = resp.json()
-            if result.get("errcode") != 0:
-                print(f"企业微信推送失败: {result}")
-            return result
-        except requests.exceptions.Timeout:
-            print("企业微信推送超时（10s）")
-            return None
-        except Exception as e:
-            print(f"企业微信推送异常: {e}")
-            return None
+        for attempt in range(3):
+            try:
+                resp = self.session.post(
+                    self.webhook_url,
+                    headers={"Content-Type": "application/json"},
+                    data=payload,
+                    timeout=10,
+                )
+                result = resp.json()
+                if result.get("errcode") != 0:
+                    print(f"企业微信推送失败: {result}")
+                return result
+            except requests.exceptions.Timeout:
+                if attempt < 2:
+                    delay = (2 ** attempt) * 1.5
+                    print(f"企业微信推送超时，{delay:.0f}s后重试({attempt+1}/3)")
+                    time.sleep(delay)
+                else:
+                    print("企业微信推送超时（10s），3次重试均失败")
+                    return None
+            except Exception as e:
+                if attempt < 2:
+                    delay = (2 ** attempt) * 1.5
+                    print(f"企业微信推送异常: {e}，{delay:.0f}s后重试({attempt+1}/3)")
+                    time.sleep(delay)
+                else:
+                    print(f"企业微信推送异常: {e}，3次重试均失败")
+                    return None
 
     @staticmethod
     def _tz_cn_now() -> datetime:

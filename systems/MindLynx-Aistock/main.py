@@ -1737,8 +1737,8 @@ def main() -> int:
                     "task": _sched_market_review, "time": t, "name": f"大盘复盘@{t}",
                 })
 
-            # 整点全量分析 10:00/11:00/14:00/15:00（交易时段每小时一次）
-            for t in ("10:00", "11:00", "14:00", "15:00"):
+            # 整点全量分析 11:00/14:00（午盘前+收盘前各一次，减少通知疲劳）
+            for t in ("11:00", "14:00"):
                 def _make_整点_analysis(time_slot: str = t):
                     def _run():
                         try:
