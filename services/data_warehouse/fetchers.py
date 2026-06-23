@@ -30,23 +30,32 @@ def _get_limiter() -> TokenBucketLimiter:
 # ── Tushare HTTP 客户端 (轻量, 无 SDK 依赖) ──
 _TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN", "")
 
-def _ts_post(api_name: str, params: dict) -> list[dict]:
-    """调用 Tushare Pro HTTP API"""
+def _ts_post(api_name: str, params: dict) -> tuple[list[str], list[list]]:
+    """调用 Tushare Pro HTTP API, 返回 (fields, items)"""
     if not _TUSHARE_TOKEN:
-        return []
+        return [], []
     import requests
     try:
         resp = requests.post(
             "http://api.tushare.pro",
-            json={"apiname": api_name, "token": _TUSHARE_TOKEN, "params": params, "fields": ""},
+            json={"api_name": api_name, "token": _TUSHARE_TOKEN, "params": params},
             timeout=15,
         )
         data = resp.json()
         if data.get("code") != 0:
-            return []
-        return data.get("data", {}).get("items", [])
+            return [], []
+        d = data.get("data", {})
+        return d.get("fields", []), d.get("items", [])
     except Exception:
-        return []
+        return [], []
+
+def _ts_val(items: list[list], row_idx: int, field_idx: int, default=0.0) -> float:
+    """安全获取 Tushare 返回值中的数值"""
+    try:
+        v = items[row_idx][field_idx]
+        return float(v) if v is not None else default
+    except (IndexError, TypeError, ValueError):
+        return default
 
 _TS_FIELD_MAP = {}  # filled by each fetcher
 
@@ -110,9 +119,10 @@ class DailyFetcher:
         """Tushare OHLCV — 付费稳定源"""
         ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
         start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        items = _ts_post("daily", {"ts_code": ts_code, "start_date": start})
+        _, items = _ts_post("daily", {"ts_code": ts_code, "start_date": start})
         if not items:
             return []
+        # fields: ts_code(0), trade_date(1), open(2), high(3), low(4), close(5), ... pct_chg(8), vol(9), amount(10)
         rows = []
         for item in items:
             if len(item) < 9:
@@ -275,34 +285,37 @@ class FinancialFetcher:
 
     def _fetch_tushare(self, code: str) -> dict[str, dict[str, float]]:
         """Tushare fina_indicator — 最新一期 ROE/EPS/营收增长"""
-        result: dict[str, dict[str, float]] = {}
-        items = _ts_post("fina_indicator", {"ts_code": f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH", "limit": "1"})
+        ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
+        fields, items = _ts_post("fina_indicator", {"ts_code": ts_code, "limit": "1"})
         if not items:
-            items = _ts_post("fina_indicator", {"ts_code": f"{code}.SH" if code.startswith(("0","3")) else f"{code}.SZ", "limit": "1"})
-        if items:
-            fields = ["end_date", "roe", "eps", "bps", "ocfps", "profit_yoy", "revenue_yoy", "retained_eps"]
-            row = items[0]
-            period = str(row[0])[:7].replace("-", "")
-            vals = {}
-            for i, f in enumerate(fields[1:], start=1):
-                if i < len(row) and row[i] is not None:
-                    try: vals[f] = float(row[i])
-                    except: pass
-            if vals:
-                result[period] = vals
+            return {}
+        # fields: [ts_code(0), ann_date(1), end_date(2), eps(3), ..., roe(53), ...]
+        result = {}
+        period = str(items[0][2])[:7].replace("-", "")  # end_date
+        vals = {}
+        # map by known field indices
+        for idx, name in [(3, "eps"), (35, "bps"), (36, "ocfps"), (53, "roe")]:
+            try:
+                v = items[0][idx]
+                if v is not None: vals[name] = float(v)
+            except (IndexError, TypeError, ValueError):
+                pass
+        if vals:
+            result[period] = vals
         return result
 
     @_get_limiter().retry("tushare")
     def fetch_tushare_pe_pb(self, code: str) -> dict:
         """Tushare daily_basic — PE/PB"""
         ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
-        items = _ts_post("daily_basic", {"ts_code": ts_code, "limit": "1"})
-        if items and len(items[0]) >= 6:
+        _, items = _ts_post("daily_basic", {"ts_code": ts_code, "limit": "1"})
+        # fields: ts_code(0), trade_date(1), close(2), turnover_rate(3), ... pe(6), pe_ttm(7), pb(8), total_mv(16)
+        if items and len(items[0]) >= 9:
             row = items[0]
             return {
-                "pe_ttm": float(row[3]) if row[3] else 0,
-                "pe_static": float(row[3]) if row[3] else 0,
-                "pb": float(row[5]) if row[5] else 0,
+                "pe_ttm": float(row[7] or 0),
+                "pe_static": float(row[6] or 0),
+                "pb": float(row[8] or 0),
             }
         return {}
 
@@ -372,7 +385,7 @@ class CapitalFlowFetcher:
     def _fetch_tushare(self, code: str, days: int = 30) -> list[dict]:
         """Tushare moneyflow — 个股资金流"""
         ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
-        items = _ts_post("moneyflow", {"ts_code": ts_code, "limit": str(days)})
+        _, items = _ts_post("moneyflow", {"ts_code": ts_code, "limit": str(days)})
         if not items:
             return []
         rows = []
@@ -527,23 +540,23 @@ class FundamentalsFetcher:
         result: dict[str, Any] = {}
         ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
 
-        # 名称/行业
-        items = _ts_post("stock_basic", {"ts_code": ts_code})
-        if items and len(items[0]) >= 7:
-            result["name"] = items[0][1] or ""
+        # 名称/行业 — fields: ts_code(0), symbol(1), name(2), area(3), industry(4)
+        _, items = _ts_post("stock_basic", {"ts_code": ts_code})
+        if items and len(items[0]) >= 5:
+            result["name"] = items[0][2] or ""
             result["industry"] = items[0][4] or ""
 
-        # PE/PB/市值
-        items = _ts_post("daily_basic", {"ts_code": ts_code, "limit": "1"})
-        if items and len(items[0]) >= 8:
-            result["pe_ttm"] = float(items[0][3] or 0)
-            result["pb"] = float(items[0][5] or 0)
-            result["market_cap"] = float(items[0][6] or 0) / 1e8 if items[0][6] else 0
+        # PE/PB/市值 — fields: ts_code(0), trade_date(1), close(2), ..., pe(6), pe_ttm(7), pb(8), ..., total_mv(16), circ_mv(17)
+        _, items = _ts_post("daily_basic", {"ts_code": ts_code, "limit": "1"})
+        if items and len(items[0]) >= 17:
+            result["pe_ttm"] = float(items[0][7] or 0)
+            result["pb"] = float(items[0][8] or 0)
+            result["market_cap"] = float(items[0][16] or 0) / 1e8 if items[0][16] else 0
 
-        # ROE
-        items = _ts_post("fina_indicator", {"ts_code": ts_code, "limit": "1"})
-        if items:
-            try: result["roe"] = float(items[0][2] or 0)
+        # ROE — fields: ts_code(0), ann_date(1), end_date(2), ..., roe(53)
+        _, items = _ts_post("fina_indicator", {"ts_code": ts_code, "limit": "1"})
+        if items and len(items[0]) > 53:
+            try: result["roe"] = float(items[0][53] or 0)
             except: pass
 
         result.setdefault("source", "tushare")
