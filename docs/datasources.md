@@ -78,6 +78,21 @@
 **EM 依赖**: ⚠️ 大幅降低（OHLCV/基本面已走Tushare，仅资金流/新闻仍EM）
 **commit**: `2901524`
 
+### 自选股池管理
+
+目前有 **12 只自选股**，集中配置在以下 6 处（增减时需全部更新）：
+
+| # | 文件 | 修改方式 | 作用域 |
+|---|------|---------|--------|
+| 1 | `config/stock_pool.csv` | 直接编辑 CSV（格式: `代码,名称,SH\|SZ`） | Fusion 引擎 |
+| 2 | `src/mind_stock_config.py` | `A_SHARE_MARKET_MAP` + `DEFAULT_STOCK_CODES` | TA 模块 + 部分服务 |
+| 3 | `systems/MindLynx-Aistock/.env` | `STOCK_LIST` 逗号分隔 | ML 子系统 + 数据仓库 |
+| 4 | `systems/lynx_vnpy/lynx_signal.py` | `STOCK_CODES` + `STOCK_NAMES` | 量化信号系统 |
+| 5 | `services/alpha158_service.py` | `STOCK_CODES` | Alpha158 因子服务 |
+| 6 | `services/ml_factor_service.py` | `STOCK_CODES` | ML 因子服务 |
+
+2026-06-23 统一修复: 首次发现 4 处未随新增股票更新 (commit 6adfa80)。
+
 ---
 
 ## 三、数据仓库 (Data Warehouse) — 降级链一览

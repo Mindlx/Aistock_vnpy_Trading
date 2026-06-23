@@ -147,7 +147,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 │  │  共享组件                                                   │  │
 │  │  ├── config/settings.yaml          → Fusion 配置            │  │
 │  │  ├── .env                          → 企业微信 webhook 统一   │  │
-│  │  ├── config/stock_pool.csv         → 10 只 A 股股票池       │  │
+│  │  ├── config/stock_pool.csv         → 12 只 A 股股票池       │  │
 │  │  └── data/realtime/                → 文件交换区 (ly/ml/at)  │  │
 │  └────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -366,7 +366,7 @@ Aistock_vnpy_Trading/
 │
 ├── config/
 │   ├── settings.yaml           # 融合配置
-│   ├── stock_pool.csv          # 10 只股票池
+│   ├── stock_pool.csv          # 12 只股票池
 │   ├── systems.yaml            # 路径映射
 │   └── systemd/                # 所有 systemd 单元
 │       ├── *.service           # 7 个服务
