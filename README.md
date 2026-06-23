@@ -297,8 +297,11 @@ systemctl --user list-units --all | grep aistock
 | 序号 | 文件 | 修改方式 | 作用域 |
 |------|------|---------|--------|
 | 1 | `config/stock_pool.csv` | 直接编辑CSV，追加或删除行（格式：`代码,名称,SH\|SZ`） | Fusion引擎（realtime_fusion、data_loader、run_daily） |
-| 2 | `src/mind_stock_config.py` | `A_SHARE_MARKET_MAP` 新增映射 + `DEFAULT_STOCK_CODES` 追加代码 | TA模块（yfinance ticker 转换） |
-| 3 | `systems/MindLynx-Aistock/.env` | `STOCK_LIST` 逗号分隔追加或删除代码 | MindLynx 子系统（pipeline、monitor） |
+| 2 | `src/mind_stock_config.py` | `A_SHARE_MARKET_MAP` 新增映射 + `DEFAULT_STOCK_CODES` 追加代码 | TA模块（yfinance ticker 转换）+ 部分服务 |
+| 3 | `systems/MindLynx-Aistock/.env` | `STOCK_LIST` 逗号分隔追加或删除代码 | MindLynx 子系统（pipeline、monitor）+ 数据仓库 |
+| 4 | `systems/lynx_vnpy/lynx_signal.py` | `STOCK_CODES` 列表追加 + `STOCK_NAMES` 字典追加 | 量化信号 + Fusion data_loader 引用 |
+| 5 | `services/alpha158_service.py` | `STOCK_CODES` 列表追加 | Alpha158 因子服务 |
+| 6 | `services/ml_factor_service.py` | `STOCK_CODES` 列表追加 | ML 因子服务 |
 
 **代码格式补充：**
 - 上海交易所（6/5/9开头）+ `.SS`
