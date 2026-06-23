@@ -1,11 +1,12 @@
 """数据获取器 — 每种数据类型一个 Fetcher 类
 
 所有 Fetcher 通过 `@limiter.retry("source")` 受令牌桶保护。
-内置多级降级链: akshare(EM) → akshare(Sina) → akshare(Tencent) → efinance
+内置多级降级链, 数据源优先级: Tushare(付费) → pytdx(TCP) → Baostock(TCP) → Sina/Tencent → akshare(EM) → efinance
 """
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -26,14 +27,38 @@ def _get_limiter() -> TokenBucketLimiter:
     return _limiter
 
 
+# ── Tushare HTTP 客户端 (轻量, 无 SDK 依赖) ──
+_TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN", "")
+
+def _ts_post(api_name: str, params: dict) -> list[dict]:
+    """调用 Tushare Pro HTTP API"""
+    if not _TUSHARE_TOKEN:
+        return []
+    import requests
+    try:
+        resp = requests.post(
+            "http://api.tushare.pro",
+            json={"apiname": api_name, "token": _TUSHARE_TOKEN, "params": params, "fields": ""},
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("code") != 0:
+            return []
+        return data.get("data", {}).get("items", [])
+    except Exception:
+        return []
+
+_TS_FIELD_MAP = {}  # filled by each fetcher
+
+
 # ═══════════════════════════════════════════
 # OHLCV 日K线获取器
 # ═══════════════════════════════════════════
 
 class DailyFetcher:
-    """日K线获取, 降级链: pytdx(TCP) → Sina → akshare(EM) → efinance"""
+    """日K线获取, 降级链: pytdx(TCP) → Sina → Tushare → akshare(EM) → efinance"""
 
-    FETCHERS = ["pytdx", "akshare_sina", "akshare_em", "efinance"]
+    FETCHERS = ["pytdx", "akshare_sina", "tushare", "akshare_em", "efinance"]
 
     def fetch_pytdx(self, code: str, days: int = 365) -> list[dict]:
         """通达信TCP源(永不封IP), 使用pytdx direct"""
@@ -79,6 +104,32 @@ class DailyFetcher:
             return []
         except Exception:
             return []  # fall through to next source
+
+    @_get_limiter().retry("tushare")
+    def fetch_tushare(self, code: str, days: int = 365) -> list[dict]:
+        """Tushare OHLCV — 付费稳定源"""
+        ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        items = _ts_post("daily", {"ts_code": ts_code, "start_date": start})
+        if not items:
+            return []
+        rows = []
+        for item in items:
+            if len(item) < 9:
+                continue
+            rows.append({
+                "date": str(item[1]),
+                "open": float(item[2] or 0),
+                "high": float(item[3] or 0),
+                "low": float(item[4] or 0),
+                "close": float(item[5] or 0),
+                "volume": float(item[6] or 0),
+                "amount": float(item[7] or 0),
+                "pct_chg": float(item[8] or 0),
+                "turnover": 0.0,
+                "source": "tushare",
+            })
+        return rows
 
     @_get_limiter().retry("eastmoney")
     def fetch_akshare_em(self, code: str, days: int = 365) -> list[dict]:
@@ -220,28 +271,49 @@ class RealtimeFetcher:
 # ═══════════════════════════════════════════
 
 class FinancialFetcher:
-    """财务指标获取"""
+    """财务指标获取, 降级链: Tushare → Baostock → EM"""
+
+    def _fetch_tushare(self, code: str) -> dict[str, dict[str, float]]:
+        """Tushare fina_indicator — 最新一期 ROE/EPS/营收增长"""
+        result: dict[str, dict[str, float]] = {}
+        items = _ts_post("fina_indicator", {"ts_code": f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH", "limit": "1"})
+        if not items:
+            items = _ts_post("fina_indicator", {"ts_code": f"{code}.SH" if code.startswith(("0","3")) else f"{code}.SZ", "limit": "1"})
+        if items:
+            fields = ["end_date", "roe", "eps", "bps", "ocfps", "profit_yoy", "revenue_yoy", "retained_eps"]
+            row = items[0]
+            period = str(row[0])[:7].replace("-", "")
+            vals = {}
+            for i, f in enumerate(fields[1:], start=1):
+                if i < len(row) and row[i] is not None:
+                    try: vals[f] = float(row[i])
+                    except: pass
+            if vals:
+                result[period] = vals
+        return result
+
+    @_get_limiter().retry("tushare")
+    def fetch_tushare_pe_pb(self, code: str) -> dict:
+        """Tushare daily_basic — PE/PB"""
+        ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
+        items = _ts_post("daily_basic", {"ts_code": ts_code, "limit": "1"})
+        if items and len(items[0]) >= 6:
+            row = items[0]
+            return {
+                "pe_ttm": float(row[3]) if row[3] else 0,
+                "pe_static": float(row[3]) if row[3] else 0,
+                "pb": float(row[5]) if row[5] else 0,
+            }
+        return {}
 
     @_get_limiter().retry("eastmoney")
-    def fetch(self, code: str) -> dict[str, dict[str, float]]:
-        """获取 ROE/PE/营收增长等核心财务指标"""
+    def _fetch_em_financial(self, code: str) -> dict[str, dict[str, float]]:
+        """EM 财务指标后备"""
         import akshare as ak
-        from datetime import datetime
-
         result: dict[str, dict[str, float]] = {}
-        now = datetime.now()
-        start_year = now.year - 2
-
-        # 1. 财务分析指标 (每股收益 ROE 等)
-        df = ak.stock_financial_analysis_indicator(
-            symbol=code, start_year=start_year
-        )
+        df = ak.stock_financial_analysis_indicator(symbol=code, start_year=datetime.now().year - 2)
         if df is not None and not df.empty:
-            period_col = None
-            for c in ["报告期", "date", "end_date"]:
-                if c in df.columns:
-                    period_col = c
-                    break
+            period_col = next((c for c in ["报告期", "date", "end_date"] if c in df.columns), None)
             if period_col:
                 for _, row in df.iterrows():
                     period = str(row[period_col])[:7].replace("-", "").replace("/", "")
@@ -254,12 +326,26 @@ class FinancialFetcher:
                         if map_col in df.columns:
                             val = row.get(map_col)
                             result[period][indicator] = float(val) if val else 0.0
+        return result
 
+    def fetch(self, code: str) -> dict[str, dict[str, float]]:
+        """降级链: Tushare → EM"""
+        result = self._fetch_tushare(code)
+        if not result:
+            result = self._fetch_em_financial(code)
+        return result
+
+    @_get_limiter().retry("tushare")
+    def fetch_pe_pb(self, code: str) -> dict:
+        """降级链: Tushare → EM"""
+        result = self.fetch_tushare_pe_pb(code)
+        if not result:
+            return self._fetch_em_pe_pb(code)
         return result
 
     @_get_limiter().retry("eastmoney")
-    def fetch_pe_pb(self, code: str) -> dict:
-        """获取 PE_TTM / PB 等估值指标"""
+    def _fetch_em_pe_pb(self, code: str) -> dict:
+        """EM PE/PB 后备"""
         try:
             import akshare as ak
             df = ak.stock_a_lg_indicator(symbol=code)
@@ -271,7 +357,7 @@ class FinancialFetcher:
                     "pb": float(latest.get("pb", 0) or 0),
                 }
         except Exception as exc:
-            logger.debug("[FinancialFetcher] PE/PB 获取失败 %s: %s", code, exc)
+            logger.debug("[FinancialFetcher] PE/PB EM 失败 %s: %s", code, exc)
         return {}
 
 
@@ -280,11 +366,42 @@ class FinancialFetcher:
 # ═══════════════════════════════════════════
 
 class CapitalFlowFetcher:
-    """资金流向获取"""
+    """资金流向获取, 降级链: Tushare → EM"""
+
+    @_get_limiter().retry("tushare")
+    def _fetch_tushare(self, code: str, days: int = 30) -> list[dict]:
+        """Tushare moneyflow — 个股资金流"""
+        ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
+        items = _ts_post("moneyflow", {"ts_code": ts_code, "limit": str(days)})
+        if not items:
+            return []
+        rows = []
+        for item in items:
+            if len(item) < 18:
+                continue
+            rows.append({
+                "date": str(item[1])[:10],
+                "main_net_flow": float(item[17] or 0),     # net_mf_amount
+                "super_large_net": float(item[13] or 0),   # buy_elg_amount - sell_elg_amount
+                "large_net": float(item[11] or 0),
+                "medium_net": float(item[9] or 0),
+                "small_net": float(item[7] or 0),
+                "north_flow": 0.0,
+                "north_hold_pct": 0.0,
+                "source": "tushare",
+            })
+        return rows
 
     @_get_limiter().retry("eastmoney")
     def fetch(self, code: str, days: int = 30) -> list[dict]:
-        """获取个股资金流向"""
+        """降级链: Tushare → EM"""
+        rows = self._fetch_tushare(code, days)
+        if rows:
+            return rows
+        return self._fetch_em(code, days)
+
+    def _fetch_em(self, code: str, days: int = 30) -> list[dict]:
+        """EM 资金流后备"""
         import akshare as ak
         market = "sh" if code.startswith(("6", "5", "9")) else "sz"
         df = ak.stock_individual_fund_flow(stock=code, market=market)
@@ -292,11 +409,7 @@ class CapitalFlowFetcher:
             return []
         rows = []
         for _, r in df.tail(days).iterrows():
-            date_col = None
-            for c in ["日期", "date"]:
-                if c in df.columns:
-                    date_col = c
-                    break
+            date_col = next((c for c in ["日期", "date"] if c in df.columns), None)
             if not date_col:
                 continue
             rows.append({
@@ -306,8 +419,7 @@ class CapitalFlowFetcher:
                 "large_net": float(r.get("大单净流入-净额", r.get("large_net", 0))),
                 "medium_net": float(r.get("中单净流入-净额", r.get("medium_net", 0))),
                 "small_net": float(r.get("小单净流入-净额", r.get("small_net", 0))),
-                "north_flow": 0.0,
-                "north_hold_pct": 0.0,
+                "north_flow": 0.0, "north_hold_pct": 0.0,
                 "source": "akshare",
             })
         return rows
@@ -407,15 +519,48 @@ class NewsFetcher:
 # ═══════════════════════════════════════════
 
 class FundamentalsFetcher:
-    """基本面快照获取 (每周)"""
+    """基本面快照获取 (每周), 降级链: Tushare → EM"""
+
+    @_get_limiter().retry("tushare")
+    def _fetch_tushare(self, code: str) -> dict:
+        """Tushare stock_basic + daily_basic + fina_indicator"""
+        result: dict[str, Any] = {}
+        ts_code = f"{code}.SZ" if code.startswith(("0","3")) else f"{code}.SH"
+
+        # 名称/行业
+        items = _ts_post("stock_basic", {"ts_code": ts_code})
+        if items and len(items[0]) >= 7:
+            result["name"] = items[0][1] or ""
+            result["industry"] = items[0][4] or ""
+
+        # PE/PB/市值
+        items = _ts_post("daily_basic", {"ts_code": ts_code, "limit": "1"})
+        if items and len(items[0]) >= 8:
+            result["pe_ttm"] = float(items[0][3] or 0)
+            result["pb"] = float(items[0][5] or 0)
+            result["market_cap"] = float(items[0][6] or 0) / 1e8 if items[0][6] else 0
+
+        # ROE
+        items = _ts_post("fina_indicator", {"ts_code": ts_code, "limit": "1"})
+        if items:
+            try: result["roe"] = float(items[0][2] or 0)
+            except: pass
+
+        result.setdefault("source", "tushare")
+        return result
 
     @_get_limiter().retry("eastmoney")
     def fetch(self, code: str) -> dict:
-        """获取基本面数据"""
+        """降级链: Tushare → EM"""
+        result = self._fetch_tushare(code)
+        if result.get("name"):
+            return result
+        return self._fetch_em(code)
+
+    def _fetch_em(self, code: str) -> dict:
+        """EM 基本面后备"""
         import akshare as ak
         result: dict[str, Any] = {}
-
-        # 名称/行业
         try:
             df = ak.stock_individual_info_em(symbol=code)
             if df is not None and not df.empty:
@@ -425,16 +570,12 @@ class FundamentalsFetcher:
                 result["market_cap"] = float(info.get("总市值", 0) or 0) / 1e8
         except Exception:
             pass
-
-        # PE/PB/ROE
         try:
             ff = FinancialFetcher()
             pe_pb = ff.fetch_pe_pb(code)
             result.update(pe_pb)
         except Exception:
             pass
-
-        # 财务指标
         try:
             fin = ff.fetch(code)
             if fin:
@@ -446,6 +587,5 @@ class FundamentalsFetcher:
                     result["profit_yoy"] = fin[p].get("profit_yoy", 0)
         except Exception:
             pass
-
         result.setdefault("source", "akshare")
         return result
