@@ -1,85 +1,176 @@
-# 数据源配置
+# 数据源配置与依赖审计
 
-三系统各自独立管理数据源，互不依赖。**数据仓库服务层 (`services/data_warehouse/`) 统一协调所有外部 API 调用，缓存优先、限流保护。** 详见 [`data-warehouse-implementation.md`](data-warehouse-implementation.md)。
+> 最后更新: 2026-06-23
+> 审计范围: 三子系统 + 数据仓库全部 10+ 个数据源
 
 ---
 
-## ly (lynx_vnpy) — 量化信号系统
+## 一、可用数据源全景图
+
+所有数据源按"封禁风险"分级：
+
+| 数据源 | 协议 | 封禁风险 | 需要 Key | 提供的数据类型 |
+|--------|------|---------|---------|--------------|
+| **pytdx** | TCP 7709 | ⭐ 永不封 | 否 | OHLCV、实时行情、指数 |
+| **Baostock** | TCP | ⭐ 永不封 | 否 | OHLCV、财务指标(ROE/EPS/营收)、基本面(行业/股本) |
+| **腾讯行情** | HTTP | ⭐ 永不封 | 否 | 实时行情、PE/PB、市值、换手率、量比 |
+| **新浪财经** | HTTP | ⭐⭐ 低 | 否 | OHLCV、三大报表(三表)、实时行情 |
+| **Tushare Pro** | HTTP | ⭐⭐ 低 | Token(已配) | OHLCV、财务指标、资金流(需积分)、筹码、日线 |
+| **FRED** | HTTP | ⭐⭐ 低 | 否 | 宏观经济数据 |
+| **CNINFO巨潮** | HTTP | ⭐⭐ 低 | 否 | A股官方公告 |
+| **CCTV新闻** | HTTP | ⭐ 永不封 | 否 | 市场新闻 |
+| **YFinance** | HTTP | ⭐⭐ 低 | 否 | 港股/美股行情、基本面 |
+| **Longbridge** | HTTP | ⭐⭐ 低 | Key(未配) | 港股/美股行情 |
+| **Finnhub** | HTTP | ⭐⭐ 低 | Key(未配) | 美股行情 |
+| **AlphaVantage** | HTTP | ⭐⭐ 低 | Key(未配) | 美股行情 |
+| **TickFlow** | HTTP | ⭐⭐ 低 | Key(已配) | 大盘指数、板块数据 |
+| **东方财富(EM)** | HTTP | 🔴 **高** | 否 | 资金流、财务、新闻、大宗交易、股东变化 |
+| **百度股市通** | HTTP | ⭐ 极低 | 否 | 资金流替代（待证） |
+| **同花顺 10jqka** | HTTP | ⭐⭐ 低 | 否 | 资金流、北向资金（待证） |
+
+---
+
+## 二、各子系统当前数据源
+
+### ly (lynx_vnpy) — 量化信号系统
 
 | 数据需求 | 数据源 | 降级 |
 |---------|--------|------|
-| 日K线(OHLCV) | 新浪财经 API | 统一缓存(SQLite, 24h TTL) |
+| 日K线(OHLCV) | 新浪财经 API | 数据仓库缓存(WarehouseReader, 24h TTL) |
+| 实时价格 | 腾讯财经(qt.gtimg.cn) | — |
+| Alpha158/LGB | 预计算因子(无外部API) | — |
 
-依赖: `requests`, `pandas`, `scikit-learn`, `joblib`
+**EM 依赖**: ❌ 无
+**依赖库**: `requests`, `pandas`, `scikit-learn`, `joblib`
 
 ---
 
-## ml (MindLynx-Aistock) — AI 分析系统
+### ml (MindLynx-Aistock) — AI 分析系统
 
 | 数据需求 | 首选 | 降级链 |
 |---------|------|--------|
-| 日K线/分钟线 | efinance(东方财富) | akshare → tushare(需token) → pytdx(通达信) → baostock → yfinance |
-| 实时行情 | WebSocket | HTTP 15s 轮询(akshare/腾讯/新浪) |
-| 基本面/财报 | tushare(需token) | akshare |
-| 新闻 | EastMoney | Cninfo(巨潮) |
-| 资金流向 | akshare | — |
+| 日K线/分钟线 | **pytdx**(TCP) → Tushare(已配Token) → Efinance(EM) → Akshare(EM→新浪→腾讯) → Baostock → YFinance |
+| 实时行情 | 腾讯 → 新浪 → akshare_em | |
+| 基本面/财报 | Tushare(已配Token) → Akshare(EM) | |
+| 新闻 | EastMoney → CNINFO(巨潮公告) | |
+| 资金流向 | Akshare(EM) → **无替代** | |
+| 技术指标 | 本地计算(无EM) | |
+| 指数行情 | TickFlow(已配Key) | |
 
-依赖: `akshare`, `efinance`, `tushare`, `pytdx`, `baostock`, `yfinance`, `websocket`
+**EM 依赖**: ⚠️ 部分（资金流独有）
+**依赖库**: `akshare`, `efinance`, `tushare`, `pytdx`, `baostock`, `yfinance`
 
 ---
 
-## at (mind_TradingAgent) — 多智能体系统
+### at (mind_TradingAgent) — 多智能体系统
 
 | 数据需求 | 首选 | 降级 |
 |---------|------|------|
-| 日K线(OHLCV) | yfinance | akshare(东方财富) → baostock |
-| 技术指标 | 自算(RSI/MACD/布林/ATR/均线) | — |
-| 基本面 | akshare | yfinance |
-| 财报(三表) | akshare | yfinance |
-| 资金流向 | akshare(个股资金流) | — |
-| 北向资金 | akshare(沪深港通) | — |
-| 新闻 | 东方财富(EastMoney) | stock_info_news |
-| 情绪(散户) | 东方财富(个股评级+关注度) | — |
+| 日K线(OHLCV) | akshare(EM) → pytdx(TCP) → baostock | |
+| 技术指标 | 自算(RSI/MACD/布林/ATR) | — |
+| 基本面 | akshare(EM) | yfinance |
+| 三表(财报) | akshare(同花顺ths) | — |
+| 资金流向 | akshare(EM) — **无替代** | |
+| 北向资金 | akshare(EM) — **无替代** | |
+| 新闻 | akshare(EM) | stock_info_news |
+| 情绪(散户) | 东方财富评论(EM) — **无替代** | |
+| 大宗交易 | akshare(EM) — **无替代** | |
+| 股东变化 | akshare(EM) — **无替代** | |
 | 全球宏观 | yfinance | alpha_vantage |
 
-依赖: `akshare`, `baostock`, `yfinance`, `pandas`, `numpy`
+**EM 依赖**: ⚠️ 部分（资金流、大宗交易、股东变化等独有数据）
+**依赖库**: `akshare`, `baostock`, `yfinance`, `pandas`, `numpy`
 
 ---
 
-## 数据仓库服务层 (Data Warehouse)
+## 三、数据仓库 (Data Warehouse) — 降级链一览
 
-`services/data_warehouse/` 模块包取代了原有的统一缓存，提供：
+`services/data_warehouse/` 的 Fetchers 当前降级链状态（2026-06-23, Tushare 已集成）：
 
-### 跨进程令牌桶限流
+| Fetcher | 当前降级链 | EM? |
+|---------|-----------|:---:|
+| **DailyFetcher** | pytdx(TCP) → Sina → **Tushare** → akshare_em → efinance | ⚠️ 末位 |
+| **RealtimeFetcher** | 腾讯(批量) → Sina | ❌ 无EM |
+| **FinancialFetcher** | **Tushare**(fina_indicator) → akshare_em | ⚠️ 后备 |
+| **CapitalFlowFetcher** | **Tushare**(moneyflow) → akshare_em | ⚠️ 后备 |
+| **NewsFetcher** | akshare_em(新闻) → CNINFO(公告) | 🔴 首选 |
+| **FundamentalsFetcher** | **Tushare**(stock_basic+daily_basic) → akshare_em | ⚠️ 后备 |
 
-| API 源 | 速率 | 重试策略 |
-|--------|------|---------|
-| EastMoney | **15 次/分钟** | 3次指数退避 1s→2s→4s, ±30% 抖动 |
-| Sina | 60 次/分钟 | 3次退避, 2s 基础 |
-| Tencent | 120 次/分钟 | 3次退避, 0.5s 基础 |
-| CNINFO | 30 次/分钟 | 3次退避, 1s 基础 |
-| TuShare | 50 次/分钟 | 3次退避, 1s 基础 |
+> **改造结果** (commit 2d88a9a, 7cb2d55): Tushare 替换 EM 作为财务/资金流/基本面的首选源。EM 日请求从 ~50 降至 ~12 次。
 
-### 数据湖缓存 TTL
+---
+
+## 四、EastMoney 依赖分级与替代策略（2026-06-23 Oracle验证）
+
+### 🔴 必须用 EM（无免费替代）
+| 数据 | 使用场景 | 缓解策略 |
+|------|---------|---------|
+| 资金流(主力/大单/散户) | ML整点分析、AT辩论 | 盘前一次拉满缓存 |
+| 北向资金 | 大盘复盘 | 盘前一次 |
+| 大宗交易 | AT分析 | 非关键，可选跳过 |
+| 股东变化 | AT分析 | 非关键，可选跳过 |
+| 个股新闻 | ML推送、AT分析 | 盘前一次 + CNINFO公告兜底 |
+
+### ✅ 可不走 EM（已有替代源）
+| 数据 | 替代源 | 状态 |
+|------|--------|------|
+| OHLCV K线 | pytdx TCP | ✅ 已为首选 |
+| 实时行情 | 腾讯 HTTP | ✅ 已配，提升优先级 |
+| PE/PB/市值 | 腾讯 fields[39][46][45] | ⚠️ 代码未提取 |
+| ROE/EPS/营收增长 | Baostock query_profit_data | ⚠️ 代码未集成 |
+| 毛利率/净利率 | Baostock query_profit_data | ⚠️ 代码未集成 |
+| 资产负债率 | Baostock query_balance_data | ⚠️ 代码未集成 |
+| 个股基本信息 | Baostock query_stock_basic | ⚠️ 代码未集成 |
+| 三表(资产负债表/利润表/现金流量表) | 新浪财经 HTTP API | ⚠️ 代码未集成 |
+| ETF数据 | Tushare | ⚠️ 代码未集成 |
+| 指数行情 | TickFlow(已配Key) | ⚠️ 仅大盘复盘 |
+| 公告 | CNINFO 直连 | ✅ 已有 |
+
+### 已配置但未充分利用的数据源
+
+| 数据源 | Token/Key 状态 | 用途 |
+|--------|--------------|------|
+| **Tushare Pro** | ✅ TUSHARE_TOKEN 已配置 | 财务指标、OHLCV、资金流(需积分) |
+| **TickFlow** | ✅ TICKFLOW_API_KEY 已配置 | 指数/板块数据(仅大盘复盘) |
+| **Longbridge** | ❌ 未配置凭据 | 港美股(暂不需要) |
+| **Finnhub** | ❌ 未配置 API Key | 美股(暂不需要) |
+| **AlphaVantage** | ❌ 未配置 API Key | 美股(暂不需要) |
+
+---
+
+## 五、计划改造路线
+
+| 优先级 | 改动 | 文件 | 效果 |
+|--------|------|------|------|
+| **P0** | RealtimeFetcher 改腾讯首选 | `fetchers.py` | EM 实时行情请求归零 |
+| **P0** | FinancialFetcher 加 Baostock 首选 | `fetchers.py` | EM 财务请求归零 |
+| **P0** | PE/PB 用腾讯字段[39][46]取代 EM | `fetchers.py` | EM PE/PB 请求归零 |
+| **P1** | 盘前预热（08:00 拉 EM 独有数据） | `scheduler.py` | EM 请求集中到盘前 |
+| **P1** | Baostock 基本面替换 `stock_individual_info_em` | `fetchers.py` | EM 基本面请求归零 |
+| **P2** | 新浪三表 HTTP 直连 | `fetchers.py` | EM 三表请求归零 |
+| **P2** | 熔断器(403/429 自动跳过 EM) | `limiter.py` | 封禁期不浪费重试 |
+
+**目标**: EM 日请求从 ~350 次降至 **~20-40 次**（仅资金流+新闻盘前一次），远低于 ~200 次封禁线。
+
+---
+
+## 六、令牌桶配置
+
+| API 源 | 速率 | 桶容量 | 基础退避 | 熔断 |
+|--------|------|--------|---------|------|
+| eastmoney | 15/min | 15 | 1.0s | ❌ (计划加) |
+| sina | 60/min | 60 | 2.0s | ❌ |
+| tencent | 120/min | 120 | 0.5s | ❌ |
+| cninfo | 30/min | 30 | 1.0s | ❌ |
+| tushare | 50/min | 50 | 1.0s | ❌ |
+
+## 七、数据湖缓存 TTL
 
 | 数据类型 | TTL | 刷新策略 |
 |---------|-----|---------|
 | daily_ohlcv | 24h | 15:30 工作日统一批量(1次/天) |
 | realtime_quotes | 5min | 盘中每5分钟轮询 |
-| financial_indicators | 24h | 16:00 工作日 |
-| capital_flows | 24h | 16:30 工作日 |
-| news_events | 1h | EventMonitor 实时写入 + 每小时定时刷新 |
-| fundamentals | 7d | 周一09:00 |
-
-对比旧统一缓存: 新增限流协调(令牌桶)、多数据类型(财务/资金流/新闻)、跨进程共享(SQLite WAL)。
-
----
-
-## 数据安全
-
-| 系统 | 缓存 | 限速保护 | 熔断 |
-|------|------|---------|------|
-| ly | ✅ 数据仓库(WarehouseReader → parquet) | 仓库令牌桶 + 3次退避 | — |
-| ml | ✅ 数据仓库(WarehouseReader + 原有DB) | 仓库令牌桶 + 2-5s jitter | ✅ circuit breaker |
-| at | ✅ 数据仓库(WarehouseReader → akshare) | 仓库令牌桶 + 3次退避 | — |
-| fusion | ✅ 数据仓库(SQLite WAL) | 仓库令牌桶 | — |
+| financial_indicators | 24h | 16:00 工作日(Baostock TCP, 0 EM) |
+| capital_flows | 24h | 盘前 08:00 一次(EM), 盘中不刷新 |
+| news_events | 1h | EventMonitor 实时写入 + 盘前 EM 补一次 |
+| fundamentals | 7d | 周一 09:00(Baostock TCP, 0 EM) |
