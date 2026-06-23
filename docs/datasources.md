@@ -62,24 +62,21 @@
 
 ---
 
-### at (mind_TradingAgent) — 多智能体系统
+### at (mind_TradingAgent) — 多智能体系统 — 2026-06-23 Tushare集成
 
 | 数据需求 | 首选 | 降级 |
 |---------|------|------|
-| 日K线(OHLCV) | akshare(EM) → pytdx(TCP) → baostock | |
-| 技术指标 | 自算(RSI/MACD/布林/ATR) | — |
-| 基本面 | akshare(EM) | yfinance |
-| 三表(财报) | akshare(同花顺ths) | — |
-| 资金流向 | akshare(EM) — **无替代** | |
+| 日K线(OHLCV) | akshare(EM) → **pytdx(TCP)** → **Tushare(付费)** → baostock | |
+| 技术指标 | 自算(RSI/MACD/布林/ATR) — OHLCV来自pytdx | — |
+| 基本面 | **Tushare(fina_indicator+daily_basic)** → akshare(EM) | |
+| 三表(财报) | akshare(同花顺ths) — **非EM** | — |
+| 资金流向 | akshare(EM) — **无替代**(见数据仓库Tushare) | |
 | 北向资金 | akshare(EM) — **无替代** | |
 | 新闻 | akshare(EM) | stock_info_news |
-| 情绪(散户) | 东方财富评论(EM) — **无替代** | |
-| 大宗交易 | akshare(EM) — **无替代** | |
-| 股东变化 | akshare(EM) — **无替代** | |
 | 全球宏观 | yfinance | alpha_vantage |
 
-**EM 依赖**: ⚠️ 部分（资金流、大宗交易、股东变化等独有数据）
-**依赖库**: `akshare`, `baostock`, `yfinance`, `pandas`, `numpy`
+**EM 依赖**: ⚠️ 大幅降低（OHLCV/基本面已走Tushare，仅资金流/新闻仍EM）
+**commit**: `2901524`
 
 ---
 
