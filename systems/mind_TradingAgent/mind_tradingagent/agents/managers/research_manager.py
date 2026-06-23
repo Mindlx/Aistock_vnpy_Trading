@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from mind_tradingagent.agents.schemas import ResearchPlan, render_research_plan
 from mind_tradingagent.agents.utils.agent_utils import (
-    build_instrument_context,
+    get_instrument_context_from_state,
     get_language_instruction,
 )
 from mind_tradingagent.agents.utils.structured import (
@@ -17,7 +17,7 @@ def create_research_manager(llm):
     structured_llm = bind_structured(llm, ResearchPlan, "Research Manager")
 
     def research_manager_node(state) -> dict:
-        instrument_context = build_instrument_context(state["company_of_interest"])
+        instrument_context = get_instrument_context_from_state(state)
         history = state["investment_debate_state"].get("history", "")
 
         investment_debate_state = state["investment_debate_state"]
@@ -36,8 +36,6 @@ def create_research_manager(llm):
 - **Sell**: Strong conviction in the bear thesis; recommend exiting or avoiding the position
 
 Commit to a clear stance whenever the debate's strongest arguments warrant one; reserve Hold for situations where the evidence on both sides is genuinely balanced.
-
-When evaluating A-share tickers, specifically consider: policy direction signals, north-bound capital trends, ST/delisting risk flags, and whether the arguments address the T+1 settlement constraint.
 
 ---
 

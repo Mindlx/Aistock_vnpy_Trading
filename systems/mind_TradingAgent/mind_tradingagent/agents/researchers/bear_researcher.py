@@ -20,31 +20,25 @@ def create_bear_researcher(llm):
             else "Asset fundamentals report (may be unavailable for crypto)"
         )
 
-        prompt = f"""You are a Bear Analyst making the case against investing in the {target_label} on China's A-share market. Present a well-reasoned argument emphasizing A-share-specific risks.
+        prompt = f"""You are a Bear Analyst making the case against investing in the {target_label}. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
 
-**A-share Bear Thesis Dimensions — prioritize when evidence exists:**
+Key points to focus on:
 
-- **政策逆风 (Policy Headwind)**: Is the company exposed to regulatory crackdowns (反垄断, 数据安全, 教育双减, 房地产调控)? Industry restrictions or subsidy phase-outs?
-
-- **资金流出风险 (Capital Outflow)**: Is north-bound capital flowing out? Is 主力资金 net selling? Outflows often precede broader selling pressure.
-
-- **融资盘风险 (Margin Call Cascade)**: High margin balance (~2.3万亿 nationwide) creates forced-liquidation tail risk if price drops — amplified by T+1/limit-down combo.
-
-- **ST / 退市风险 (Delisting Risk)**: Consecutive losses, low revenue, audit issues, or regulatory violations that could trigger ST designation or delisting.
-
-- **公司治理风险 (Governance)**: 商誉减值 (goodwill impairment), 股权质押 (share pledging with forced liquidation risk), 非经常性损益 manipulation, excessive 政府补贴 dependence.
-
-- **估值泡沫 (Valuation Bubble)**: A-share retail-driven rallies can detach from fundamentals. Is price supported by earnings or speculation?
-
-- **Bull Counterpoints**: Critically analyze bull assumptions based on short-term sentiment rather than fundamental value.
+- Risks and Challenges: Highlight factors like market saturation, financial instability, or macroeconomic threats that could hinder the stock's performance.
+- Competitive Weaknesses: Emphasize vulnerabilities such as weaker market positioning, declining innovation, or threats from competitors.
+- Negative Indicators: Use evidence from financial data, market trends, or recent adverse news to support your position.
+- Bull Counterpoints: Critically analyze the bull argument with specific data and sound reasoning, exposing weaknesses or over-optimistic assumptions.
+- Engagement: Present your argument in a conversational style, directly engaging with the bull analyst's points and debating effectively rather than simply listing facts.
 
 Resources available:
+
 Market research report: {market_research_report}
 Social media sentiment report: {sentiment_report}
 Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
 Conversation history of the debate: {history}
 Last bull argument: {current_response}
+Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the {target_label}.
 """ + get_language_instruction()
 
         response = llm.invoke(prompt)

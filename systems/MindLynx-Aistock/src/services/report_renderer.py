@@ -14,6 +14,8 @@ from typing import Any
 
 from src.analyzer import AnalysisResult
 from src.config import get_config
+from src.core.trading_calendar import get_market_for_stock, infer_market_phase
+from src.market_phase_summary import format_public_market_status_line
 from src.report_language import (
     get_localized_stock_name,
     get_report_labels,
@@ -157,6 +159,19 @@ def render(
 
     report_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    def market_status_line() -> str:
+        for source_results in (results, sorted_results):
+            for result in source_results:
+                code = getattr(result, "stock_code", None) or getattr(result, "code", None)
+                if not code:
+                    continue
+                market = get_market_for_stock(code)
+                phase = infer_market_phase(market)
+                line = format_public_market_status_line(phase, market=market, language=report_language)
+                if line:
+                    return line
+        return ""
+
     def failed_checks(checklist: list[str]) -> list[str]:
         return [c for c in (checklist or []) if c.startswith("❌") or c.startswith("⚠️")]
 
@@ -173,6 +188,7 @@ def render(
         "report_language": report_language,
         "models_used": models_used,
         "show_llm_model": show_llm_model,
+        "market_status_line": market_status_line(),
         "escape_md": _escape_md,
         "clean_sniper": _clean_sniper_value,
         "failed_checks": failed_checks,

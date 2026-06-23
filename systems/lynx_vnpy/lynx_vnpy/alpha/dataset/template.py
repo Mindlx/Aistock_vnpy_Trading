@@ -8,7 +8,8 @@ from multiprocessing.context import BaseContext
 import polars as pl
 import pandas as pd
 from tqdm import tqdm
-
+from alphalens.utils import get_clean_factor_and_forward_returns    # type: ignore
+from alphalens.tears import create_full_tear_sheet                  # type: ignore
 
 from ..logger import logger
 from .utility import (
@@ -232,18 +233,6 @@ class AlphaDataset:
         price_df: pd.DataFrame = merged_df.select(["datetime", "vt_symbol", "close"]).to_pandas()
         price_df = price_df.pivot(index="datetime", columns="vt_symbol", values="close")
 
-        # Lazy import alphalens (optional, for IC tear sheets)
-        try:
-            from alphalens.utils import get_clean_factor_and_forward_returns
-            from alphalens.tears import create_full_tear_sheet
-        except ImportError:
-            print("⚠️ alphalens not installed. Install with: pip install alphalens")
-            print("   Falling back to basic IC computation.")
-            from scipy.stats import spearmanr
-            ic_val, _ = spearmanr(feature_s.dropna(), price_df.mean(axis=1).loc[feature_s.dropna().index])
-            print(f"   Spearman IC: {ic_val:.4f}")
-            return
-
         # Merge data
         clean_data: pd.DataFrame = get_clean_factor_and_forward_returns(feature_s, price_df, quantiles=10)
 
@@ -270,13 +259,7 @@ class AlphaDataset:
         price_df: pd.DataFrame = df.select(["datetime", "vt_symbol", "close"]).to_pandas()
         price_df = price_df.pivot(index="datetime", columns="vt_symbol", values="close")
 
-        try:
-            from alphalens.utils import get_clean_factor_and_forward_returns
-            from alphalens.tears import create_full_tear_sheet
-        except ImportError:
-            print("⚠️ alphalens not installed. Skipping signal tear sheet.")
-            return
-
+        # Merge data
         clean_data: pd.DataFrame = get_clean_factor_and_forward_returns(
             signal_s,
             price_df,
@@ -284,6 +267,7 @@ class AlphaDataset:
             quantiles=10
         )
 
+        # Perform analysis
         create_full_tear_sheet(clean_data)
 
 

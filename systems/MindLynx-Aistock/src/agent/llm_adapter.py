@@ -15,6 +15,7 @@ from typing import Any
 import litellm
 from litellm import Router
 
+from src.agent.provider_trace import ProviderTrace
 from src.config import (
     extra_litellm_params,
     get_api_keys_for_model,
@@ -164,6 +165,7 @@ class LLMToolAdapter:
         self._router = None  # litellm Router (multi-key primary model)
         self._legacy_router_model_list: list[dict[str, Any]] = []
         self._litellm_available = False
+        self.trace = ProviderTrace()
         self._register_custom_model_pricing()
         self._init_litellm()
 
@@ -330,8 +332,9 @@ class LLMToolAdapter:
                 if remaining_timeout <= 0:
                     last_error = TimeoutError(f"LLM completion timed out before trying fallback model {model}")
                     break
+            attempt_start = time.time()
             try:
-                return self._call_litellm_model(
+                response = self._call_litellm_model(
                     messages,
                     tools or [],
                     model,
@@ -339,9 +342,25 @@ class LLMToolAdapter:
                     max_tokens=max_tokens,
                     timeout=remaining_timeout,
                 )
+                latency = (time.time() - attempt_start) * 1000
+                self.trace.record_entry(
+                    provider=providers[idx],
+                    model=model,
+                    success=True,
+                    latency_ms=round(latency, 1),
+                )
+                return response
             except Exception as e:
+                latency = (time.time() - attempt_start) * 1000
                 if isinstance(e, _resolve_litellm_exception("RateLimitError")):
                     logger.warning("Agent LLM rate-limited on %s: %s", model, e)
+                    self.trace.record_entry(
+                        provider=providers[idx],
+                        model=model,
+                        success=False,
+                        latency_ms=round(latency, 1),
+                        reason="rate_limit",
+                    )
                     last_error = e
                     hit_rate_limit = True
 
@@ -359,9 +378,23 @@ class LLMToolAdapter:
                     continue
                 if isinstance(e, _resolve_litellm_exception("ContextWindowExceededError")):
                     logger.warning("Agent LLM context window exceeded on %s: %s", model, e)
+                    self.trace.record_entry(
+                        provider=providers[idx],
+                        model=model,
+                        success=False,
+                        latency_ms=round(latency, 1),
+                        reason="context_window_exceeded",
+                    )
                     last_error = e
                     continue
                 logger.warning("Agent LLM call failed with %s: %s", model, e)
+                self.trace.record_entry(
+                    provider=providers[idx],
+                    model=model,
+                    success=False,
+                    latency_ms=round(latency, 1),
+                    reason=str(e)[:120],
+                )
                 last_error = e
                 continue
 
@@ -601,3 +634,7 @@ class LLMToolAdapter:
             model=model,
             raw=response,
         )
+
+    def get_trace(self) -> ProviderTrace:
+        """Return the provider trace for the last completion request."""
+        return self.trace

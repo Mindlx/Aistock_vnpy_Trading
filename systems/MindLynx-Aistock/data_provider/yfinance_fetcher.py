@@ -122,8 +122,11 @@ class YfinanceFetcher(BaseFetcher):
             logger.debug(f"转换港股代码: {stock_code} -> {hk_code}.HK")
             return f"{hk_code}.HK"
 
-        # 已经包含后缀的情况
+        # 已经包含后缀的情况（含日股 .T、韩股 .KS/.KQ）
         if ".SS" in code or ".SZ" in code or ".HK" in code or ".BJ" in code:
+            return code
+        if code.endswith(".T") or code.endswith(".KS") or code.endswith(".KQ"):
+            logger.debug(f"识别为日韩股票代码（Yahoo Finance 原生格式）: {code}")
             return code
 
         # 去除可能的 .SH 后缀

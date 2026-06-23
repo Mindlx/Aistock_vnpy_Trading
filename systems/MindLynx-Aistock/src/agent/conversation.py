@@ -39,6 +39,11 @@ class ConversationSession:
         messages = get_db().get_conversation_history(self.session_id)
         return messages
 
+    def should_compress(self, max_tokens: int = 4000) -> bool:
+        """Check if conversation history exceeds token budget."""
+        from src.agent.chat_context import should_compress
+        return should_compress(self.get_history(), max_tokens)
+
 
 class ConversationManager:
     """Manages multiple conversation sessions with TTL."""

@@ -1,0 +1,85 @@
+name: Upstream Check
+
+on:
+  schedule:
+    # Run weekly on Monday 09:00 UTC (17:00 CST)
+    - cron: '0 9 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt 2>/dev/null || true
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/ZhuLinsen/daily_stock_analysis.git
+          git fetch upstream main
+
+      - name: Count new commits
+        id: count
+        run: |
+          MERGE_BASE=$(git merge-base HEAD upstream/main)
+          COUNT=$(git rev-list --count $MERGE_BASE..upstream/main)
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Upstream has $COUNT new commits since $MERGE_BASE"
+
+      - name: Analyze if new commits exist
+        if: steps.count.outputs.count != '0'
+        run: |
+          python scripts/upstream_sync_audit.py --remote upstream --branch main --output /tmp/upstream_report.json --no-fetch 2>&1
+
+      - name: Create issue if new commits
+        if: steps.count.outputs.count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const count = '${{ steps.count.outputs.count }}';
+            let body = `## 上游有 ${count} 个新提交
+
+            ${count > 0 ? `上游仓库 [ZhuLinsen/daily_stock_analysis](https://github.com/ZhuLinsen/daily_stock_analysis) 有 **${count}** 个新提交等待评估。
+
+            运行 \`python scripts/upstream_sync_audit.py\` 查看详细的合并建议。` : '无新提交。'}
+
+            ---
+            *此 issue 由自动化工作流自动创建。*
+            `;
+
+            if (count > 0) {
+              try {
+                const report = JSON.parse(fs.readFileSync('/tmp/upstream_report.json', 'utf8'));
+                body += `\n\n### 扫描摘要\n\n`;
+                body += `- SAFE（可直接 cherry-pick）: ${report.summary.safe}\n`;
+                body += `- NEEDS_REVIEW: ${report.summary.needs_review}\n`;
+                body += `- BLOCKED: ${report.summary.blocked}\n`;
+                if (report.recommendations.zero_file_conflict_no_new_files.length > 0) {
+                  body += `\n### 可直接合入\n\n`;
+                  report.recommendations.zero_file_conflict_no_new_files.forEach(c => {
+                    body += `- \`${c.hash}\` ${c.subject}\n`;
+                  });
+                }
+              } catch (e) {
+                // report not available
+              }
+            }
+
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `上游更新检查: ${count} 个新提交`,
+              body: body,
+              labels: ['upstream-sync']
+            });

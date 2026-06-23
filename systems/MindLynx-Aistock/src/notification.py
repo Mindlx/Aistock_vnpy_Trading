@@ -76,6 +76,8 @@ def _signal_sort_key(r):
     return _SIGNAL_RANK.get(tag, 99), -r.sentiment_score
 from src.utils.data_processing import normalize_model_used
 from src.utils.sanitize import sanitize_diagnostic_text
+from src.core.trading_calendar import get_market_for_stock, infer_market_phase
+from src.market_phase_summary import format_public_market_status_line
 
 logger = logging.getLogger(__name__)
 
@@ -394,6 +396,23 @@ class NotificationService(
 
         return channels
 
+    def _format_market_status_line(
+        self,
+        results: list[AnalysisResult],
+        report_language: str,
+    ) -> str:
+        """Build a compact market/phase status line for report headers."""
+        for result in results or []:
+            code = getattr(result, "stock_code", None) or getattr(result, "code", None)
+            if not code:
+                continue
+            market = get_market_for_stock(code)
+            phase = infer_market_phase(market)
+            line = format_public_market_status_line(phase, market=market, language=report_language)
+            if line:
+                return line
+        return ""
+
     def _detect_all_channels(self) -> list[NotificationChannel]:
         """
         检测所有已配置的渠道
@@ -701,6 +720,11 @@ class NotificationService(
             "---",
             "",
         ]
+
+        # 市场状态行（如 "A股 · 盘中"）
+        market_status = self._format_market_status_line(results, report_language)
+        if market_status:
+            report_lines.extend([market_status, ""])
 
         # 按评分排序（高分在前）
         sorted_results = sorted(results, key=_signal_sort_key)
@@ -1703,6 +1727,9 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
             f"> {len(results)} {labels['stock_unit_compact']} ｜ 🟢{buy_count} 🟡{hold_count} 🔴{sell_count}",
             "",
         ]
+        market_status = self._format_market_status_line(results, report_language)
+        if market_status:
+            lines.extend([market_status, ""])
         for r in sorted_results:
             _, emoji, _ = self._get_signal_level(r)
             name = self._get_display_name(r, report_language)
@@ -1716,9 +1743,11 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 fs = quant.get("factor_summary", "")[:60]
                 if fs:
                     quant_line = f" ｜ {fs}"
+            price_str = f"¥{r.current_price:.2f}" if r.current_price is not None else "¥--"
+            change_str = f"{r.change_pct:+.1f}%" if r.change_pct is not None else "--"
             lines.append(
                 f"**{name}** {emoji} "
-                f"¥{r.current_price:.2f} {r.change_pct:+.1f}% ｜ "
+                f"{price_str} {change_str} ｜ "
                 f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
                 f"{labels['score_label']} {r.sentiment_score} ｜ {one}{quant_line}"
             )

@@ -3,7 +3,7 @@
 
 name: box_oscillation
 display_name: 箱体震荡
-description: 基于达瓦斯箱体理论（Darvas Box）的区间交易策略，箱底买入、箱顶减仓。
+description: 识别价格箱体区间，在箱底买入、箱顶减仓，适用于横盘震荡行情。
 category: framework
 core_rules: [1, 2, 3]
 required_tools:
@@ -15,7 +15,7 @@ default_priority: 50
 market_regimes: [sideways]
 
 instructions: |
-  **箱体震荡 — 基于达瓦斯箱体理论（Darvas Box）**
+  **箱体震荡战法（Box Range Trading Strategy）**
 
   核心逻辑：箱体内部价格在阻力位与支撑位之间反复震荡，
   "贴着支撑买、接近阻力卖"，通过波段操作获取区间收益。

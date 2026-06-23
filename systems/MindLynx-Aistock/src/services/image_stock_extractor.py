@@ -18,6 +18,7 @@ import sys
 import time
 
 from src.config import Config, get_config
+from src.storage import persist_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +276,21 @@ def _call_litellm_vision(image_b64: str, mime_type: str, api_key: str | None = N
         litellm = litellm_module
     response = litellm.completion(**call_kwargs)
     if response and response.choices and response.choices[0].message.content:
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        if hasattr(response, "usage") and response.usage:
+            try:
+                persist_llm_usage(
+                    {
+                        "prompt_tokens": getattr(response.usage, "prompt_tokens", 0) or 0,
+                        "completion_tokens": getattr(response.usage, "completion_tokens", 0) or 0,
+                        "total_tokens": getattr(response.usage, "total_tokens", 0) or 0,
+                    },
+                    model,
+                    call_type="vision",
+                )
+            except Exception as exc:
+                logger.warning("[LLM usage] failed to persist vision usage: %s", exc)
+        return content
     raise ValueError("LiteLLM vision returned empty response")
 
 

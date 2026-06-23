@@ -33,11 +33,11 @@ _ENGLISH_SECTION_PATTERNS = {
 }
 
 _CHINESE_SECTION_PATTERNS = {
-    "market_summary": r"#{3,4}\s*一、(?:盘面总览|市场总结)",
-    "index_commentary": r"#{3,4}\s*二、(?:指数结构|指数点评|主要指数)",
-    "sector_highlights": r"#{3,4}\s*三、(?:板块主线|热点解读|板块表现)",
-    "funds_sentiment": r"#{3,4}\s*四、(?:资金与情绪|资金动向)",
-    "news_catalysts": r"#{3,4}\s*五、(?:消息催化|后市展望)",
+    "market_summary": r"###\s*一、(?:盘面总览|市场总结)",
+    "index_commentary": r"###\s*二、(?:指数结构|指数点评|主要指数)",
+    "sector_highlights": r"###\s*三、(?:板块主线|热点解读|板块表现)",
+    "funds_sentiment": r"###\s*四、(?:资金与情绪|资金动向)",
+    "news_catalysts": r"###\s*五、(?:消息催化|后市展望)",
 }
 
 
@@ -491,8 +491,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     def generate_market_review(self, overview: MarketOverview, news: list,
                                previous_plan: str | None = None,
-                               session_label: str = "全天",
-                               stock_data: str | None = None) -> str:
+                               session_label: str = "全天") -> str:
         """
         使用大模型生成大盘复盘报告
 
@@ -507,8 +506,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             logger.warning("[大盘] AI分析器未配置或不可用，使用模板生成报告")
             return self._generate_template_review(overview, news)
 
-        # 构建 Prompt（含自选股数据，如有）
-        prompt = self._build_review_prompt(overview, news, previous_plan, session_label, stock_data=stock_data)
+        # 构建 Prompt
+        prompt = self._build_review_prompt(overview, news, previous_plan, session_label)
 
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point — never access private analyzer attributes.
@@ -600,8 +599,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if not match:
             return text
         start = match.end()
-        # Find the next section heading (一、二、三...) after this one
-        next_heading = re.search(r"\n#{2,4}\s*[一二三四五六七八九十]、", text[start:])
+        # Find the next ### heading after this one
+        next_heading = re.search(r"\n###\s", text[start:])
         if next_heading:
             insert_pos = start + next_heading.start()
         else:
@@ -636,15 +635,15 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             light = self.build_market_light_snapshot(overview)
             return "\n".join(
                 [
-                    f"> **Market Light**: {light['status']} ({light['label']}) | "
-                    f"**{light['score']}/100** {self._build_temperature_bar(light['score'])}",
-                    f"> **Reasons**: {'; '.join(light['reasons'])}",
-                    f"> **Guidance**: {light['guidance']}",
+                    f"- **Market Signal**: {light['score']}/100 "
+                    f"({light['temperature_label']}, {light['label']})",
+                    f"- **Drivers**: {'; '.join(light['reasons'])}",
+                    f"- **Guidance**: {light['guidance']}",
                     "",
-                    f"> 📈 Advancers **{overview.up_count}** / Decliners **{overview.down_count}** / "
-                    f"Flat **{overview.flat_count}** | "
-                    f"Limit-up **{overview.limit_up_count}** / Limit-down **{overview.limit_down_count}** | "
-                    f"Turnover **{overview.total_amount:.0f}** ({self._get_turnover_unit_label()})",
+                    f"- **Breadth**: Advancers {overview.up_count} / Decliners {overview.down_count} / "
+                    f"Flat {overview.flat_count}; "
+                    f"Limit-up {overview.limit_up_count} / Limit-down {overview.limit_down_count}; "
+                    f"Turnover {overview.total_amount:.0f} ({self._get_turnover_unit_label()})",
                 ]
             )
         light = self.build_market_light_snapshot(overview)
@@ -654,10 +653,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         up_ratio = overview.up_count / participation if participation else 0.0
         limit_spread = overview.limit_up_count - overview.limit_down_count
         lines = [
-            f"> **大盘红绿灯**：{_status_emoji.get(light['status'], '●')}（{light['label']}）",
-            f"> **核心原因**：{'；'.join(light['reasons'])}",
-            f"> **操作建议**：{light['guidance']}",
-            f"> **盘面温度**：{light['temperature_label']} **{score}/100** {self._build_temperature_bar(score)}",
+            f"- **盘面信号**：{score}/100（{label}，{light['label']}）",
+            f"- **信号依据**：{'；'.join(light['reasons'])}",
+            f"- **操作建议**：{light['guidance']}",
             "",
             "| 指标 | 数值 | 观察 |",
             "|------|------|------|",
@@ -684,9 +682,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         if self._get_review_language() == "en":
             label_map = {
-                "green": "constructive",
-                "yellow": "watch",
-                "red": "defensive",
+                "green": "risk-on",
+                "yellow": "balanced",
+                "red": "risk-off",
             }
             guidance_map = {
                 "green": "Risk appetite is acceptable; focus on leading themes and position discipline.",
@@ -719,7 +717,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def _build_market_light_reasons_zh(self, overview: MarketOverview, score: int) -> list[str]:
         participation = overview.up_count + overview.down_count
         up_ratio = overview.up_count / participation if participation else None
-        reasons: list[str] = [f"盘面温度 {score}/100"]
+        reasons: List[str] = []
         if up_ratio is not None:
             if up_ratio >= 0.6:
                 reasons.append(f"上涨家数占比 {up_ratio:.0%}，赚钱效应扩散")
@@ -732,12 +730,16 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             reasons.append(f"主要指数平均涨跌幅 {avg_change:+.2f}%")
         if overview.limit_up_count or overview.limit_down_count:
             reasons.append(f"涨跌停差 {overview.limit_up_count - overview.limit_down_count:+d}")
+        if not reasons and overview.total_amount:
+            reasons.append(f"成交额 {overview.total_amount:.0f} 亿，{self._describe_turnover(overview.total_amount)}")
+        if not reasons:
+            reasons.append("结构化涨跌数据有限，按可用行情综合判断")
         return reasons[:4]
 
     def _build_market_light_reasons_en(self, overview: MarketOverview, score: int) -> list[str]:
         participation = overview.up_count + overview.down_count
         up_ratio = overview.up_count / participation if participation else None
-        reasons: list[str] = [f"market temperature {score}/100"]
+        reasons: List[str] = []
         if up_ratio is not None:
             if up_ratio >= 0.6:
                 reasons.append(f"advancers ratio {up_ratio:.0%}, breadth is expanding")
@@ -750,6 +752,10 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             reasons.append(f"average major-index change {avg_change:+.2f}%")
         if overview.limit_up_count or overview.limit_down_count:
             reasons.append(f"limit-up/down spread {overview.limit_up_count - overview.limit_down_count:+d}")
+        if not reasons and overview.total_amount:
+            reasons.append(f"turnover {overview.total_amount:.0f} ({self._get_turnover_unit_label()})")
+        if not reasons:
+            reasons.append("limited structured breadth data; using available market inputs")
         return reasons[:4]
 
     @staticmethod
@@ -882,31 +888,21 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         return "\n".join(lines)
 
     def _build_news_block(self, news: list) -> str:
-        """Build a source-aware news catalyst table for the rendered report."""
+        """Build a source-aware news catalyst list for the rendered report."""
         if not news:
             return ""
-        if self._get_review_language() == "en":
+        language = self._get_review_language()
+        if language == "en":
             lines = [
                 "#### News Catalysts",
-                "| # | Headline | Snippet / Lead | Source |",
-                "|---|----------|----------------|--------|",
             ]
         else:
             lines = [
-                "#### 近三日催化线索",
-                "| 序号 | 事件/标题 | 摘要/线索片段 | 来源 |",
-                "|------|-----------|----------------|------|",
+                "#### 近三日市场线索",
             ]
 
         for idx, item in enumerate(news[:5], 1):
-            title = self._escape_table_cell(
-                self._compact_news_text(self._get_news_field(item, "title"), limit=80) or "-"
-            )
-            snippet = self._escape_table_cell(
-                self._compact_news_text(self._get_news_field(item, "snippet"), limit=180) or "-"
-            )
-            source = self._escape_table_cell(self._format_news_source_cell(item) or "-")
-            lines.append(f"| {idx} | {title} | {snippet} | {source} |")
+            lines.append(self._format_news_catalyst_line(idx, item, language=language))
         return "\n".join(lines)
 
     @staticmethod
@@ -920,15 +916,21 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         return str(value).strip()
 
     @classmethod
-    def _format_news_source_cell(cls, item: Any) -> str:
+    def _format_news_catalyst_line(cls, idx: int, item: Any, *, language: str = "zh") -> str:
+        fallback_title = "Untitled catalyst" if language == "en" else "未命名线索"
+        title = cls._compact_news_text(cls._get_news_field(item, "title"), limit=90) or fallback_title
         source = cls._compact_news_text(cls._get_news_field(item, "source"), limit=40)
         date_text = cls._compact_news_text(cls._get_news_field(item, "published_date"), limit=24)
         url = cls._compact_news_text(cls._get_news_field(item, "url"), limit=0)
-        label_parts = [part for part in (source, date_text) if part]
-        label = " / ".join(label_parts)
+        title_text = cls._escape_markdown_link_label(title)
         if url:
-            return f"[{label or 'URL'}]({url})"
-        return label
+            title_text = f"[{title_text}]({url})"
+        meta_parts = [part for part in (source, date_text) if part]
+        if language == "en":
+            meta = f" ({' / '.join(meta_parts)})" if meta_parts else ""
+        else:
+            meta = f"（{' / '.join(meta_parts)}）" if meta_parts else ""
+        return f"- {idx}. {title_text}{meta}"
 
     @staticmethod
     def _compact_news_text(value: str, *, limit: int) -> str:
@@ -954,13 +956,13 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         return f"{numeric_value:+.2f}%"
 
     @staticmethod
-    def _escape_table_cell(value: str) -> str:
-        return value.replace("|", "\\|")
-
-    @staticmethod
     def _build_temperature_bar(score: int) -> str:
         filled = max(0, min(10, round(score / 10)))
         return "█" * filled + "░" * (10 - filled)
+
+    @staticmethod
+    def _escape_markdown_link_label(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
     @staticmethod
     def _describe_turnover(total_amount: float) -> str:
@@ -1074,8 +1076,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     def _build_review_prompt(self, overview: MarketOverview, news: list,
                              previous_plan: str | None = None,
-                             session_label: str = "全天",
-                             stock_data: str | None = None) -> str:
+                             session_label: str = "全天") -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
 
@@ -1199,8 +1200,6 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 
 {self._get_strategy_prompt_block()}
 
-{stock_data or ""}
-
 ---
 
 # Output Template (follow this structure)
@@ -1227,9 +1226,6 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 
 ### 7. Strategy Plan
 (Provide an offensive/balanced/defensive stance, a position-sizing guideline, one invalidation trigger, and end with “For reference only, not investment advice.”)
-
-### 8. Stock Pool Advice
-(If stock pool factor data is provided above, give concise operation advice for each tracked stock based on factor signals and market context. Skip if no data.)
 
 ---
 
@@ -1268,8 +1264,6 @@ Output the report content directly, no extra commentary.
 
 {self._get_strategy_prompt_block()}
 
-{stock_data or ""}
-
 ---
 
 # 输出格式模板（请严格按此格式输出）
@@ -1301,11 +1295,6 @@ Output the report content directly, no extra commentary.
 
 ### 七、风险提示
 （列出需要关注的风险点；文末用引用形式补充：“> 以上数据仅供参考，不构成投资建议”）
-
-### 八、自选股操盘建议
-（如果【自选股因子数据】或【自选股实时行情】不为空，基于这些数据和当日大盘背景，对每只自选股给出独立操盘建议：明确操作方向、仓位参考和关键价位。
-⚠️ 注意：严禁编造价格数据！所有价格和涨跌幅必须来自上方数据表格中的"现价"和涨跌幅字段。如果数据中不包含某只股票的价格信息，切勿自行编造。
-如果数据为空则跳过此章节。）
 
 ---
 
@@ -1543,73 +1532,6 @@ Market conditions can change quickly. The data above is for reference only and d
         text = f"上期建议为{prev_text}，今日{result_word}。"
         return f"> {text}"
 
-    def _load_stock_pool_data(self) -> str | None:
-        """加载当日融合系统自选股分析数据，供LLM生成操盘建议。
-
-        优先从融合输出文件读取（含因子信号），融合不存在时降级到实时行情。
-        """
-        # 方案一：从融合输出读
-        try:
-            from pathlib import Path
-            today = datetime.now().strftime("%Y-%m-%d")
-            fusion_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "fusion_output"
-            if fusion_dir.exists():
-                files = sorted(fusion_dir.glob(f"fusion_{today}*.json"))
-                if files:
-                    import json
-                    data = json.loads(files[-1].read_text(encoding="utf-8"))
-                    lines = ["## 自选股因子数据"]
-                    items = data if isinstance(data, list) else data.get("results", [])
-                    if items:
-                        for item in items:
-                            code = item.get("stock_code", item.get("code", ""))
-                            name = item.get("stock_name", "")
-                            ly = item.get("lynx_score", 0)
-                            ml = item.get("mindlynx_score", 0)
-                            fusion = item.get("fusion_score", 0)
-                            sig = item.get("signal_name", "")
-                            # 也尝试补实时价
-                            price_str = self._fetch_realtime_price_str(code)
-                            price_col = f"  现价{price_str}" if price_str else ""
-                            lines.append(f"- **{name}**  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}{price_col}")
-                        return "\n".join(lines)
-        except Exception as e:
-            logger.debug(f"[大盘] 自选股融合数据加载失败: {e}")
-
-        # 方案二：融合不存在，降级到实时行情
-        return self._fetch_realtime_stock_data()
-
-    def _fetch_realtime_price_str(self, stock_code: str) -> str:
-        """获取单只股票的实时价格字符串（短格式）。"""
-        try:
-            q = self.data_manager.get_realtime_quote(stock_code, log_final_failure=False)
-            if q is not None and q.price is not None:
-                chg = f"{q.change_pct:+.2f}%" if q.change_pct is not None else ""
-                return f"¥{q.price:.2f}{chg}"
-        except Exception:
-            pass
-        return ""
-
-    def _fetch_realtime_stock_data(self) -> str | None:
-        """获取自选股实时行情数据（无融合因子时的降级方案）。"""
-        codes = getattr(self.config, "stock_list", [])
-        if not codes or not isinstance(codes, list):
-            return None
-        lines = ["## 自选股实时行情（融合因子数据暂不可用）"]
-        for code in codes:
-            try:
-                q = self.data_manager.get_realtime_quote(code, log_final_failure=False)
-                if q is not None and q.price is not None:
-                    name = q.name or code
-                    chg = f"{q.change_pct:+.2f}%" if q.change_pct is not None else ""
-                    vol_r = f"  量比{q.volume_ratio:.2f}" if q.volume_ratio is not None else ""
-                    lines.append(f"- **{name}**  ¥{q.price:.2f}  {chg}{vol_r}")
-                else:
-                    lines.append(f"- {code}  行情暂不可用")
-            except Exception:
-                lines.append(f"- {code}  行情获取失败")
-        return "\n".join(lines) if len(lines) > 1 else None
-
     def run_daily_review(self, session_label: str = "全天") -> str:
         """
         执行每日大盘复盘流程
@@ -1631,12 +1553,8 @@ Market conditions can change quickly. The data above is for reference only and d
         # 3. 读取上一期全天报告的明日交易计划，供 LLM 参考
         previous_plan = self._load_previous_plan()
 
-        # 3b. 读取当日融合系统自选股分析数据（如有）
-        stock_data = self._load_stock_pool_data()
-        logger.info(f"[大盘] 自选股数据: {'已加载' if stock_data else '无数据'}")
-
-        # 4. 生成复盘报告（LLM 自动包含上期建议验证 + 自选股分析）
-        report = self.generate_market_review(overview, news, previous_plan, session_label, stock_data=stock_data)
+        # 4. 生成复盘报告（LLM 自动包含上期建议验证）
+        report = self.generate_market_review(overview, news, previous_plan, session_label)
 
         logger.info("========== 大盘复盘分析完成 ==========")
 

@@ -45,7 +45,7 @@ EASTMONEY_ANNOUNCE_API = (
     "https://np-anotice-stock.eastmoney.com/api/security/annount/search"
 )
 CNINFO_SEARCH_API = "https://www.cninfo.com.cn/new/fulltextSearch/full"
-CNINFO_BASE_URL = "https://www.cninfo.com.cn/"
+CNINFO_BASE_URL = "http://www.cninfo.com.cn/"
 HUDONGYI_SEARCH_API = (
     "https://ir.p5w.net/api/ir-v2/Interaction/GetInteractionList"
 )
@@ -794,8 +794,8 @@ class EventFilter:
         if fp in self._seen_fingerprints:
             return False
         self._seen_fingerprints[fp] = now
-        # 每次有新事件都持久化，防止重启后重复推送
-        self._save_persisted()
+        if len(self._seen_fingerprints) % 50 == 0:
+            self._save_persisted()
         return True
 
     def should_keep(self, event: StockEvent) -> bool:
@@ -902,15 +902,6 @@ class EventMonitor:
                 self.stats["low_importance"] += 1
                 continue
 
-            # 严格执行重要性阈值：低于阈值的事件全部跳过（不推送、不触发分析）
-            if event.importance < self.importance_threshold:
-                self.stats["low_importance"] += 1
-                logger.debug(
-                    "EventMonitor: 重要性%d低于阈值%d, 跳过 %s",
-                    event.importance, self.importance_threshold, event.title[:50]
-                )
-                continue
-
             if event.is_high_importance:
                 self.stats["high_importance"] += 1
                 triggered.append(event)
@@ -926,31 +917,6 @@ class EventMonitor:
             self.stats["medium_importance"],
             self.stats["low_importance"],
         )
-
-        # ── 写入数据湖 (零侵入: ImportError 时跳过) ──
-        if all_events:
-            try:
-                from services.data_warehouse.storage import DataLake
-                lake = DataLake()
-                news_items = []
-                for ev in all_events:
-                    news_items.append({
-                        "stock_code": ev.code,
-                        "title": ev.title[:200],
-                        "url": ev.url,
-                        "summary": ev.content[:200],
-                        "source": ev.source,
-                        "category": ev.type.value if ev.type else "事件",
-                        "importance": min(3, ev.importance // 3),
-                        "published_at": datetime.fromtimestamp(ev.event_time).strftime("%Y-%m-%d %H:%M") if ev.event_time else "",
-                    })
-                if news_items:
-                    lake.insert_news(news_items)
-                    logger.debug("EventMonitor: 写入 %d 条事件到数据湖", len(news_items))
-            except ImportError:
-                pass
-            except Exception as exc:
-                logger.debug("EventMonitor: 数据湖写入失败: %s", exc)
 
         return triggered
 
@@ -1030,9 +996,6 @@ class EventMonitor:
     @staticmethod
     def _format_brief(event: StockEvent) -> str:
         """格式化简报消息（移动端紧凑格式）"""
-        import html as _html
-        import re as _re
-
         emoji_map = {
             EventType.EARNINGS: "📊", EventType.CONTRACT: "📋", EventType.BUYBACK: "🔄",
             EventType.REDUCE: "⬇️", EventType.INCREASE: "⬆️", EventType.RESTRUCTURE: "🔄",
@@ -1040,39 +1003,11 @@ class EventMonitor:
             EventType.DIVIDEND: "💰", EventType.REGULATORY: "🔍", EventType.POLICY: "📜",
             EventType.PRICE_ANOMALY: "📈", EventType.OTHER: "📌",
         }
-        # 事件类型中文名
-        type_cn = {
-            EventType.EARNINGS: "业绩", EventType.CONTRACT: "合同", EventType.BUYBACK: "回购",
-            EventType.REDUCE: "减持", EventType.INCREASE: "增持", EventType.RESTRUCTURE: "重组",
-            EventType.DELIST_RISK: "退市", EventType.SUSPENSION: "停牌", EventType.INVESTOR_QA: "互动",
-            EventType.DIVIDEND: "分红", EventType.REGULATORY: "监管", EventType.POLICY: "政策",
-            EventType.PRICE_ANOMALY: "异动", EventType.OTHER: "其他",
-        }
         emoji = emoji_map.get(event.type, "📌")
-        code = event.code
-        name = event.stock_name or code
-
-        # 解码HTML实体并剥离标签
-        raw_title = _html.unescape(event.title or "")
-        title = _re.sub(r"<[^>]+>", "", raw_title).strip()[:60]
-
-        # 清理标题中重复的名称前缀
-        if name and title.startswith(name):
-            title = title[len(name):].strip().lstrip("，,、：:")
-        if title.startswith(code):
-            title = title[len(code):].strip().lstrip("，,、：:")
-
-        # 巨潮公告PDF链接有反爬限制，跳过
-        url = event.url or ""
-        if url and url.startswith("http") and "cninfo" not in url:
-            url_part = f" | {url}"
-        else:
-            url_part = ""
-
-        label = type_cn.get(event.type, event.type.value)
-        from datetime import datetime as _dt
-        ts = _dt.now().strftime("%H:%M")
-        return f"{emoji} {ts} {name}: {title} [{label} 重要性{event.importance}]{url_part}"
+        name = event.stock_name or event.code
+        title = event.title[:60]
+        url_part = f" | {event.url}" if event.url else ""
+        return f"{emoji} {event.code} {event.type.value}: {title} [重要性{event.importance}]{url_part}"
 
     async def run_forever(
         self,

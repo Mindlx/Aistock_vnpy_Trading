@@ -137,6 +137,10 @@ class TrendAnalysisResult:
     signal_reasons: list[str] = field(default_factory=list)
     risk_factors: list[str] = field(default_factory=list)
 
+    # 近期各窗口最低价（用于ideal_buy推导）
+    recent_lows: dict[int, float] = field(default_factory=dict)
+    prev_close: float = 0.0  # 前一日收盘价（用于计算跌停价）
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "code": self.code,
@@ -255,13 +259,21 @@ class StockTrendAnalyzer:
         # 4. 支撑压力分析
         self._analyze_support_resistance(df, result)
 
-        # 5. MACD 分析
+        # 5. 计算各窗口最低价（用于ideal_buy推导）
+        result.prev_close = float(df.iloc[-2]["close"]) if len(df) >= 2 else result.current_price
+        if "low" in df.columns:
+            lows = df["low"].values
+            for window in [3, 5, 9, 20]:
+                if len(lows) >= window:
+                    result.recent_lows[window] = round(float(min(lows[-window:])), 2)
+
+        # 6. MACD 分析
         self._analyze_macd(df, result)
 
-        # 6. RSI 分析
+        # 7. RSI 分析
         self._analyze_rsi(df, result)
 
-        # 7. 生成买入信号
+        # 8. 生成买入信号
         self._generate_signal(result)
 
         return result

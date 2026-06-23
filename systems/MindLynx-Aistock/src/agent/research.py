@@ -26,6 +26,7 @@ from typing import Any
 from src.agent.llm_adapter import LLMToolAdapter
 from src.agent.runner import RunLoopResult, run_agent_loop
 from src.agent.tools.registry import ToolRegistry
+from src.storage import persist_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +293,12 @@ class ResearchAgent:
         )
         if response.provider == "error":
             raise RuntimeError(response.content or "LLM completion failed")
+        model_used = response.model or response.provider
+        if response.usage:
+            try:
+                persist_llm_usage(response.usage, model_used, call_type="research")
+            except Exception as exc:
+                logger.warning("[LLM usage] failed to persist research usage: %s", exc)
         return {
             "content": (response.content or "").strip(),
             "tokens": response.usage.get("total_tokens", 0),

@@ -20,21 +20,14 @@ def create_bull_researcher(llm):
             else "Asset fundamentals report (may be unavailable for crypto)"
         )
 
-        prompt = f"""You are a Bull Analyst advocating for investing in the {target_label} on China's A-share market. Build a strong, evidence-based case emphasizing growth potential and positive indicators.
+        prompt = f"""You are a Bull Analyst advocating for investing in the {target_label}. Your task is to build a strong, evidence-based case emphasizing growth potential, competitive advantages, and positive market indicators. Leverage the provided research and data to address concerns and counter bearish arguments effectively.
 
-**A-share Bull Thesis Dimensions — prioritize when evidence exists:**
-
-- **政策顺风 (Policy Tailwind)**: Is the company in a government-favored industry (半导体, 新能源, AI, 高端制造)? Are there supportive policies or subsidies?
-
-- **北向资金支持 (Foreign Capital Support)**: Is north-bound capital flowing in? Persistent inflows signal international confidence.
-
-- **主力资金跟随 (Major Capital Following)**: Is 主力资金 net buying? Research from PBoC/Tsinghua shows large orders have predictive power in A-shares.
-
-- **零售情绪动能 (Retail Sentiment Momentum)**: With ~80% retail volume, strong Xueqiu/Guba bullish sentiment can drive sustained momentum — not just noise.
-
-- **Growth Potential & Competitive Advantages**: Market opportunities, revenue projections, 国产替代 potential, brand strength.
-
-- **Bear Counterpoints**: Critically address concerns about 商誉, 质押, ST risk, or policy headwinds.
+Key points to focus on:
+- Growth Potential: Highlight the company's market opportunities, revenue projections, and scalability.
+- Competitive Advantages: Emphasize factors like unique products, strong branding, or dominant market positioning.
+- Positive Indicators: Use financial health, industry trends, and recent positive news as evidence.
+- Bear Counterpoints: Critically analyze the bear argument with specific data and sound reasoning, addressing concerns thoroughly and showing why the bull perspective holds stronger merit.
+- Engagement: Present your argument in a conversational style, engaging directly with the bear analyst's points and debating effectively rather than just listing data.
 
 Resources available:
 Market research report: {market_research_report}
@@ -43,6 +36,7 @@ Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
 Conversation history of the debate: {history}
 Last bear argument: {current_response}
+Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.
 """ + get_language_instruction()
 
         response = llm.invoke(prompt)

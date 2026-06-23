@@ -187,6 +187,21 @@ def _is_us_code(stock_code: str) -> bool:
     return is_us_stock_code(stock_code)
 
 
+def is_jp_stock_code(stock_code: str) -> bool:
+    """Check if a stock code is a Japanese stock (Yahoo Finance .T suffix)."""
+    if not stock_code or not isinstance(stock_code, str):
+        return False
+    return stock_code.strip().upper().endswith(".T")
+
+
+def is_kr_stock_code(stock_code: str) -> bool:
+    """Check if a stock code is a Korean stock (Yahoo Finance .KS or .KQ suffix)."""
+    if not stock_code or not isinstance(stock_code, str):
+        return False
+    code = stock_code.strip().upper()
+    return code.endswith(".KS") or code.endswith(".KQ")
+
+
 def _to_sina_tx_symbol(stock_code: str) -> str:
     """Convert 6-digit A-share code to sh/sz/bj prefixed symbol for Sina/Tencent APIs."""
     base = (stock_code.strip().split(".")[0] if "." in stock_code else stock_code).strip()

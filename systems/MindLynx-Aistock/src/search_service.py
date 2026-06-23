@@ -112,11 +112,22 @@ class SearchResult:
     url: str
     source: str  # 来源网站
     published_date: str | None = None
+    relevance_score: int | None = None
+    relevance_category: str | None = None
+    relevance_reasons: list[str] | None = None
 
     def to_text(self) -> str:
         """转换为文本格式"""
         date_str = f" ({self.published_date})" if self.published_date else ""
-        return f"【{self.source}】{self.title}{date_str}\n{self.snippet}"
+        relevance_parts: list[str] = []
+        if self.relevance_category:
+            relevance_parts.append(self.relevance_category)
+        if self.relevance_score is not None:
+            relevance_parts.append(f"score={self.relevance_score}")
+        if self.relevance_reasons:
+            relevance_parts.append(f"依据: {'；'.join(self.relevance_reasons[:3])}")
+        relevance_str = f"\n关联度: {'; '.join(relevance_parts)}" if relevance_parts else ""
+        return f"【{self.source}】{self.title}{date_str}\n{self.snippet}{relevance_str}"
 
 
 @dataclass
@@ -1593,16 +1604,6 @@ class EastMoneyNewsProvider(BaseSearchProvider):
 
     _STOCK_CODE_RE = re.compile(r"\b(\d{6})\b")
 
-    # 权威媒体优先级（分值越高越优先展示）
-    _AUTHORITY_MEDIA = {
-        "中国证券报": 90, "中国证券报·中证网": 90, "上海证券报": 90, "证券日报": 90,
-        "证券时报": 85, "证券时报网": 85, "券商中国": 85, "证券时报·券商中国": 85,
-        "财联社": 80, "每日经济新闻": 80, "每经": 80,
-        "第一财经": 75, "经济日报": 75, "经济参考报": 75,
-        "人民财讯": 70, "新华网": 70, "新华社": 70, "人民日报": 70,
-        "界面新闻": 65, "澎湃新闻": 65, "21世纪经济报道": 65,
-    }
-
     def __init__(self):
         super().__init__([], "EastMoney")
         self._available = True
@@ -1675,15 +1676,8 @@ class EastMoneyNewsProvider(BaseSearchProvider):
                     )
                 )
 
-            # 按权威媒体优先级排序，同优先级内按时间倒序
-            results.sort(
-                key=lambda r: (
-                    self._AUTHORITY_MEDIA.get(r.source, 0),
-                    r.published_date or "",
-                ),
-                reverse=True,
-            )
-            results = results[:max_results]
+                if len(results) >= max_results:
+                    break
 
             logger.info(
                 f"[{self.name}] 股票 {stock_code} 获取 {len(results)}/{len(df)} 条新闻，耗时 {time.time() - start_time:.2f}s"
@@ -2161,6 +2155,24 @@ class SearchService:
     FUTURE_TOLERANCE_DAYS = 1
     _CHINESE_TEXT_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
     _US_STOCK_RE = re.compile(r"^[A-Za-z]{1,5}(\.[A-Za-z])?$")
+    _DIRECT_NEWS_CATEGORY = "direct_company_news"
+    _SECTOR_NEWS_CATEGORY = "sector_related_news"
+    _MACRO_NEWS_CATEGORY = "macro_market_news"
+    _COMPANY_EVENT_TERMS = (
+        "公告", "披露", "发布", "收购", "回购", "减持", "增持", "诉讼",
+        "业绩", "财报", "营收", "净利润", "分红", "订单", "合作", "中标",
+        "earnings", "revenue", "profit", "guidance", "filing",
+        "sec", "buyback", "dividend", "lawsuit", "merger",
+        "acquisition", "quarterly", "announces", "launches",
+    )
+    _LOW_QUALITY_DOWNLOAD_TERMS = (
+        "下载", "安装包", "apk", "download", "install",
+        "免费下载", "客户端下载",
+    )
+    _OFFICIAL_SOURCE_HOSTS = (
+        "cninfo.com.cn", "sse.com", "szse.cn", "hkexnews.hk",
+        "sec.gov", "nasdaq.com", "nyse.com",
+    )
 
     def __init__(
         self,

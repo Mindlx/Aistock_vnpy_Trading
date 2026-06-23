@@ -18,7 +18,6 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-
 StructuredMethod = Literal[
     "function_calling",  # uses tools; respects supports_tool_choice
     "json_mode",         # uses response_format={"type":"json_object"}
@@ -97,13 +96,6 @@ _BY_ID: dict[str, ModelCapabilities] = {
     "deepseek-reasoner": _DEEPSEEK_THINKING,
     "deepseek-v4-flash": _DEEPSEEK_THINKING,
     "deepseek-v4-pro": _DEEPSEEK_THINKING,
-    # 本地模型 (llama.cpp), 不支持 function calling, 回退 free-text
-    "qwen3.6-27b": ModelCapabilities(
-        supports_tool_choice=False,
-        supports_json_mode=False,
-        supports_json_schema=False,
-        preferred_structured_method="none",
-    ),
     # MiniMax — full official model lineup per
     # platform.minimax.io/docs/api-reference/text-openai-api
     "MiniMax-M2.7": _MINIMAX_THINKING,

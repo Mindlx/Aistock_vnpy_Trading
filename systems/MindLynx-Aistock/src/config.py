@@ -638,6 +638,9 @@ class Config(LLMConfig, NotificationConfig, DataConfig, AnalysisConfig):
     # 实时行情预取（Issue #455）：设为 false 可禁用，避免 efinance/akshare_em 全市场拉取
     prefetch_realtime_quotes: bool = True
 
+    # RSS 情报管道开关：启用后在分析流水线中注入 RSS IntelligenceItem 数据
+    rss_pipeline_enabled: bool = False
+
     # === 数据库配置 ===
     database_path: str = "./data/stock_analysis.db"
     sqlite_wal_enabled: bool = True
@@ -1570,6 +1573,8 @@ class Config(LLMConfig, NotificationConfig, DataConfig, AnalysisConfig):
                 minimum=1,
             ),
             portfolio_fx_update_enabled=os.getenv("PORTFOLIO_FX_UPDATE_ENABLED", "true").lower() == "true",
+            # RSS 情报管道：启用后在分析流水线中注入 IntelligenceItem 数据
+            rss_pipeline_enabled=os.getenv("RSS_PIPELINE_ENABLED", "false").lower() == "true",
         )
 
         # Validate after construction (warnings only, never block startup)

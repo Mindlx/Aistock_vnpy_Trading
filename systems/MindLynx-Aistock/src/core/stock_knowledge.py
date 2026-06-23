@@ -110,154 +110,150 @@ def build_stock_knowledge(
             "factor": 14,
         }
 
-    with sqlite3.connect(db_path) as conn:
-        now = datetime.now()
-        result: dict = {}
-        freshness: list[str] = []
+    conn = sqlite3.connect(db_path)
+    now = datetime.now()
+    result: dict = {}
+    freshness: list[str] = []
 
-        # 1. Prior analysis — within TTL
-        cutoff = (now - timedelta(days=max_age_days["analysis"])).strftime("%Y-%m-%d")
-        rows = conn.execute(
-            "SELECT sentiment_score, operation_advice, trend_prediction, created_at "
-            "FROM analysis_history WHERE code=? AND sentiment_score IS NOT NULL "
-            "AND date(created_at) >= ? "
-            "ORDER BY created_at DESC LIMIT 5",
-            (code, cutoff[:10]),
-        ).fetchall()
-        if rows:
-            prior = []
-            for score, advice, trend, ts_str in rows[:3]:
-                try:
-                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S.%f")
-                except ValueError:
-                    ts = datetime.strptime(ts_str[:19], "%Y-%m-%d %H:%M:%S")
-                age = (now.date() - ts.date()).days
-                ts_label = ts.strftime("%m-%d %H:%M")
-                prior.append(f"[{ts_label}] {score}分 {advice} {trend}")
-            result["analysis_history"] = prior
-            scores = [r[0] for r in reversed(rows)]
-            if len(scores) >= 2 and scores[0] != scores[-1]:
-                result["score_trend"] = f"{'↑' if scores[-1] > scores[0] else '↓'}{abs(scores[-1] - scores[0])}分"
-            else:
-                result["score_trend"] = "→ 稳定"
-            oldest = min((now.date() - _parse_ts(r[3]).date()).days for r in rows[:3]) if rows else 0
-            if oldest > 3:
-                cutoff_date = (now - timedelta(days=max_age_days["analysis"])).strftime("%Y-%m-%d")
-                freshness.append(f"⚠️ 分析数据早于{cutoff_date}(已过TTL={max_age_days['analysis']}d)")
-
-        # 1.5 Factor score history
-        cutoff_factor = (now - timedelta(days=max_age_days["factor"])).strftime("%Y-%m-%d")
-        factor_rows = conn.execute(
-            "SELECT context_snapshot, created_at FROM analysis_history "
-            "WHERE code=? AND context_snapshot IS NOT NULL AND date(created_at) >= ? "
-            "ORDER BY created_at DESC LIMIT 5",
-            (code, cutoff_factor[:10]),
-        ).fetchall()
-        if factor_rows:
-            import re
-            factor_scores = []
-            for snap_str, ts_str in factor_rows:
-                try:
-                    snap = __import__("json").loads(snap_str) if isinstance(snap_str, str) else snap_str
-                    fp = snap.get("factor_profile", "")
-                    m = re.search(r"\*\*综合得分\*\*:\s*([+-]?\d+\.?\d*)\s*\((.+?)\)", fp)
-                    if m:
-                        factor_scores.append((float(m.group(1)), m.group(2), ts_str[:10]))
-                    else:
-                        # Fallback: 用简单字符串搜索提取综合得分
-                        idx = fp.find("综合得分")
-                        if idx >= 0:
-                            rest = fp[idx+4:]
-                            m2 = re.search(r"([+-]?\d+\.?\d*)", rest)
-                            if m2:
-                                factor_scores.append((float(m2.group(1)), "", ts_str[:10]))
-                                logger.debug("factor_trend regex不匹配，使用fallback提取: %s", m2.group(1))
-                except Exception:
-                    continue
-            if len(factor_scores) >= 2:
-                recent = factor_scores[0][0]
-                prior = factor_scores[-1][0]
-                trend = "↑" if recent > prior else ("↓" if recent < prior else "→")
-                result["factor_trend"] = (
-                    f"近{max_age_days['factor']}天因子综合得分: {factor_scores[0][2]} {recent:+.2f} ({factor_scores[0][1]}), "
-                    f"较{len(factor_scores)}次前 {trend}{abs(recent - prior):.2f}"
-                )
-            elif factor_scores:
-                result["factor_trend"] = f"最新因子综合得分: {factor_scores[0][2]} {factor_scores[0][0]:+.2f} ({factor_scores[0][1]})"
-
-        # 2. Fundamental trend
-        cutoff = (now - timedelta(days=max_age_days["fundamentals"])).strftime("%Y-%m-%d %H:%M:%S")
-        rows = conn.execute(
-            "SELECT payload, created_at FROM fundamental_snapshot "
-            "WHERE code=? AND date(created_at) >= ? ORDER BY created_at DESC LIMIT 2",
-            (code, cutoff),
-        ).fetchall()
-        if rows and rows[0][0]:
+    # 1. Prior analysis — within TTL
+    cutoff = (now - timedelta(days=max_age_days["analysis"])).strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT sentiment_score, operation_advice, trend_prediction, created_at "
+        "FROM analysis_history WHERE code=? AND sentiment_score IS NOT NULL "
+        "AND date(created_at) >= ? "
+        "ORDER BY created_at DESC LIMIT 5",
+        (code, cutoff[:10]),
+    ).fetchall()
+    if rows:
+        prior = []
+        for score, advice, trend, ts_str in rows[:3]:
             try:
-                snap = __import__("json").loads(rows[0][0]) if isinstance(rows[0][0], str) else rows[0][0]
-                val = snap.get("valuation", snap.get("data", {}))
-                pe = val.get("pe_ratio") if isinstance(val, dict) else None
-                pb = val.get("pb_ratio") if isinstance(val, dict) else None
-                if pe or pb:
-                    result["fundamentals"] = f"PE={pe or '?'} PB={pb or '?'}"
-                    age = (now.date() - _parse_ts(rows[0][1]).date()).days
-                    if age > 30:
-                        cutoff_date = (now - timedelta(days=max_age_days["fundamentals"])).strftime("%Y-%m-%d")
-                        freshness.append(f"⚠️ 基本面数据早于{cutoff_date}(已过TTL={max_age_days['fundamentals']}d)")
-            except (__import__("json").JSONDecodeError, KeyError, TypeError):
-                pass
+                ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S.%f")
+            except ValueError:
+                ts = datetime.strptime(ts_str[:19], "%Y-%m-%d %H:%M:%S")
+            age = (now.date() - ts.date()).days
+            # Use absolute timestamp — LLMs need exact dates, not relative ones
+            ts_label = ts.strftime("%m-%d %H:%M")
+            prior.append(f"[{ts_label}] {score}分 {advice} {trend}")
+        result["analysis_history"] = prior
+        scores = [r[0] for r in reversed(rows)]
+        if len(scores) >= 2 and scores[0] != scores[-1]:
+            result["score_trend"] = f"{'↑' if scores[-1] > scores[0] else '↓'}{abs(scores[-1] - scores[0])}分"
+        else:
+            result["score_trend"] = "→ 稳定"
+        # Freshness indicator — use absolute cutoff date
+        oldest = min((now.date() - _parse_ts(r[3]).date()).days for r in rows[:3]) if rows else 0
+        if oldest > 3:
+            cutoff_date = (now - timedelta(days=max_age_days["analysis"])).strftime("%Y-%m-%d")
+            freshness.append(f"⚠️ 分析数据早于{cutoff_date}(已过TTL={max_age_days['analysis']}d)")
 
-        # 3. Authoritative announcements
-        cutoff = (now - timedelta(days=max_age_days["events"])).strftime("%Y-%m-%d")
-        ann_rows = conn.execute(
-            "SELECT dimension, title, snippet, provider FROM news_intel "
-            "WHERE code=? AND dimension IN ('announcements','latest_news') "
-            "AND fetched_at >= ? ORDER BY fetched_at DESC LIMIT 3",
-            (code, cutoff),
-        ).fetchall()
-        if ann_rows:
-            announcements = []
-            for dim, title, snippet, provider in ann_rows:
-                text = str(title or '') + ' ' + str(snippet or '')
-                keywords = ["减持", "增持", "回购", "业绩", "重组", "中标", "合同", "退市", "ST", "分红", "送转", "问询", "处罚"]
-                hits = [k for k in keywords if k in text]
-                label = f"[{dim}] " + (",".join(hits) if hits else str(title or '')[:60])
-                announcements.append(label)
-            if announcements:
-                result["authoritative_news"] = announcements[:5]
+    # 1.5 Factor score history — track composite_score trend (F5 fix)
+    cutoff_factor = (now - timedelta(days=max_age_days["factor"])).strftime("%Y-%m-%d")
+    factor_rows = conn.execute(
+        "SELECT context_snapshot, created_at FROM analysis_history "
+        "WHERE code=? AND context_snapshot IS NOT NULL AND date(created_at) >= ? "
+        "ORDER BY created_at DESC LIMIT 5",
+        (code, cutoff_factor[:10]),
+    ).fetchall()
+    if factor_rows:
+        import re
+        factor_scores = []
+        for snap_str, ts_str in factor_rows:
+            try:
+                snap = __import__("json").loads(snap_str) if isinstance(snap_str, str) else snap_str
+                fp = snap.get("factor_profile", "")
+                m = re.search(r"\*\*综合得分\*\*:\s*([+-]?\d+\.?\d*)\s*\((.+?)\)", fp)
+                if m:
+                    factor_scores.append((float(m.group(1)), m.group(2), ts_str[:10]))
+            except Exception:
+                continue
+        if len(factor_scores) >= 2:
+            recent = factor_scores[0][0]
+            prior = factor_scores[-1][0]
+            trend = "↑" if recent > prior else ("↓" if recent < prior else "→")
+            result["factor_trend"] = (
+                f"近{max_age_days['factor']}天因子综合得分: {factor_scores[0][2]} {recent:+.2f} ({factor_scores[0][1]}), "
+                f"较{len(factor_scores)}次前 {trend}{abs(recent - prior):.2f}"
+            )
+        elif factor_scores:
+            result["factor_trend"] = f"最新因子综合得分: {factor_scores[0][2]} {factor_scores[0][0]:+.2f} ({factor_scores[0][1]})"
 
-        # 4. Events (alert triggers)
-        cutoff = (now - timedelta(days=max_age_days["events"])).strftime("%Y-%m-%d %H:%M:%S")
+    # 2. Fundamental trend
+    cutoff = (now - timedelta(days=max_age_days["fundamentals"])).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT payload, created_at FROM fundamental_snapshot "
+        "WHERE code=? AND date(created_at) >= ? ORDER BY created_at DESC LIMIT 2",
+        (code, cutoff),
+    ).fetchall()
+    if rows and rows[0][0]:
         try:
-            event_rows = conn.execute(
-                "SELECT reason, status, triggered_at FROM alert_triggers "
-                "WHERE target=? AND triggered_at >= ? ORDER BY triggered_at DESC LIMIT 5",
-                (code, cutoff),
-            ).fetchall()
-            if event_rows:
-                events = []
-                for reason, status, ts in event_rows[:3]:
-                    events.append(f"[{status}] {reason[:80] if reason else '?'}")
-                result["events"] = events
-        except sqlite3.OperationalError:
+            snap = __import__("json").loads(rows[0][0]) if isinstance(rows[0][0], str) else rows[0][0]
+            val = snap.get("valuation", snap.get("data", {}))
+            pe = val.get("pe_ratio") if isinstance(val, dict) else None
+            pb = val.get("pb_ratio") if isinstance(val, dict) else None
+            if pe or pb:
+                result["fundamentals"] = f"PE={pe or '?'} PB={pb or '?'}"
+                age = (now.date() - _parse_ts(rows[0][1]).date()).days
+                if age > 30:
+                    cutoff_date = (now - timedelta(days=max_age_days["fundamentals"])).strftime("%Y-%m-%d")
+                    freshness.append(f"⚠️ 基本面数据早于{cutoff_date}(已过TTL={max_age_days['fundamentals']}d)")
+        except (__import__("json").JSONDecodeError, KeyError, TypeError):
             pass
 
-        # 4. Board/sector
-        cutoff = (now - timedelta(days=max_age_days["sector"])).strftime("%Y-%m-%d %H:%M:%S")
-        board_rows = conn.execute(
-            "SELECT payload FROM fundamental_snapshot WHERE code=? "
-            "AND payload LIKE '%belong_boards%' AND date(created_at) >= ? "
-            "ORDER BY created_at DESC LIMIT 1",
+    # 3. Authoritative announcements (from news_intel — 权威公告)
+    cutoff = (now - timedelta(days=max_age_days["events"])).strftime("%Y-%m-%d")
+    ann_rows = conn.execute(
+        "SELECT dimension, title, snippet, provider FROM news_intel "
+        "WHERE code=? AND dimension IN ('announcements','latest_news') "
+        "AND fetched_at >= ? ORDER BY fetched_at DESC LIMIT 3",
+        (code, cutoff),
+    ).fetchall()
+    if ann_rows:
+        announcements = []
+        for dim, title, snippet, provider in ann_rows:
+            text = str(title or '') + ' ' + str(snippet or '')
+            # Extract key terms
+            keywords = ["减持", "增持", "回购", "业绩", "重组", "中标", "合同", "退市", "ST", "分红", "送转", "问询", "处罚"]
+            hits = [k for k in keywords if k in text]
+            label = f"[{dim}] " + (",".join(hits) if hits else str(title or '')[:60])
+            announcements.append(label)
+        if announcements:
+            result["authoritative_news"] = announcements[:5]
+
+    # 4. Events (alert triggers)
+    cutoff = (now - timedelta(days=max_age_days["events"])).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        event_rows = conn.execute(
+            "SELECT reason, status, triggered_at FROM alert_triggers "
+            "WHERE target=? AND triggered_at >= ? ORDER BY triggered_at DESC LIMIT 5",
             (code, cutoff),
         ).fetchall()
-        if board_rows and board_rows[0][0]:
-            try:
-                snap = __import__("json").loads(board_rows[0][0]) if isinstance(board_rows[0][0], str) else board_rows[0][0]
-                boards = snap.get("belong_boards", [])
-                if boards:
-                    result["sector"] = ", ".join(b.get("name", b) for b in boards[:3] if isinstance(b, dict))
-            except (__import__("json").JSONDecodeError, KeyError):
-                pass
+        if event_rows:
+            events = []
+            for reason, status, ts in event_rows[:3]:
+                events.append(f"[{status}] {reason[:80] if reason else '?'}")
+            result["events"] = events
+    except sqlite3.OperationalError:
+        pass
+
+    # 4. Board/sector
+    cutoff = (now - timedelta(days=max_age_days["sector"])).strftime("%Y-%m-%d %H:%M:%S")
+    board_rows = conn.execute(
+        "SELECT payload FROM fundamental_snapshot WHERE code=? "
+        "AND payload LIKE '%belong_boards%' AND date(created_at) >= ? "
+        "ORDER BY created_at DESC LIMIT 1",
+        (code, cutoff),
+    ).fetchall()
+    if board_rows and board_rows[0][0]:
+        try:
+            snap = __import__("json").loads(board_rows[0][0]) if isinstance(board_rows[0][0], str) else board_rows[0][0]
+            boards = snap.get("belong_boards", [])
+            if boards:
+                result["sector"] = ", ".join(b.get("name", b) for b in boards[:3] if isinstance(b, dict))
+        except (__import__("json").JSONDecodeError, KeyError):
+            pass
+
+    conn.close()
 
     # 5. Latest report content (daily markdown report)
     report_text = _find_latest_report(code)

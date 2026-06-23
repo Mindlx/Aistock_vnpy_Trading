@@ -32,6 +32,7 @@ from src.data.stock_index_loader import get_index_stock_name
 from src.data.stock_mapping import STOCK_NAME_MAP, is_meaningful_stock_name
 
 from .fundamental_adapter import AkshareFundamentalAdapter
+from .yfinance_fundamental_adapter import YfinanceFundamentalAdapter
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -157,11 +158,18 @@ def _is_etf_code(code: str) -> bool:
 
 
 def _market_tag(code: str) -> str:
-    """返回市场标签: cn/us/hk."""
+    """返回市场标签: cn/us/hk/jp/kr."""
     if _is_us_market(code):
         return "us"
     if _is_hk_market(code):
         return "hk"
+    c = (code or "").strip().upper()
+    # JP: .T suffix (Tokyo Stock Exchange, Yahoo Finance convention)
+    if c.endswith(".T"):
+        return "jp"
+    # KR: .KS (KOSPI), .KQ (KOSDAQ) suffixes (Yahoo Finance convention)
+    if c.endswith(".KS") or c.endswith(".KQ"):
+        return "kr"
     return "cn"
 
 
@@ -594,6 +602,7 @@ class DataFetcherManager:
             # 默认数据源将在首次使用时延迟加载
             self._init_default_fetchers()
         self._fundamental_adapter = AkshareFundamentalAdapter()
+        self._yfinance_fundamental_adapter = YfinanceFundamentalAdapter()
         self._tickflow_fetcher = None
         self._tickflow_api_key: str | None = None
         self._tickflow_lock = RLock()
@@ -2461,11 +2470,6 @@ class DataFetcherManager:
         stock_code = normalize_stock_code(stock_code)
         market = _market_tag(stock_code)
         is_etf = _is_etf_code(stock_code)
-        if market in {"us", "hk"}:
-            return self._build_market_not_supported(
-                market=market,
-                reason="market not supported",
-            )
 
         stage_timeout = float(
             budget_seconds if budget_seconds is not None else config.fundamental_stage_timeout_seconds
@@ -2542,7 +2546,7 @@ class DataFetcherManager:
             [valuation_err] if valuation_err else [],
         )
 
-        # growth / earnings / institution (one AkShare call)
+        # growth / earnings / institution (one adapter call)
         if remaining_seconds <= 0:
             bundle_status = "failed"
             bundle_payload: dict[str, Any] = {}
@@ -2550,8 +2554,12 @@ class DataFetcherManager:
             bundle_ms = 0
         else:
             bundle_timeout = min(fetch_timeout, remaining_seconds)
+            if market in {"us", "hk"}:
+                _bundle_fn = lambda: self._yfinance_fundamental_adapter.get_fundamental_bundle(stock_code, market)
+            else:
+                _bundle_fn = lambda: self._fundamental_adapter.get_fundamental_bundle(stock_code)
             bundle_payload, bundle_err_msg, bundle_ms = self._run_with_retry(
-                lambda: self._fundamental_adapter.get_fundamental_bundle(stock_code),
+                _bundle_fn,
                 bundle_timeout,
                 "fundamental_bundle",
             )

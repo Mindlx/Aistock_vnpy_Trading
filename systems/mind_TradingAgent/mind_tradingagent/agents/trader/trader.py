@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage
 
 from mind_tradingagent.agents.schemas import TraderProposal, render_trader_proposal
 from mind_tradingagent.agents.utils.agent_utils import (
-    build_instrument_context,
+    get_instrument_context_from_state,
     get_language_instruction,
 )
 from mind_tradingagent.agents.utils.structured import (
@@ -22,18 +22,16 @@ def create_trader(llm):
 
     def trader_node(state, name):
         company_name = state["company_of_interest"]
-        asset_type = state.get("asset_type", "stock")
-        instrument_context = build_instrument_context(company_name, asset_type)
+        instrument_context = get_instrument_context_from_state(state)
         investment_plan = state["investment_plan"]
 
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are a trading agent analyzing market data to make investment decisions for Chinese A-share markets. "
+                    "You are a trading agent analyzing market data to make investment decisions. "
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
-                    "Anchor your reasoning in the analysts' reports and the research plan. "
-                    "Account for A-share T+1 settlement (positions cannot be exited same-day) and price-limit constraints when sizing entries and stop-losses."
+                    "Anchor your reasoning in the analysts' reports and the research plan."
                     + get_language_instruction()
                 ),
             },

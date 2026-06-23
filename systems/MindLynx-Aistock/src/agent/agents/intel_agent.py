@@ -80,6 +80,12 @@ Return **only** a JSON object:
         parts = [f"Gather intelligence and assess sentiment for stock **{ctx.stock_code}**"]
         if ctx.stock_name:
             parts[0] += f" ({ctx.stock_name})"
+
+        # Include pre-fetched RSS intelligence if available
+        rss_intel = ctx.get_data("rss_intelligence")
+        if rss_intel:
+            parts.append(f"\n\n## Pre-fetched RSS Intelligence\n{rss_intel}")
+
         parts.append(
             "Steps:\n"
             "1. Call search_comprehensive_intel to get latest news, company announcements "

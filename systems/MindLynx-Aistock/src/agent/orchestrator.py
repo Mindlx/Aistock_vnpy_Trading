@@ -308,7 +308,13 @@ class AgentOrchestrator:
         ctx.meta["response_mode"] = "chat"
 
         session = conversation_manager.get_or_create(session_id)
-        history = session.get_history()
+
+        if session.should_compress(max_tokens=4000):
+            from src.agent.chat_context import compress_history
+            history = compress_history(session.get_history(), max_tokens=4000)
+        else:
+            history = session.get_history()
+
         if history:
             ctx.meta["conversation_history"] = history
 
@@ -703,7 +709,7 @@ class AgentOrchestrator:
             ctx.meta["report_language"] = normalize_report_language(context.get("report_language", "zh"))
 
             # Pre-populate data fields that the caller already has
-            for data_key in ("realtime_quote", "daily_history", "chip_distribution", "trend_result", "news_context"):
+            for data_key in ("realtime_quote", "daily_history", "chip_distribution", "trend_result", "news_context", "rss_intelligence"):
                 if context.get(data_key):
                     ctx.set_data(data_key, context[data_key])
 

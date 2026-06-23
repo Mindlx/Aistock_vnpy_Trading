@@ -19,6 +19,7 @@ def __getattr__(name: str):
         "BacktestService": "src.services.backtest_service",
         "HistoryService": "src.services.history_service",
         "StockService": "src.services.stock_service",
+        "IntelligenceService": "src.services.intelligence_service",
         "TaskService": "src.services.task_service",
         "get_task_service": "src.services.task_service",
     }
@@ -34,6 +35,7 @@ __all__ = [
     "AnalysisService",
     "BacktestService",
     "HistoryService",
+    "IntelligenceService",
     "StockService",
     "TaskService",
     "get_task_service",

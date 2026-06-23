@@ -6,13 +6,9 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from sklearn.metrics import mean_squared_error      # type: ignore
-try:
-    import torch
-    import torch.nn as nn
-    import torch.optim as optim
-    _HAS_TORCH = True
-except ImportError:
-    _HAS_TORCH = False
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
 from lynx_vnpy.alpha import (
     AlphaDataset,

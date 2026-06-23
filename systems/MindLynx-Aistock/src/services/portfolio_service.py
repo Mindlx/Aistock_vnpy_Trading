@@ -1056,18 +1056,6 @@ class PortfolioService:
     def _resolve_position_price(self, *, symbol: str, as_of_date: date) -> _ResolvedPositionPrice:
         today = date.today()
 
-        close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
-        if close is not None:
-            close_price, close_date = close
-            if close_price > 0:
-                return _ResolvedPositionPrice(
-                    price=float(close_price),
-                    source="history_close",
-                    price_date=close_date,
-                    is_stale=close_date < as_of_date,
-                    is_available=True,
-                )
-
         if as_of_date == today:
             realtime_price, provider = self._fetch_realtime_position_price(symbol)
             if realtime_price is not None and realtime_price > 0:
@@ -1078,6 +1066,18 @@ class PortfolioService:
                     is_stale=False,
                     is_available=True,
                     provider=provider,
+                )
+
+        close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
+        if close is not None:
+            close_price, close_date = close
+            if close_price > 0:
+                return _ResolvedPositionPrice(
+                    price=float(close_price),
+                    source="history_close",
+                    price_date=close_date,
+                    is_stale=close_date < as_of_date,
+                    is_available=True,
                 )
 
         return _ResolvedPositionPrice(

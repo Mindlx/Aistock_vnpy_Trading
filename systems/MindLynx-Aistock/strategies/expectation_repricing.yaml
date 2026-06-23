@@ -2,7 +2,7 @@
 
 name: expectation_repricing
 display_name: 预期重估
-description: 基于霍华德·马克斯（Howard Marks）第二层思维与周期理论的预期重估策略。
+description: 分析业绩预期、政策预期和估值预期的变化，寻找预期差修复或预期过热后的回落风险。
 category: framework
 core_rules: [3, 5, 6]
 required_tools:
@@ -15,7 +15,7 @@ default_priority: 65
 market_regimes: [volatile, sector_hot]
 
 instructions: |
-  **预期重估 — 基于霍华德·马克斯第二层思维 × 周期理论**
+  **预期重估策略（Expectation Repricing Strategy）**
 
   适用场景：
   - 市场对公司业绩、政策、行业景气、估值中枢或竞争格局的预期正在变化。

@@ -137,13 +137,6 @@ def check_content_integrity(result: "AnalysisResult") -> tuple[bool, list[str]]:
             return True
         if isinstance(value, str):
             return not value.strip()
-        # 数值合理性：必须为正数
-        try:
-            num = float(value)
-            if num <= 0 or math.isnan(num) or math.isinf(num):
-                return True
-        except (ValueError, TypeError):
-            return True
         return False
 
     if result.sentiment_score is None:
@@ -194,13 +187,6 @@ def apply_placeholder_fill(result: "AnalysisResult", missing_fields: list[str]) 
             return True
         if isinstance(value, str):
             return not value.strip()
-        # 数值合理性：必须为正数
-        try:
-            num = float(value)
-            if num <= 0 or math.isnan(num) or math.isinf(num):
-                return True
-        except (ValueError, TypeError):
-            return True
         return False
 
     placeholder = get_placeholder_text(getattr(result, "report_language", "zh"))
@@ -2640,13 +2626,6 @@ class GeminiAnalyzer:
         if not stock_name or stock_name == f"股票{code}":
             stock_name = STOCK_NAME_MAP.get(code, f"股票{code}")
 
-        # LLM prompt脱敏：替换真实代码和名称为匿名ID
-        _cfg = self._get_runtime_config()
-        if getattr(_cfg, "prompt_anonymize", False):
-            import hashlib
-            code = f"STOCK_{hashlib.md5(code.encode()).hexdigest()[:8].upper()}"
-            stock_name = "目标公司"
-
         today = context.get("today", {})
         unknown_text = get_unknown_text(report_language)
         no_data_text = get_no_data_text(report_language)
@@ -3057,11 +3036,6 @@ class GeminiAnalyzer:
         if allocation_text:
             prompt += "\n\n---\n\n" + str(allocation_text) + "\n"
 
-
-        # 注入 LY 量化信号（双模型预判）
-        ly_text = context.get("ly_signal", "")
-        if ly_text:
-            prompt += "\n\n---\n\n" + str(ly_text) + "\n"
         # 注入股票知识库 (Phase 5) — 放末尾，recency bias
         knowledge_text = context.get("knowledge_prompt", "")
         if knowledge_text:
@@ -3359,40 +3333,21 @@ class GeminiAnalyzer:
     def _validate_json_response(self, text: str) -> None:
         """Validate that *text* contains a parseable JSON object.
 
-        Detection priority:
-          1. Parse full text directly (fast path for pure JSON)
-          2. Extract from ```json``` markdown block (most reliable extraction)
-          3. Fallback: first { → last } (heuristic, handles prose-wrapped JSON)
+        Used as the ``response_validator`` argument to :meth:`_call_litellm` so
+        that a JSON-less or unparseable reply from the primary model is treated
+        as a model failure and triggers fallback to the next configured model.
 
         Raises:
             ValueError: if no JSON object is found in *text*.
-            json.JSONDecodeError: if the extracted JSON cannot be parsed.
+            json.JSONDecodeError: if the extracted JSON cannot be parsed (after
+                :meth:`_fix_json_string` attempts repair).
         """
-        # Fast path: pure JSON response
-        text_stripped = text.strip()
-        if text_stripped.startswith("{") and text_stripped.endswith("}"):
-            try:
-                json.loads(self._fix_json_string(text_stripped))
-                return
-            except json.JSONDecodeError:
-                pass  # fall through to extraction
-
         cleaned = text
-        # Extract markdown code block if present (most reliable)
         if "```json" in cleaned:
-            m = __import__("re").search(r"```json\s*\n?(.*?)\n?```", cleaned, __import__("re").DOTALL)
-            if m:
-                candidate = m.group(1).strip()
-                try:
-                    json.loads(self._fix_json_string(candidate))
-                    return
-                except json.JSONDecodeError:
-                    pass
             cleaned = cleaned.replace("```json", "").replace("```", "")
         elif "```" in cleaned:
             cleaned = cleaned.replace("```", "")
 
-        # Fallback: first { → last }
         json_start = cleaned.find("{")
         json_end = cleaned.rfind("}") + 1
 

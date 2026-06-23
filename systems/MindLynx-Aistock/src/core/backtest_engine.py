@@ -38,8 +38,6 @@ class BacktestResultLike(Protocol):
     first_hit: str | None
     first_hit_trading_days: int | None
     operation_advice: str | None
-    sentiment_score: int | None
-    sentiment_direction_correct: bool | None
 
 
 @dataclass(frozen=True)
@@ -47,11 +45,6 @@ class EvaluationConfig:
     eval_window_days: int
     neutral_band_pct: float = 2.0
     engine_version: str = "v1"
-    sentiment_score_threshold_bull: int = 52
-    sentiment_score_threshold_bear: int = 49
-    # Calibration note (2026-06-07): 52/49 gives 74.6% accuracy with 98% coverage (balanced score 73.2).
-    # Previous 60/40 gave 73.5% with 57% coverage (balanced score 42.0) — 52/49 dominates on all metrics.
-    # 5d window: 52/49=75.9%cov98%, 60/40=74.3%cov60%. 10d window: 52/49=70.5%cov98%, 60/40=70.3%cov49%.
 
 
 class BacktestEngine:
@@ -144,28 +137,6 @@ class BacktestEngine:
         return "flat"
 
     @classmethod
-    def infer_direction_from_score(
-        cls,
-        sentiment_score: int | None,
-        threshold_bull: int = 60,
-        threshold_bear: int = 40,
-    ) -> str:
-        """Infer expected direction from sentiment_score (0-100).
-
-        Maps continuous score to ternary direction using configurable thresholds.
-        Defaults: >=60 → up, <=40 → down, 41-59 → flat.
-
-        Returns one of: up / down / flat.
-        """
-        if sentiment_score is None:
-            return "flat"
-        if sentiment_score >= threshold_bull:
-            return "up"
-        if sentiment_score <= threshold_bear:
-            return "down"
-        return "flat"
-
-    @classmethod
     def infer_position_recommendation(cls, operation_advice: str | None) -> str:
         """Infer recommended position: long/cash (long-only system).
 
@@ -191,7 +162,6 @@ class BacktestEngine:
         cls,
         *,
         operation_advice: str | None,
-        sentiment_score: int | None = None,
         analysis_date: date,
         start_price: float,
         forward_bars: Sequence[DailyBarLike],
@@ -201,34 +171,18 @@ class BacktestEngine:
     ) -> dict[str, Any]:
         """Evaluate one historical analysis against forward daily bars.
 
-        Args:
-            operation_advice: LLM's textual advice (buy/hold/sell).
-            sentiment_score: LLM's numeric score (0-100), evaluated independently
-                for direction accuracy via infer_direction_from_score().
-            ... (rest unchanged)
-
         Notes:
         - Daily bars cannot determine intraday ordering. If stop-loss and
           take-profit are both touched in the same bar, we record
           first_hit="ambiguous" and assume stop-loss first for simulated exit.
-        - sentiment_score direction correctness is computed separately from
-          operation_advice-based direction — both are reported in the result dict.
         """
 
         if start_price is None or start_price <= 0:
-            direction_expected = cls.infer_direction_expected(operation_advice)
-            sentiment_direction = cls.infer_direction_from_score(
-                sentiment_score,
-                threshold_bull=config.sentiment_score_threshold_bull,
-                threshold_bear=config.sentiment_score_threshold_bear,
-            )
             return {
                 "analysis_date": analysis_date,
                 "operation_advice": operation_advice,
-                "sentiment_score": sentiment_score,
                 "position_recommendation": cls.infer_position_recommendation(operation_advice),
-                "direction_expected": direction_expected,
-                "sentiment_direction_expected": sentiment_direction,
+                "direction_expected": cls.infer_direction_expected(operation_advice),
                 "eval_status": "error",
             }
 
@@ -257,21 +211,11 @@ class BacktestEngine:
         stock_return_pct = None if end_close is None else (end_close - start_price) / start_price * 100
 
         direction_expected = cls.infer_direction_expected(operation_advice)
-        sentiment_direction = cls.infer_direction_from_score(
-            sentiment_score,
-            threshold_bull=config.sentiment_score_threshold_bull,
-            threshold_bear=config.sentiment_score_threshold_bear,
-        )
         position = cls.infer_position_recommendation(operation_advice)
 
         outcome, direction_correct = cls._classify_outcome(
             stock_return_pct=stock_return_pct,
             direction_expected=direction_expected,
-            neutral_band_pct=config.neutral_band_pct,
-        )
-        _, sentiment_direction_correct = cls._classify_outcome(
-            stock_return_pct=stock_return_pct,
-            direction_expected=sentiment_direction,
             neutral_band_pct=config.neutral_band_pct,
         )
 
@@ -306,7 +250,6 @@ class BacktestEngine:
             "engine_version": config.engine_version,
             "eval_status": "completed",
             "operation_advice": operation_advice,
-            "sentiment_score": sentiment_score,
             "position_recommendation": position,
             "start_price": start_price,
             "end_close": end_close,
@@ -315,8 +258,6 @@ class BacktestEngine:
             "stock_return_pct": stock_return_pct,
             "direction_expected": direction_expected,
             "direction_correct": direction_correct,
-            "sentiment_direction_expected": sentiment_direction,
-            "sentiment_direction_correct": sentiment_direction_correct,
             "outcome": outcome,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
@@ -359,12 +300,6 @@ class BacktestEngine:
         direction_numerator = sum(1 for r in completed if r.direction_correct is True)
         direction_accuracy_pct = (
             round(direction_numerator / direction_denominator * 100, 2) if direction_denominator else None
-        )
-
-        sentiment_denominator = sum(1 for r in completed if r.sentiment_direction_correct is not None)
-        sentiment_numerator = sum(1 for r in completed if r.sentiment_direction_correct is True)
-        sentiment_direction_accuracy_pct = (
-            round(sentiment_numerator / sentiment_denominator * 100, 2) if sentiment_denominator else None
         )
 
         win_loss_denominator = win_count + loss_count
@@ -437,7 +372,6 @@ class BacktestEngine:
             "loss_count": loss_count,
             "neutral_count": neutral_count,
             "direction_accuracy_pct": direction_accuracy_pct,
-            "sentiment_direction_accuracy_pct": sentiment_direction_accuracy_pct,
             "win_rate_pct": win_rate_pct,
             "neutral_rate_pct": neutral_rate_pct,
             "avg_stock_return_pct": avg_stock_return_pct,

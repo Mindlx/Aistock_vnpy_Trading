@@ -576,6 +576,21 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 except Exception as e:
                     logger.warning(f"{stock_name}({code}) 保存分析历史失败: {e}")
 
+            # 持久化决策信号（P0: fail-open, 不影响主流程）
+            if result and result.success:
+                try:
+                    from src.services.decision_signal_service import DecisionSignalService
+
+                    ds = DecisionSignalService()
+                    ds.save_from_agent_result(
+                        dashboard=result.dashboard if hasattr(result, "dashboard") else None,
+                        stock_code=code,
+                        stock_name=stock_name,
+                        query_id=query_id,
+                    )
+                except Exception as e:
+                    logger.debug(f"[{code}] 保存决策信号失败: {e}")
+
             return result
 
         except Exception as e:
@@ -904,6 +919,31 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     enhanced["daily_intel_context"] = "\n".join(lines)
         except Exception:
             pass
+
+        # RSS intelligence items: inject pre-fetched RSS data for this stock
+        try:
+            if getattr(self.config, "rss_pipeline_enabled", False):
+                from src.repositories.intelligence_repo import IntelligenceRepository
+
+                _code = context.get("code", "")
+                if _code:
+                    _repo = IntelligenceRepository()
+                    _items = _repo.get_recent_items_by_scope("symbol", _code, limit=10, max_days=7)
+                    if _items:
+                        _lines = ["## 📡 RSS 情报（最近 7 天）"]
+                        for _item in _items:
+                            _pub = _item.published_at.strftime("%m-%d") if _item.published_at else ""
+                            _src = _item.source_name or _item.source or ""
+                            _lines.append(f"- [{_pub}] [{_src}] {_item.title[:80]}")
+                            if _item.summary:
+                                _lines.append(f"  {_item.summary[:150]}")
+                        _lines.append("> 以上 RSS 情报由已配置的资讯源自动抓取，仅供参考。")
+                        _rss_text = "\n".join(_lines)
+                        if len(_rss_text) > 2000:
+                            _rss_text = _rss_text[:2000] + "\n...（已截断）"
+                        enhanced["rss_intelligence"] = _rss_text
+        except Exception:
+            logger.debug("[pipeline] RSS intelligence injection failed(code=%s)", context.get("code", "?"))
 
         # Extract market background from latest market review report
         try:
@@ -1313,6 +1353,30 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             except Exception:
                 logger.debug("[pipeline] 每日情报(daily_intel)注入失败(code=%s)", code)
 
+            # RSS intelligence: inject pre-fetched RSS items for this stock
+            try:
+                if getattr(self.config, "rss_pipeline_enabled", False):
+                    from src.repositories.intelligence_repo import IntelligenceRepository
+
+                    _repo = IntelligenceRepository()
+                    _items = _repo.get_recent_items_by_scope("symbol", code, limit=10, max_days=7)
+                    if _items:
+                        _lines = ["## 📡 RSS 情报（最近 7 天）"]
+                        for _item in _items:
+                            _pub = _item.published_at.strftime("%m-%d") if _item.published_at else ""
+                            _src = _item.source_name or _item.source or ""
+                            _lines.append(f"- [{_pub}] [{_src}] {_item.title[:80]}")
+                            if _item.summary:
+                                _lines.append(f"  {_item.summary[:150]}")
+                        _lines.append("> 以上 RSS 情报由已配置的资讯源自动抓取，仅供参考。")
+                        _rss_text = "\n".join(_lines)
+                        if len(_rss_text) > 2000:
+                            _rss_text = _rss_text[:2000] + "\n...（已截断）"
+                        initial_context["rss_intelligence"] = _rss_text
+                        logger.info("[%s] RSS intelligence injected into agent context", code)
+            except Exception:
+                logger.debug("[pipeline] RSS情报注入失败(code=%s)", code)
+
             # Inject market background into agent message
             try:
                 from pathlib import Path
@@ -1392,6 +1456,17 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             allocation_text = getattr(self, "_allocation_prompt", "")
             if allocation_text:
                 initial_context["allocation_prompt"] = allocation_text
+
+            # Inject market phase context so LLM knows current trading session timing
+            try:
+                from src.market_phase_prompt import build_market_phase_prompt_for_stock
+
+                _phase_prompt = build_market_phase_prompt_for_stock(code)
+                if _phase_prompt:
+                    initial_context["market_phase_prompt"] = _phase_prompt
+            except Exception:
+                pass
+
             position_text = ""
             try:
                 from src.core.position_sizer import build_position_prompt, compute_position_size
@@ -1668,6 +1743,21 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     )
                 except Exception as e:
                     logger.warning(f"[{code}] 保存 Agent 分析历史失败: {e}")
+
+            # 持久化决策信号（P0: fail-open, 不影响主流程）
+            if result and result.success:
+                try:
+                    from src.services.decision_signal_service import DecisionSignalService
+
+                    ds = DecisionSignalService()
+                    ds.save_from_agent_result(
+                        dashboard=result.dashboard,
+                        stock_code=code,
+                        stock_name=resolved_stock_name,
+                        query_id=query_id,
+                    )
+                except Exception as e:
+                    logger.debug(f"[{code}] 保存决策信号失败: {e}")
 
             return result
 
@@ -2316,6 +2406,8 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
     ) -> dict[str, Any]:
         """
         构建分析上下文快照
+
+        同时保留原有 dict 组装逻辑作为向后兼容的 fallback。
         """
         snapshot = {
             "enhanced_context": enhanced_context,
@@ -2326,6 +2418,23 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
         }
         if self.analysis_skills is not None:
             snapshot["skills"] = list(self.analysis_skills)
+
+        # Enhanced context snapshot using Pydantic model (additive, fallback-safe)
+        try:
+            from src.schemas.analysis_context_pack import AnalysisSnapshot
+            from src.services.analysis_context_builder import AnalysisContextBuilder
+
+            context_snapshot_obj = AnalysisContextBuilder().build_snapshot(
+                enhanced_context=enhanced_context,
+                news_content=news_content,
+                realtime_quote=realtime_quote,
+                chip_data=chip_data,
+                factor_zscores=getattr(self, "_factor_zscores", {}),
+            )
+            snapshot["analysis_context_pack"] = context_snapshot_obj.model_dump()
+        except Exception:
+            pass  # Fall back to existing inline logic — no degradation
+
         return snapshot
 
     @staticmethod

@@ -1150,6 +1150,54 @@ def start_api_server(host: str, port: int, config: Config) -> None:
 
     import uvicorn
 
+    probe = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind((host, port))
+    except OSError as exc:
+        raise RuntimeError(f"FastAPI port is not available: {host}:{port}") from exc
+    finally:
+        probe.close()
+
+    level_name = (config.log_level or "INFO").lower()
+    use_config_signal_handlers = True
+    uvicorn_kwargs = {
+        "host": host,
+        "port": port,
+        "log_level": level_name,
+        "log_config": None,
+    }
+    # Import the ASGI app object in the calling thread instead of handing uvicorn
+    # the "api.app:app" import string. With the string, uvicorn imports the app
+    # lazily inside the server thread, and that import (litellm + the full app
+    # tree, ~10s+ on constrained hosts) runs inside the startup probe window
+    # below, tripping the 3.0s timeout and causing a restart loop on slower
+    # machines. Importing first keeps the heavy work out of the probe window;
+    # genuine import failures still surface immediately to the caller.
+    from api.app import app as fastapi_app
+
+    try:
+        uvicorn_config = uvicorn.Config(
+            fastapi_app,
+            install_signal_handlers=False,
+            **uvicorn_kwargs,
+        )
+    except TypeError:
+        # Older uvicorn versions do not accept install_signal_handlers in
+        # Config; fall back and only disable signal handling via Server attribute
+        # when it's a boolean flag.
+        use_config_signal_handlers = False
+        uvicorn_config = uvicorn.Config(
+            fastapi_app,
+            **uvicorn_kwargs,
+        )
+    uvicorn_server = uvicorn.Server(config=uvicorn_config)
+    if not use_config_signal_handlers:
+        install_signal_handlers = getattr(uvicorn_server, "install_signal_handlers", None)
+        if isinstance(install_signal_handlers, bool):
+            uvicorn_server.install_signal_handlers = False
+
+    startup_error: list[BaseException] = []
+
     def run_server():
         level_name = (config.log_level or "INFO").lower()
         uvicorn.run(
@@ -1619,6 +1667,30 @@ def main() -> int:
                     "interval_seconds": _em_interval,
                     "run_immediately": True,
                     "name": "event_monitor",
+                })
+
+            # RSS intelligence fetch: pre-fetch RSS feeds before analysis cycles
+            if getattr(config, "rss_pipeline_enabled", False):
+                def _rss_fetch_background():
+                    try:
+                        from src.services.intelligence_service import IntelligenceService
+                        svc = IntelligenceService()
+                        results = svc.fetch_all_enabled()
+                        ok_count = sum(1 for r in results if r.get("status") == "ok")
+                        total_items = sum(r.get("items_fetched", 0) for r in results)
+                        if results:
+                            logger.info(
+                                "[RSS] Fetched %d/%d sources, %d new items",
+                                ok_count, len(results), total_items,
+                            )
+                    except Exception as e:
+                        logger.warning("RSS background fetch failed: %s", e)
+
+                background_tasks.append({
+                    "task": _rss_fetch_background,
+                    "interval_seconds": 3600,  # hourly
+                    "run_immediately": True,
+                    "name": "rss_fetch",
                 })
 
             # DB maintenance: weekly TTL purge + VACUUM

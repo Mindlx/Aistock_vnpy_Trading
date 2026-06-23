@@ -55,6 +55,7 @@ from src.config import get_config
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+INTELLIGENCE_ITEM_NULL_SCOPE_VALUE = "__dsa_null_scope__"
 
 # SQLAlchemy ORM 基类
 Base = declarative_base()
@@ -305,8 +306,6 @@ class BacktestResult(Base):
 
     # 建议快照（避免未来分析字段变化导致回测不可解释）
     operation_advice = Column(String(20))
-    sentiment_score = Column(Integer, nullable=True)  # LLM numerical score 0-100
-    sentiment_direction_correct = Column(Boolean, nullable=True)  # direction accuracy of sentiment_score
     position_recommendation = Column(String(8))  # long/cash
 
     # 价格与收益
@@ -376,7 +375,6 @@ class BacktestSummary(Base):
 
     # 准确率/胜率
     direction_accuracy_pct = Column(Float)
-    sentiment_direction_accuracy_pct = Column(Float)
     win_rate_pct = Column(Float)
     neutral_rate_pct = Column(Float)
 
@@ -715,6 +713,94 @@ class AlertCooldownRecord(Base):
 
     __table_args__ = (
         UniqueConstraint("rule_id", "target", "severity", name="uix_alert_cooldown_rule_target_severity"),
+    )
+
+
+class DecisionSignal(Base):
+    """决策信号 — 每个 SkillAgent 的评估结果持久化。
+
+    记录每只股票每个技能的独立信号输出，支持按股票/技能/时间检索。
+    ``conditions_met`` 和 ``conditions_missed`` 存储为 JSON 文本。
+    """
+
+    __tablename__ = "decision_signals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    stock_code = Column(String(10), nullable=False, index=True)
+    stock_name = Column(String(100))
+    skill_id = Column(String(64), nullable=False, index=True)
+    signal = Column(String(16), nullable=False, default="hold")
+    confidence = Column(Float, nullable=False, default=0.0)
+    conditions_met = Column(Text, default="[]")
+    conditions_missed = Column(Text, default="[]")
+    score_adjustment = Column(Float, default=0.0)
+    reasoning = Column(Text, default="")
+    analysis_date = Column(DateTime, index=True)
+    query_id = Column(String(64), index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        Index("ix_decision_signal_stock_skill_date", "stock_code", "skill_id", "analysis_date"),
+        Index("ix_decision_signal_created", "created_at"),
+    )
+
+
+# JSON-serialized field names for DecisionSignal, used by the repository layer.
+DECISION_SIGNAL_FIELDS_JSON = ("conditions_met", "conditions_missed")
+
+
+class IntelligenceSource(Base):
+    """可配置资讯源。"""
+
+    __tablename__ = "intelligence_sources"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True, index=True)
+    source_type = Column(String(32), nullable=False, default="rss", index=True)
+    url = Column(String(1000), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    scope_type = Column(String(32), nullable=False, default="market", index=True)
+    scope_value = Column(String(64), index=True)
+    market = Column(String(32), nullable=False, default="cn", index=True)
+    description = Column(Text)
+    last_status = Column(String(32))
+    last_error = Column(Text)
+    last_fetched_at = Column(DateTime, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+
+    __table_args__ = (
+        Index("ix_intel_source_scope", "scope_type", "scope_value", "market"),
+    )
+
+
+class IntelligenceItem(Base):
+    """沉淀后的资讯 / 情报条目。"""
+
+    __tablename__ = "intelligence_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_id = Column(Integer, ForeignKey("intelligence_sources.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_name = Column(String(100), index=True)
+    source_type = Column(String(32), nullable=False, default="rss", index=True)
+    title = Column(String(300), nullable=False)
+    summary = Column(Text)
+    url = Column(String(1000), nullable=False, index=True)
+    source = Column(String(100))
+    published_at = Column(DateTime, index=True)
+    fetched_at = Column(DateTime, default=datetime.now, index=True)
+    scope_type = Column(String(32), nullable=False, default="market", index=True)
+    scope_value = Column(String(64), nullable=False, default=INTELLIGENCE_ITEM_NULL_SCOPE_VALUE, index=True)
+    market = Column(String(32), nullable=False, default="cn", index=True)
+    raw_payload = Column(Text)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id", "url", "scope_type", "scope_value", "market",
+            name="uix_intel_item_source_scope_url",
+        ),
+        Index("ix_intel_item_scope_time", "scope_type", "scope_value", "market", "published_at"),
+        Index("ix_intel_item_fetch_time", "fetched_at"),
     )
 
 

@@ -110,7 +110,7 @@ LEGACY_DEFAULT_AGENT_SYSTEM_PROMPT = """你是一位专注于趋势交易的{mar
         "data_perspective": {{
             "trend_status": {{"ma_alignment": "", "is_bullish": true, "trend_score": 0}},
             "price_position": {{"current_price": 0, "ma5": 0, "ma10": 0, "ma20": 0, "bias_ma5": 0, "bias_status": "", "support_level": 0, "resistance_level": 0}},
-            "volume_analysis": {{"volume_ratio": null, "volume_status": "", "turnover_rate": 0, "volume_meaning": ""}},
+            "volume_analysis": {{"volume_ratio": 0, "volume_status": "", "turnover_rate": 0, "volume_meaning": ""}},
             "chip_structure": {{"profit_ratio": 0, "avg_cost": 0, "concentration": 0, "chip_health": ""}}
         }},
         "intelligence": {{
@@ -145,6 +145,41 @@ LEGACY_DEFAULT_AGENT_SYSTEM_PROMPT = """你是一位专注于趋势交易的{mar
     "hot_topics": "相关热点"
 }}
 ```
+
+## 评分标准
+
+### 强烈买入（80-100分）：
+- ✅ 多头排列：MA5 > MA10 > MA20
+- ✅ 低乖离率：<2%，最佳买点
+- ✅ 缩量回调或放量突破
+- ✅ 筹码集中健康
+- ✅ 消息面有利好催化
+
+### 买入（60-79分）：
+- ✅ 多头排列或弱势多头
+- ✅ 乖离率 <5%
+- ✅ 量能正常
+- ⚪ 允许一项次要条件不满足
+
+### 观望（40-59分）：
+- ⚠️ 乖离率 >5%（追高风险）
+- ⚠️ 均线缠绕趋势不明
+- ⚠️ 有风险事件
+
+### 卖出/减仓（0-39分）：
+- ❌ 空头排列
+- ❌ 跌破MA20
+- ❌ 放量下跌
+- ❌ 重大利空
+
+## 决策仪表盘核心原则
+
+1. **核心结论先行**：一句话说清该买该卖
+2. **分持仓建议**：空仓者和持仓者给不同建议
+3. **精确狙击点**：必须给出具体价格，不说模糊的话
+4. **检查清单可视化**：用 ✅⚠️❌ 明确显示每项检查结果
+5. **风险优先级**：舆情中的风险点要醒目标出
+
 ## 可操作性与稳定性约束
 
 
@@ -212,7 +247,7 @@ AGENT_SYSTEM_PROMPT = """你是一位{market_role}投资分析 Agent，拥有数
         "data_perspective": {{
             "trend_status": {{"ma_alignment": "", "is_bullish": true, "trend_score": 0}},
             "price_position": {{"current_price": 0, "ma5": 0, "ma10": 0, "ma20": 0, "bias_ma5": 0, "bias_status": "", "support_level": 0, "resistance_level": 0}},
-            "volume_analysis": {{"volume_ratio": null, "volume_status": "", "turnover_rate": 0, "volume_meaning": ""}},
+            "volume_analysis": {{"volume_ratio": 0, "volume_status": "", "turnover_rate": 0, "volume_meaning": ""}},
             "chip_structure": {{"profit_ratio": 0, "avg_cost": 0, "concentration": 0, "chip_health": ""}}
         }},
         "intelligence": {{
@@ -628,8 +663,6 @@ class AgentExecutor:
                 )
             if context.get("news_context"):
                 parts.append(f"\n[系统已获取的新闻与舆情情报]\n{context['news_context']}")
-            if context.get("ly_signal"):
-                parts.append(f"\n[系统已获取的量化预判信号（LY双模型）]\n{context["ly_signal"]}")
 
         parts.append("\n请使用可用工具获取缺失的数据（如历史K线、新闻等），然后以决策仪表盘 JSON 格式输出分析结果。")
         return "\n".join(parts)

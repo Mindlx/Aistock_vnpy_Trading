@@ -89,8 +89,9 @@ class AlphaVantageFetcher(BaseFetcher):
             raise DataFetchError(f"[AlphaVantage] No data in date range for {symbol}")
 
         df = pd.DataFrame(rows)
-        df.index = pd.to_datetime(df["date"])
-        return df.drop(columns=["date"])
+        df.index = pd.to_datetime(df['date'])
+        df.index.name = None
+        return df.drop(columns=['date'])
 
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         if df.empty:

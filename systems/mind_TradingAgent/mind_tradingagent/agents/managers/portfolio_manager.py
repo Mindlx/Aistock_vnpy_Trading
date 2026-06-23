@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from mind_tradingagent.agents.schemas import PortfolioDecision, render_pm_decision
 from mind_tradingagent.agents.utils.agent_utils import (
-    build_instrument_context,
+    get_instrument_context_from_state,
     get_language_instruction,
 )
 from mind_tradingagent.agents.utils.structured import (
@@ -25,7 +25,7 @@ def create_portfolio_manager(llm):
     structured_llm = bind_structured(llm, PortfolioDecision, "Portfolio Manager")
 
     def portfolio_manager_node(state) -> dict:
-        instrument_context = build_instrument_context(state["company_of_interest"])
+        instrument_context = get_instrument_context_from_state(state)
 
         history = state["risk_debate_state"]["history"]
         risk_debate_state = state["risk_debate_state"]
@@ -39,28 +39,18 @@ def create_portfolio_manager(llm):
             else ""
         )
 
-        prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision for this A-share position.
+        prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
 
 ---
+
 **Rating Scale** (use exactly one):
 - **Buy**: Strong conviction to enter or add to position
 - **Overweight**: Favorable outlook, gradually increase exposure
 - **Hold**: Maintain current position, no action needed
 - **Underweight**: Reduce exposure, take partial profits
 - **Sell**: Exit position or avoid entry
-
----
-**A-share Risk Overrides — MUST influence your rating:**
-
-1. **T+1 Liquidity**: Any position entered today CANNOT be exited until tomorrow. If overnight catalyst risk (policy announcements, earnings) is flagged, downgrade conviction by one notch. Do not recommend Buy if negative overnight gap risk exists.
-
-2. **涨跌停板 Trapping Risk**: If the stock or sector has recently hit price limits, factor in the risk of being trapped. A 跌停-locked position cannot be exited. If bear signals emerge near 跌停, consider whether reduction is possible before lock.
-
-3. **Margin Cascade Risk**: If elevated 融资 (margin) balance is flagged, forced-liquidation tail risk exists. Conservative position sizing warranted even if bull thesis is otherwise strong.
-
-4. **ETF Flow Context**: With 3.7万亿 equity ETF market (中央汇金 bought >7700亿 in 2024), broad ETF flows drive sector moves independent of individual stock fundamentals.
 
 **Context:**
 - Research Manager's investment plan: **{research_plan}**
@@ -70,7 +60,8 @@ def create_portfolio_manager(llm):
 {history}
 
 ---
-Be decisive and ground every conclusion in specific evidence from the analysts. Explicitly address any A-share risk overrides above that are relevant.{get_language_instruction()}"""
+
+Be decisive and ground every conclusion in specific evidence from the analysts.{get_language_instruction()}"""
 
         final_trade_decision = invoke_structured_or_freetext(
             structured_llm,

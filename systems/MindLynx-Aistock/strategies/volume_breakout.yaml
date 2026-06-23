@@ -3,7 +3,7 @@
 
 name: volume_breakout
 display_name: 放量突破
-description: 基于威科夫量价分析（Wyckoff Method）的放量突破策略，检测阻力位突破信号。
+description: 检测放量突破阻力位信号。适用于股价接近已知阻力位时。
 category: trend
 core_rules: [1, 2, 3]
 required_tools:
@@ -15,7 +15,7 @@ default_priority: 30
 market_regimes: [trending_up]
 
 instructions: |
-  **放量突破 — 基于威科夫量价理论（Wyckoff Method）**
+  **放量突破（Volume Breakout Strategy）**
 
   突破判定标准：
 

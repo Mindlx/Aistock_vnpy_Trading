@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.agent.llm_adapter import LLMToolAdapter
+from src.agent.provider_trace import ProviderTrace
 from src.agent.tools.registry import ToolRegistry
 from src.storage import persist_llm_usage as _persist_usage
 
@@ -71,6 +72,8 @@ class RunLoopResult:
     error: str | None = None
     # Raw messages list at the end of the loop (callers may want to persist)
     messages: list[dict[str, Any]] = field(default_factory=list)
+    # Provider trace from the adapter (populated after the loop)
+    provider_trace: ProviderTrace | None = None
 
     @property
     def model(self) -> str:
@@ -572,6 +575,9 @@ def run_agent_loop(
                 time.time() - start_time,
                 total_tokens,
             )
+            trace = llm_adapter.get_trace()
+            if trace.entries:
+                logger.debug("Provider trace: %s", trace.get_summary())
             if progress_callback:
                 progress_callback({"type": "generating", "step": step + 1, "message": "正在生成最终分析..."})
 
@@ -588,6 +594,7 @@ def run_agent_loop(
                 models_used=models_used,
                 error=final_content if is_error else None,
                 messages=messages,
+                provider_trace=llm_adapter.get_trace(),
             )
 
     # Max steps exceeded

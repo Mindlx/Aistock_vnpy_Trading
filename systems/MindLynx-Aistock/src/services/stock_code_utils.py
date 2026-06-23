@@ -24,6 +24,9 @@ _SUFFIX_DIGIT_LENS: dict = {
     ".SS": (6,),
     ".BJ": (6,),
     ".HK": (1, 2, 3, 4, 5),
+    ".T": (4,),           # JP: Tokyo Stock Exchange (Yahoo Finance), e.g. 7203.T
+    ".KS": (6,),          # KR: KOSPI (Yahoo Finance), e.g. 005930.KS
+    ".KQ": (6,),          # KR: KOSDAQ (Yahoo Finance), e.g. 035420.KQ
 }
 
 
