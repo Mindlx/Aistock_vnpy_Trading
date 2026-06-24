@@ -787,6 +787,11 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
         if regime_text:
             enhanced["regime_prompt"] = regime_text
 
+        # P2e: inject East Money rating (market sentiment)
+        em_text = self._get_stock_eastmoney_rating(code)
+        if em_text:
+            enhanced["eastmoney_rating"] = em_text
+
         # P4: portfolio allocation
 
         # P2+: inject LY quantitative signal (zero-intrusion, disk-file read only)
@@ -1179,6 +1184,36 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
 
         return formatted
 
+    def _get_stock_eastmoney_rating(self, code: str) -> str:
+        """读取东方财富评级缓存，返回个股评级文本（供LLM prompt注入）。"""
+        try:
+            from pathlib import Path
+            import json
+            _root = Path(__file__).resolve().parent.parent.parent.parent
+            cache_path = _root / "data" / "realtime" / "eastmoney_rating.json"
+            if not cache_path.exists():
+                return ""
+            data = json.loads(cache_path.read_text(encoding="utf-8"))
+            stock = data.get("stocks", {}).get(code)
+            if not stock:
+                return ""
+            parts = [f"东方财富评级={stock.get('icon', '?')}"]
+            d = stock.get("desire")
+            if d is not None:
+                parts.append(f"参与意愿{d}/100")
+            f_avg = stock.get("focus_avg")
+            if f_avg is not None:
+                parts.append(f"关注度{f_avg}/100")
+            conc = stock.get("conclusion", "")
+            if conc:
+                parts.append(f"结论:{conc}")
+            fetched = data.get("fetched_at", "")
+            if fetched:
+                parts.append(f"数据时间:{fetched}")
+            return " | ".join(parts)
+        except Exception:
+            return ""
+
     def _attach_belong_boards_to_fundamental_context(
         self,
         code: str,
@@ -1303,6 +1338,11 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 initial_context["chip_distribution"] = self._safe_to_dict(chip_data)
             if trend_result:
                 initial_context["trend_result"] = self._safe_to_dict(trend_result)
+
+            # East Money rating (market sentiment) for agent path
+            em_text = self._get_stock_eastmoney_rating(code)
+            if em_text:
+                initial_context["eastmoney_rating"] = em_text
 
             # Agent path: inject social sentiment as news_context so both
             # executor (_build_user_message) and orchestrator (ctx.set_data)
