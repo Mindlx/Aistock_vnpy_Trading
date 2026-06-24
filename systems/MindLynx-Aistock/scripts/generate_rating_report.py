@@ -462,7 +462,7 @@ def generate_brief_text(rows: list[dict]) -> str:
         dv = r.get("desire_val", "--")
         fv = r.get("focus_val", "--")
         short_line = r.get("short_line", "")
-        lines.append(f"{icon} {name}｜{dv}/{fv}｜{short_line}")
+        lines.append(f"{icon} **{name}**｜{dv}/{fv}｜{short_line}")
 
     lines.append("")
     lines.append("📎 详情见PDF报告")
@@ -573,7 +573,7 @@ def main():
 
     # 4. 转换为 PDF
     logger.info("正在转换为 PDF...")
-    pdf_data = markdown_to_pdf(md_content, font_size="14pt")
+    pdf_data = markdown_to_pdf(md_content, font_size="18pt")
     if not pdf_data:
         logger.error("PDF 生成失败，请检查 weasyprint 安装")
         logger.info("Markdown 内容预览:\n%s", md_content[:500])
