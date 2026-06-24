@@ -317,7 +317,7 @@ def _generate_brief_text(result: dict, session: str) -> str:
         data = stocks_data[code]
         d = data.get("desire", "--")
         f = data.get("focus_avg", "--")
-        lines.append(f"{data['name']}｜意愿{d} 关注{f}")
+        lines.append(f"**{data['name']}**｜意愿{d} 关注{f}")
     return "\n".join(lines)
 
 

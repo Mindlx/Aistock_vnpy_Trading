@@ -1786,7 +1786,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         stock_name = self._get_display_name(result, report_language)
 
         lines = [
-            f"## {signal_emoji} **{stock_name}**",
+            f"{signal_emoji} **{stock_name}**",
             "",
             f"> {report_date} ｜ ¥{result.current_price:.2f} {result.change_pct:+.1f}% ｜ {labels['score_label']}: **{result.sentiment_score}** ｜ {localize_trend_prediction(result.trend_prediction, report_language)}",
             "",
