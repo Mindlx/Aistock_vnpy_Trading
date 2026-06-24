@@ -137,21 +137,25 @@ data/realtime/
 
 ## 三、关键配置
 
-### 3.1 权重 (settings.yaml) — 2026-06-18 Oracle验证更新
+### 3.1 权重 (settings.yaml) — 2026-06-24 AT价值评估更新
 
 | 系统 | 权重 | 说明 |
 |------|------|------|
-| ly (lynx_vnpy) | **0.36** | RF+LGB双模型 + alpha158增强 |
-| mindlynx | **0.48** | 12因子+策略+LLM混合模式 |
-| at (TradingAgent) | **0.05** | 47%准确率(≈随机), Oracle建议降权至0.05 |
-| ~~ml_factor~~ | ~~0.06~~ | 已移除: 死配置, _compute_adjusted_weights从未加载 |
+| mindlynx | **0.50** | 62.2% (p=0.010) 唯一统计显著的系统 |
+| ly (lynx_vnpy) | **0.37** | 54.0% (p=0.373) 正向但不显著, RF+LGB+alpha158 |
+| at (TradingAgent) | **0.00** | 48.2% (p=0.745) 纯随机, 归零累积数据待后续开发优化 |
 
-**修正记录 (7358ce8)**:
+**修正记录 (2026-06-24)**:
+1. AT权重 0.05→0.00: bt_predictions 85样本评估, 48.2%准确率 p=0.745(不显著)。
+   Fusion在有AT参与时准确率从57.6%降至51.4%, AT为纯噪音。
+   系统继续运行积累数据, 待后续系统性改造后再评估。
+2. LY 0.36→0.37, ML 0.48→0.50: AT移除后按比例重分配。
+
+**历史修正 (7358ce8, 2026-06-18)**:
 1. AT权重 0.10→0.05: 回测150样本AT 47.0%(31/66), z=-0.49不显著
 2. `ml_factor`死配置移除: 权重定义在settings.yaml但`_compute_adjusted_weights`的weight_map只有3个系统
-3. 分歧惩罚移除: `fusion_score -= penalty`改为`disagreement_capped`置信度标记。
-   Oracle验证: 加权平均在分歧时已退化看空输出, 惩罚反而加剧(分歧时融合仅34.6%)
-4. ML融合偏向 sentiment_score 80/20: 原50/50, Oracle验证sentiment_score方向准确率74% > 操作建议24%
+3. 分歧惩罚移除: `fusion_score -= penalty`改为`disagreement_capped`置信度标记
+4. ML融合偏向 sentiment_score 80/20
 
 fusion_mode: "dual"（同时输出linear+bayesian，CSV暴露linear层字段）
 
@@ -378,18 +382,17 @@ ly的58因子提供体系化覆盖(K线形态/多窗口统计/分位数等)。
 
 ## 八、待办与优先级
 
-### P0 — 积累数据 (现在开始，被动等待)
+### ✅ 已完成 — AT价值评估 (2026-06-24)
+
+**结论**: AT 48.2% (p=0.745) = 纯随机噪音。权重归零，系统继续运行积累数据。
+详见上方 3.1 权重表。
+
+### P0 — 积累数据 (继续)
 
 | 任务 | 条件 | 预计完成 |
 |------|------|---------|
-| post-HP3融合记录 ≥200条 | 正常交易日5-10天 | ~6/15 |
-| at评估所需5d forward数据 | 需~2周 | ~6/15 |
+| post-HP3融合记录 ≥200条 | 正常交易日5-10天 | ✅ 已超 |
 | backtest --force回数据恢复 | EastMoney等API可用 | 不确定 |
-
-### P1 — AT价值评估 (forward数据就绪后)
-
-评估TradingAgent是否有统计显著预测能力。at当前alpha=0.40。
-关键未知：at 40.5% strong_bearish是信号还是噪音？
 
 ### P2 — Backtest --force 重算 (API恢复后)
 

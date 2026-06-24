@@ -2,9 +2,9 @@
 # ⚠️ 本系统仅供学习和研究目的，不构成任何投资建议
 
 weights:
-  lynx_vnpy: 0.36          # ly: RandomForest 量化模型 (T+1, 复杂模型)
-  mindlynx: 0.48           # ml: 因子层实时模型 + LLM推理 (盘中实时, 12因子+策略)
-  tradingagent: 0.05       # at: 47%准确率(≈随机), Oracle建议降权至0.05最小化噪声
+  lynx_vnpy: 0.37          # ly: RandomForest 量化模型 (T+1, 复杂模型), 54.0% (p=0.373)
+  mindlynx: 0.50           # ml: 因子层实时模型 + LLM推理, 62.2% (p=0.010) 唯一统计显著系统
+  tradingagent: 0.00       # at: 48.2% (p=0.745) 纯随机噪音, 归零但AT服务继续运行积累数据
 
 # 7 级 L7 阈值已内置于 normalizer.py 的 L7_THRESHOLDS 中
 # 如需自定义，取消注释并在 fusion_engine.py 中改为从 config 读取
@@ -111,14 +111,13 @@ features:
 backtest:
   enabled: true            # 回测功能已启用
   db_path: "data/backtest/bt_results.db"
-  initial_weights:          # 回测使用的权重起始值（与 weights 保持一致即可）
-    lynx_vnpy: 0.36
-    mindlynx: 0.48
-    tradingagent: 0.10
-  weight_search_range:      # 网格搜索范围
-    lynx_vnpy: [0.2, 0.3, 0.36, 0.4]
-    mindlynx: [0.3, 0.4, 0.48, 0.55]
-    tradingagent: [0.05, 0.10, 0.15, 0.20]
+  initial_weights:          # 回测使用的权重起始值（与 weights 保持一致）
+    lynx_vnpy: 0.37
+    mindlynx: 0.50
+    tradingagent: 0.00
+  weight_search_range:      # 网格搜索范围（AT已移除，权重归零）
+    lynx_vnpy: [0.2, 0.3, 0.37, 0.4]
+    mindlynx: [0.3, 0.4, 0.50, 0.55]
   report:
     weekly_cron: "30 17 * * 5"   # 每周五17:30推送周报
     accuracy_threshold: 0.50      # 基准准确率（低于此阈值告警）

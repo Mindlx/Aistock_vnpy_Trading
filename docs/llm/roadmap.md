@@ -38,15 +38,17 @@
 | at 评估所需 5d forward 数据 | 需 ~2 周 trading days | ~6 月 15 日 |
 | backtest --force API 恢复 | Eastmoney 等数据源可用 | 不确定 |
 
-### P1 — AT 价值评估（forward 数据就绪后）
+### ✅ 已完成 — AT 价值评估 (2026-06-24)
 
-检查 TradingAgent (at) 是否有统计显著的预测能力：
-- `src/data_loader.py` 已支持读取 TA 日志
-- 需要用 fusion_history.csv 中的 tradingagent_score 匹配 forward returns
-- 关键未知：at 40.5% strong_bearish 是信号还是噪音？
-- at 当前 alpha=0.40，如果评估显示不如随机，应进一步降低
+**结论**: AT 48.2% (p=0.745) = 纯随机噪音，权重已归零。
+系统继续运行积累数据，待后续系统性改造开发后再评估。
 
-**文件**: `scripts/calibrate_alphas.py`（可扩展为包含 at 评估）
+**详细数据**:
+- bt_predictions 85 样本评估：41/85 = 48.2%
+- Fusion 在 AT 中性时准确率 57.6%，AT 参与时降至 51.4%
+- AT bullish 方向准确率仅 23.1%（反指）
+- 唯一统计显著的系统：ML 62.2% (p=0.010)
+- 对应权重变更：AT 0.05→0.00, LY 0.36→0.37, ML 0.48→0.50
 
 ### P2 — Backtest --force 重算（API 恢复后）
 
@@ -111,13 +113,13 @@ cat reports/calibration/$(date +%Y%m%d).md
 |------|---------|
 | c6aa739 | 阈值校准、alpha 校准、提示词校准、策略 YAML 升级、context_snapshot 统一、factor_baseline 修复、auto-calibration 脚本 |
 
-### Week of 6/15（数据就绪后执行）
+### Week of 6/24（P1 已完成）
 
 | 优先级 | 任务 | 前置条件 | 工作量 |
 |--------|------|---------|--------|
-| P1 | AT 价值评估 | forward 数据 ≥5d | 0.5d |
+| P1 | ✅ AT 价值评估 | 已完成 | 48.2%纯随机,权重归零 |
 | P2 | backtest --force 重算 | API 恢复 | 2h |
-| P3 | L7_THRESHOLDS 校准 | P1+P2 完成 | 2d |
+| P3 | L7_THRESHOLDS 校准 | P2 完成 | 2d |
 | P4 | systemd timer 部署 calibrate_alphas.py | — | 0.5d |
 
 ---

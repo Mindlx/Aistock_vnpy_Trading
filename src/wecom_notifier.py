@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
+from collections import deque
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -16,9 +18,11 @@ import requests
 from src.normalizer import L7_EMOJI, L7_SIGNAL_NAMES, L7_POSITION, SignalNormalizer
 from src.position import UnifiedPosition, PositionConstraintEngine, pct_to_label
 
+logger = logging.getLogger(__name__)
 
-# L7 信号 → 图标/颜色映射（7 级，从 normalizer 导入）
-# L7 信号 → 图标（国内股市：🔴红涨看多 🟠橙 🟡金 → 🟢绿跌看空）
+# 企业微信 API 速率限制：每个 webhook 最多 20次/分钟，留10%余量
+WECOM_RATE_LIMIT = 18  # max sends per 60s window
+WECOM_RATE_WINDOW = 60  # seconds
 
 
 class WeComNotifier:
@@ -28,16 +32,35 @@ class WeComNotifier:
         self.webhook_url = webhook_url
         self.enabled = enabled
         self.session = requests.Session()
+        self._send_times: deque[float] = deque()  # 滑动窗口时间戳
 
     def close(self):
         """关闭 HTTP Session，释放连接池"""
         self.session.close()
 
+    def _acquire_rate_limit(self):
+        """滑动窗口速率限制：最多 WECOM_RATE_LIMIT 次/60s"""
+        now = time.monotonic()
+        window_start = now - WECOM_RATE_WINDOW
+        while self._send_times and self._send_times[0] < window_start:
+            self._send_times.popleft()
+        if len(self._send_times) >= WECOM_RATE_LIMIT:
+            sleep_time = self._send_times[0] + WECOM_RATE_WINDOW - now
+            if sleep_time > 0:
+                logger.warning(
+                    "企业微信达到速率限制(%d/%ds)，等待%.1fs",
+                    WECOM_RATE_LIMIT, WECOM_RATE_WINDOW, sleep_time,
+                )
+                time.sleep(sleep_time)
+        self._send_times.append(time.monotonic())
+
     def send_markdown(self, content: str) -> Optional[Dict[str, Any]]:
-        """发送 Markdown 格式消息（3次指数退避重试）"""
+        """发送 Markdown 格式消息（3次指数退避重试 + 速率限制）"""
         if not self.enabled or not self.webhook_url:
-            print("⚠️  企业微信推送未配置或已禁用，跳过推送")
+            logger.warning("企业微信推送未配置或已禁用，跳过推送")
             return None
+
+        self._acquire_rate_limit()
 
         data = {
             "msgtype": "markdown",
@@ -55,23 +78,23 @@ class WeComNotifier:
                 )
                 result = resp.json()
                 if result.get("errcode") != 0:
-                    print(f"企业微信推送失败: {result}")
+                    logger.error("企业微信推送失败: %s", result)
                 return result
             except requests.exceptions.Timeout:
                 if attempt < 2:
                     delay = (2 ** attempt) * 1.5
-                    print(f"企业微信推送超时，{delay:.0f}s后重试({attempt+1}/3)")
+                    logger.warning("企业微信推送超时，%.0fs后重试(%d/3)", delay, attempt + 1)
                     time.sleep(delay)
                 else:
-                    print("企业微信推送超时（10s），3次重试均失败")
+                    logger.error("企业微信推送超时（10s），3次重试均失败")
                     return None
             except Exception as e:
                 if attempt < 2:
                     delay = (2 ** attempt) * 1.5
-                    print(f"企业微信推送异常: {e}，{delay:.0f}s后重试({attempt+1}/3)")
+                    logger.warning("企业微信推送异常: %s，%.0fs后重试(%d/3)", e, delay, attempt + 1)
                     time.sleep(delay)
                 else:
-                    print(f"企业微信推送异常: {e}，3次重试均失败")
+                    logger.error("企业微信推送异常: %s，3次重试均失败", e)
                     return None
 
     @staticmethod
@@ -253,7 +276,7 @@ class WeComNotifier:
         result = self.send_markdown(summary)
 
         if result and result.get("errcode") == 0:
-            print(f"✅ 企业微信推送成功 ({len(results)} 只股票)")
+            logger.info("✅ 企业微信推送成功 (%d 只股票)", len(results))
 
         # 可选附加信息（龙虎榜、雪球情绪等）
         if extra_sections:

@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import time
+from collections import deque
 
 import requests
 
@@ -24,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 # WeChat Work image msgtype limit ~2MB (base64 payload)
 WECHAT_IMAGE_MAX_BYTES = 2 * 1024 * 1024
+
+# 企业微信 API 速率限制：每个 webhook 最多 20次/分钟，留10%余量
+WECOM_RATE_LIMIT = 18
+WECOM_RATE_WINDOW = 60
 
 
 class WechatSender:
@@ -38,6 +43,23 @@ class WechatSender:
         self._wechat_max_bytes = getattr(config, "wechat_max_bytes", 4000)
         self._wechat_msg_type = getattr(config, "wechat_msg_type", "markdown")
         self._webhook_verify_ssl = getattr(config, "webhook_verify_ssl", True)
+        self._send_times: deque[float] = deque()
+
+    def _acquire_rate_limit(self):
+        """滑动窗口速率限制：最多 WECOM_RATE_LIMIT 次/60s"""
+        now = time.monotonic()
+        window_start = now - WECOM_RATE_WINDOW
+        while self._send_times and self._send_times[0] < window_start:
+            self._send_times.popleft()
+        if len(self._send_times) >= WECOM_RATE_LIMIT:
+            sleep_time = self._send_times[0] + WECOM_RATE_WINDOW - now
+            if sleep_time > 0:
+                logger.warning(
+                    "企业微信达到速率限制(%d/%ds)，等待%.1fs",
+                    WECOM_RATE_LIMIT, WECOM_RATE_WINDOW, sleep_time,
+                )
+                time.sleep(sleep_time)
+        self._send_times.append(time.monotonic())
 
     def send_to_wechat(self, content: str, *, timeout_seconds: float | None = None) -> bool:
         """
@@ -75,6 +97,8 @@ class WechatSender:
         if not self._wechat_url:
             logger.warning("企业微信 Webhook 未配置，跳过推送")
             return False
+
+        self._acquire_rate_limit()
 
         # 根据消息类型动态限制上限，避免 text 类型超过企业微信 2048 字节限制
         if self._wechat_msg_type == "text":
@@ -131,24 +155,41 @@ class WechatSender:
             return False
 
     def _send_wechat_message(self, content: str, *, timeout_seconds: float | None = None) -> bool:
-        """发送企业微信消息"""
+        """发送企业微信消息（3次指数退避重试）"""
         payload = self._gen_wechat_payload(content)
 
-        response = requests.post(
-            self._wechat_url, json=payload, timeout=timeout_seconds or 10, verify=self._webhook_verify_ssl
-        )
-
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("errcode") == 0:
-                logger.info("企业微信消息发送成功")
-                return True
-            else:
-                logger.error(f"企业微信返回错误: {result}")
-                return False
-        else:
-            logger.error(f"企业微信请求失败: {response.status_code}")
-            return False
+        for attempt in range(3):
+            try:
+                response = requests.post(
+                    self._wechat_url, json=payload, timeout=timeout_seconds or 10, verify=self._webhook_verify_ssl
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("errcode") == 0:
+                        logger.info("企业微信消息发送成功")
+                        return True
+                    else:
+                        logger.error(f"企业微信返回错误: {result}")
+                        return False
+                else:
+                    logger.error(f"企业微信请求失败: HTTP {response.status_code}")
+                    return False
+            except requests.exceptions.Timeout:
+                if attempt < 2:
+                    delay = (2 ** attempt) * 1.5
+                    logger.warning(f"企业微信推送超时，{delay:.0f}s后重试({attempt+1}/3)")
+                    time.sleep(delay)
+                else:
+                    logger.error("企业微信推送超时（10s），3次重试均失败")
+                    return False
+            except Exception as e:
+                if attempt < 2:
+                    delay = (2 ** attempt) * 1.5
+                    logger.warning(f"企业微信推送异常: {e}，{delay:.0f}s后重试({attempt+1}/3)")
+                    time.sleep(delay)
+                else:
+                    logger.error(f"企业微信推送异常: {e}，3次重试均失败")
+                    return False
 
     def _send_wechat_chunked(self, content: str, max_bytes: int) -> bool:
         """

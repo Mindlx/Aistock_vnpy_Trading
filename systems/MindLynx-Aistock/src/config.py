@@ -520,6 +520,12 @@ def setup_env(override: bool = False):
     env_path = Path(env_file) if env_file else Path(__file__).parent.parent / ".env"
     load_dotenv(dotenv_path=env_path, override=override)
 
+    # 加载项目根目录 .env 作为后备（共享变量如 WECOM_WEBHOOK_URL）
+    # config.py 在 systems/MindLynx-Aistock/src/，上4级到项目根
+    root_env = Path(__file__).parent.parent.parent.parent / ".env"
+    if root_env.exists() and root_env.resolve() != env_path.resolve():
+        load_dotenv(dotenv_path=root_env, override=False)
+
 
 @dataclass
 class Config(LLMConfig, NotificationConfig, DataConfig, AnalysisConfig):
