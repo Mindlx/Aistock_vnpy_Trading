@@ -187,18 +187,18 @@ class MarketAnalyzer:
             stocks_data = data.get("stocks", {})
             if not stocks_data:
                 return ""
-            lines = ["## 东方财富评级（市场情绪）"]
-            # 统计多空分布
-            bullish = sum(1 for s in stocks_data.values() if s.get("icon") in ("✅", "📈"))
-            neutral = sum(1 for s in stocks_data.values() if s.get("icon") == "💤")
-            bearish = sum(1 for s in stocks_data.values() if s.get("icon") in ("📉", "❌"))
-            total = len(stocks_data)
-            lines.append(f"- 评级分布: {bullish}只偏多  {neutral}只中性  {bearish}只偏空  (共{total}只)")
+            lines = ["## 东方财富参与意愿（散户情绪指标）"]
             # 统计意愿均值
             desires = [s["desire"] for s in stocks_data.values() if isinstance(s.get("desire"), (int, float))]
             if desires:
                 avg_desire = sum(desires) / len(desires)
-                lines.append(f"- 参与意愿均值: {avg_desire:.1f}/100")
+                lines.append(f"- 参与意愿均值: {avg_desire:.1f}/100（0-100，平台用户行为聚合）")
+            # 统计关注度均值
+            focuses = [s["focus_avg"] for s in stocks_data.values() if isinstance(s.get("focus_avg"), (int, float))]
+            if focuses:
+                avg_focus = sum(focuses) / len(focuses)
+                lines.append(f"- 关注度均值: {avg_focus:.1f}/100")
+            lines.append(f"- 注意: 该数据反映散户对个股的当前关注度和参与意愿,与T+1涨跌幅无显著相关性,仅供参考")
             fetched = data.get("fetched_at", "?")
             lines.append(f"- 数据时间: {fetched}")
             return "\n".join(lines)
@@ -207,7 +207,7 @@ class MarketAnalyzer:
             return ""
 
     def _get_eastmoney_stock_map(self) -> dict[str, str]:
-        """读取东方财富评级缓存，返回 {stock_code: 'EM=✅/📈/💤/📉/❌ 意愿XX'} 映射。"""
+        """读取东方财富评级缓存，返回 {stock_code: 'EM意愿XX 关注XX'} 映射。"""
         try:
             from pathlib import Path
             _root = Path(__file__).resolve().parent.parent.parent.parent
@@ -219,14 +219,13 @@ class MarketAnalyzer:
             stocks_data = data.get("stocks", {})
             result = {}
             for code, s in stocks_data.items():
-                icon = s.get("icon", "?")
                 d = s.get("desire")
                 f = s.get("focus_avg")
-                parts = [f"EM={icon}"]
+                parts = ["EM"]
                 if d is not None:
-                    parts.append(f"意愿{d}")
+                    parts.append(f"意愿{d}/100")
                 if f is not None:
-                    parts.append(f"关注{f}")
+                    parts.append(f"关注{f}/100")
                 result[code] = " ".join(parts)
             return result
         except Exception:
@@ -1381,7 +1380,7 @@ Output the report content directly, no extra commentary.
 （分析领涨/领跌板块背后的逻辑、持续性和是否形成主线）
 
 ### 四、资金与情绪
-（解读成交额、涨跌停结构、市场宽度、风险偏好和东方财富评级数据，综合分析主力资金动向与市场情绪）
+（解读成交额、涨跌停结构、市场宽度和东方财富参与意愿数据，综合分析主力资金动向与市场情绪）
 {capital_flow_text or ""}
 {eastmoney_text or ""}
 

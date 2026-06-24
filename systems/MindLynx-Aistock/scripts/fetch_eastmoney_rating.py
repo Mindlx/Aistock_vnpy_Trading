@@ -167,8 +167,6 @@ def fetch_all(stocks: list[dict]) -> dict[str, Any] | None:
         desire_str: str | None = None
         focus_avg: float | None = None
         focus_trend: str | None = None
-        icon: str = "?"
-        conclusion: str = "数据暂不可用"
 
         # 参与意愿
         ddf = fetch_desire(code)
@@ -189,7 +187,7 @@ def fetch_all(stocks: list[dict]) -> dict[str, Any] | None:
         # 综合评级
         w = desire_val or 50
         f_avg = focus_avg or 50
-        icon, conclusion = _combined_grade(w, f_avg, is_st)
+        _combined_grade(w, f_avg, is_st)  # keep for logging, results stored in cache metadata
 
         entries[code] = {
             "name": name,
@@ -198,8 +196,6 @@ def fetch_all(stocks: list[dict]) -> dict[str, Any] | None:
             "desire_change": desire_change,
             "focus_avg": focus_avg,
             "focus_trend": focus_trend,
-            "icon": icon,
-            "conclusion": conclusion,
         }
 
         if i < total:
@@ -223,24 +219,21 @@ def fetch_all(stocks: list[dict]) -> dict[str, Any] | None:
 
 
 def _generate_brief_text(result: dict, session: str) -> str:
-    """生成微信简讯（紧凑格式，无PDF指引）。"""
+    """生成微信简讯（紧凑格式）。"""
     now = datetime.now().strftime("%H:%M")
     stocks_data = result["stocks"]
-    lines = [f"💰 {now} 东方财富评级（{session}）"]
+    lines = [f"💰 {now} 东方财富参与意愿（{session}）"]
 
-    # 按图标排序: ✅📈💤📉❌
-    _ICON_ORDER = {"✅": 0, "📈": 1, "💤": 2, "📉": 3, "❌": 4}
+    # 按意愿值降序排列
     sorted_codes = sorted(stocks_data.keys(),
-                          key=lambda c: _ICON_ORDER.get(stocks_data[c].get("icon", ""), 99))
+                          key=lambda c: stocks_data[c].get("desire") or 0, reverse=True)
 
     for code in sorted_codes:
         data = stocks_data[code]
-        icon = data.get("icon", "?")
         name = data["name"]
         d = data.get("desire", "--")
         f = data.get("focus_avg", "--")
-        conclusion = data.get("conclusion", "")
-        lines.append(f"{icon} {name}｜意愿{d} 关注{f}｜{conclusion}")
+        lines.append(f"{name}｜意愿{d} 关注{f}")
 
     return "\n".join(lines)
 
