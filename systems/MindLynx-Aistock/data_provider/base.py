@@ -3051,3 +3051,23 @@ class DataFetcherManager:
         if last_error:
             logger.warning(f"[涨停池] 所有数据源均失败，最终错误: {last_error}")
         return []
+
+    def get_sector_capital_flow_rankings(self, n: int = 5) -> dict:
+        """获取板块资金流向排行（主力净流入 Top/Bottom）。
+
+        Returns:
+            dict: {"top": [{"name": str, "net_flow": float}, ...],
+                   "bottom": [{"name": str, "net_flow": float}, ...]}
+        """
+        try:
+            result = self._fundamental_adapter.get_capital_flow("000001", top_n=n)
+            rankings = result.get("sector_rankings", {})
+            # 兼容两种可能的数据格式
+            top = rankings.get("top", [])
+            bottom = rankings.get("bottom", [])
+            if top or bottom:
+                logger.info(f"[板块资金流向] 获取成功: 净流入前{n} + 净流出前{n}")
+            return {"top": top, "bottom": bottom}
+        except Exception as e:
+            logger.warning(f"[板块资金流向] 获取失败: {e}")
+            return {"top": [], "bottom": []}

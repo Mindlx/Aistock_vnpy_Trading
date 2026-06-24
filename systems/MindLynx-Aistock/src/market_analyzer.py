@@ -144,6 +144,36 @@ class MarketAnalyzer:
     def _get_template_review_language(self) -> str:
         return normalize_report_language(getattr(getattr(self, "config", None), "report_language", "zh"))
 
+    def _get_sector_capital_flow_text(self) -> str:
+        """获取板块资金流向文本块，供prompt注入。"""
+        try:
+            rankings = self.data_manager.get_sector_capital_flow_rankings(n=5)
+            top = rankings.get("top", [])
+            bottom = rankings.get("bottom", [])
+            if not top and not bottom:
+                return ""
+            lines = ["## 板块资金流向"]
+            if top:
+                top_text = ", ".join([
+                    f"{s.get('name', '?')}({s.get('net_flow', 0):+.0f}万)"
+                    if isinstance(s.get('net_flow'), (int, float))
+                    else f"{s.get('name', '?')}"
+                    for s in top
+                ])
+                lines.append(f"- 主力净流入前5: {top_text}")
+            if bottom:
+                bottom_text = ", ".join([
+                    f"{s.get('name', '?')}({s.get('net_flow', 0):+.0f}万)"
+                    if isinstance(s.get('net_flow'), (int, float))
+                    else f"{s.get('name', '?')}"
+                    for s in bottom
+                ])
+                lines.append(f"- 主力净流出前5: {bottom_text}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.debug(f"[大盘] 板块资金流向获取失败: {e}")
+            return ""
+
     def _get_market_scope_name(self, review_language: str | None = None) -> str:
         review_language = review_language or self._get_review_language()
         if self.region == "us":
@@ -492,7 +522,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def generate_market_review(self, overview: MarketOverview, news: list,
                                previous_plan: str | None = None,
                                session_label: str = "全天",
-                               stock_data: str | None = None) -> str:
+                               stock_data: str | None = None,
+                               capital_flow_text: str | None = None) -> str:
         """
         使用大模型生成大盘复盘报告
 
@@ -507,8 +538,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             logger.warning("[大盘] AI分析器未配置或不可用，使用模板生成报告")
             return self._generate_template_review(overview, news)
 
-        # 构建 Prompt（含自选股数据，如有）
-        prompt = self._build_review_prompt(overview, news, previous_plan, session_label, stock_data=stock_data)
+        # 构建 Prompt（含自选股数据 + 资金流向数据，如有）
+        prompt = self._build_review_prompt(overview, news, previous_plan, session_label,
+                                            stock_data=stock_data, capital_flow_text=capital_flow_text)
 
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point — never access private analyzer attributes.
@@ -1078,7 +1110,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def _build_review_prompt(self, overview: MarketOverview, news: list,
                              previous_plan: str | None = None,
                              session_label: str = "全天",
-                             stock_data: str | None = None) -> str:
+                             stock_data: str | None = None,
+                             capital_flow_text: str | None = None) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
 
@@ -1287,7 +1320,8 @@ Output the report content directly, no extra commentary.
 （分析领涨/领跌板块背后的逻辑、持续性和是否形成主线）
 
 ### 四、资金与情绪
-（解读成交额、涨跌停结构、市场宽度和风险偏好）
+（解读成交额、涨跌停结构、市场宽度和风险偏好，如【板块资金流向】数据存在则据此分析主力资金动向）
+{capital_flow_text or ""}
 
 ### 五、消息催化
 （结合近三日新闻，提炼真正影响明日交易的催化或扰动）
@@ -1564,8 +1598,14 @@ Market conditions can change quickly. The data above is for reference only and d
         stock_data = self._load_stock_pool_data()
         logger.info(f"[大盘] 自选股数据: {'已加载' if stock_data else '无数据'}")
 
-        # 4. 生成复盘报告（LLM 自动包含上期建议验证 + 自选股分析）
-        report = self.generate_market_review(overview, news, previous_plan, session_label, stock_data=stock_data)
+        # 3c. 获取板块资金流向数据（板块级主力净流入排行）
+        capital_flow_text = self._get_sector_capital_flow_text()
+        if capital_flow_text:
+            logger.info("[大盘] 板块资金流向: 已加载")
+
+        # 4. 生成复盘报告（LLM 自动包含上期建议验证 + 自选股分析 + 资金流向）
+        report = self.generate_market_review(overview, news, previous_plan, session_label,
+                                              stock_data=stock_data, capital_flow_text=capital_flow_text)
 
         logger.info("========== 大盘复盘分析完成 ==========")
 
@@ -1597,7 +1637,7 @@ Market conditions can change quickly. The data above is for reference only and d
                             fusion = item.get("fusion_score", 0)
                             sig = item.get("signal_name", "")
                             price_str = self._fetch_realtime_price_str(code)
-                            price_col = f"  现价{price_str}" if price_str else ""
+                            price_col = f"  当前价={price_str}" if price_str else ""
                             lines.append(f"- {name}({code})  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}{price_col}")
                         return "\n".join(lines)
         except Exception as e:
@@ -1611,7 +1651,8 @@ Market conditions can change quickly. The data above is for reference only and d
             q = self.data_manager.get_realtime_quote(stock_code, log_final_failure=False)
             if q is not None and q.price is not None:
                 chg = f"{q.change_pct:+.2f}%" if q.change_pct is not None else ""
-                return f"¥{q.price:.2f}{chg}"
+                # 同时输出价格和涨跌幅，避免LLM混淆
+                return f"¥{q.price:.2f} | 涨跌幅{chg}"
         except Exception:
             pass
         return ""
