@@ -1,0 +1,14 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 东方财富评级数据获取+简讯推送
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+EnvironmentFile=/home/bluekuma/workspace/Aistock_vnpy_Trading/.env
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/systems/MindLynx-Aistock/.venv/bin/python systems/MindLynx-Aistock/scripts/fetch_eastmoney_rating.py
+StandardOutput=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/fusion-cron.log
+StandardError=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/fusion-cron.log
+TimeoutStopSec=300

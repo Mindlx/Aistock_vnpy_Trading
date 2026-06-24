@@ -174,6 +174,64 @@ class MarketAnalyzer:
             logger.debug(f"[大盘] 板块资金流向获取失败: {e}")
             return ""
 
+    def _get_eastmoney_rating_text(self) -> str:
+        """读取东方财富评级缓存，生成市场情绪摘要文本块。"""
+        try:
+            from pathlib import Path
+            _root = Path(__file__).resolve().parent.parent.parent.parent
+            cache_path = _root / "data" / "realtime" / "eastmoney_rating.json"
+            if not cache_path.exists():
+                return ""
+            import json
+            data = json.loads(cache_path.read_text(encoding="utf-8"))
+            stocks_data = data.get("stocks", {})
+            if not stocks_data:
+                return ""
+            lines = ["## 东方财富评级（市场情绪）"]
+            # 统计多空分布
+            bullish = sum(1 for s in stocks_data.values() if s.get("icon") in ("✅", "📈"))
+            neutral = sum(1 for s in stocks_data.values() if s.get("icon") == "💤")
+            bearish = sum(1 for s in stocks_data.values() if s.get("icon") in ("📉", "❌"))
+            total = len(stocks_data)
+            lines.append(f"- 评级分布: {bullish}只偏多  {neutral}只中性  {bearish}只偏空  (共{total}只)")
+            # 统计意愿均值
+            desires = [s["desire"] for s in stocks_data.values() if isinstance(s.get("desire"), (int, float))]
+            if desires:
+                avg_desire = sum(desires) / len(desires)
+                lines.append(f"- 参与意愿均值: {avg_desire:.1f}/100")
+            fetched = data.get("fetched_at", "?")
+            lines.append(f"- 数据时间: {fetched}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.debug(f"[大盘] 东方财富评级加载失败: {e}")
+            return ""
+
+    def _get_eastmoney_stock_map(self) -> dict[str, str]:
+        """读取东方财富评级缓存，返回 {stock_code: 'EM=✅/📈/💤/📉/❌ 意愿XX'} 映射。"""
+        try:
+            from pathlib import Path
+            _root = Path(__file__).resolve().parent.parent.parent.parent
+            cache_path = _root / "data" / "realtime" / "eastmoney_rating.json"
+            if not cache_path.exists():
+                return {}
+            import json
+            data = json.loads(cache_path.read_text(encoding="utf-8"))
+            stocks_data = data.get("stocks", {})
+            result = {}
+            for code, s in stocks_data.items():
+                icon = s.get("icon", "?")
+                d = s.get("desire")
+                f = s.get("focus_avg")
+                parts = [f"EM={icon}"]
+                if d is not None:
+                    parts.append(f"意愿{d}")
+                if f is not None:
+                    parts.append(f"关注{f}")
+                result[code] = " ".join(parts)
+            return result
+        except Exception:
+            return {}
+
     def _get_market_scope_name(self, review_language: str | None = None) -> str:
         review_language = review_language or self._get_review_language()
         if self.region == "us":
@@ -523,7 +581,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                                previous_plan: str | None = None,
                                session_label: str = "全天",
                                stock_data: str | None = None,
-                               capital_flow_text: str | None = None) -> str:
+                               capital_flow_text: str | None = None,
+                               eastmoney_text: str | None = None) -> str:
         """
         使用大模型生成大盘复盘报告
 
@@ -538,9 +597,10 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             logger.warning("[大盘] AI分析器未配置或不可用，使用模板生成报告")
             return self._generate_template_review(overview, news)
 
-        # 构建 Prompt（含自选股数据 + 资金流向数据，如有）
+        # 构建 Prompt（含自选股数据 + 资金流向 + 东方财富评级，如有）
         prompt = self._build_review_prompt(overview, news, previous_plan, session_label,
-                                            stock_data=stock_data, capital_flow_text=capital_flow_text)
+                                            stock_data=stock_data, capital_flow_text=capital_flow_text,
+                                            eastmoney_text=eastmoney_text)
 
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point — never access private analyzer attributes.
@@ -1111,7 +1171,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                              previous_plan: str | None = None,
                              session_label: str = "全天",
                              stock_data: str | None = None,
-                             capital_flow_text: str | None = None) -> str:
+                             capital_flow_text: str | None = None,
+                             eastmoney_text: str | None = None) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
 
@@ -1320,8 +1381,9 @@ Output the report content directly, no extra commentary.
 （分析领涨/领跌板块背后的逻辑、持续性和是否形成主线）
 
 ### 四、资金与情绪
-（解读成交额、涨跌停结构、市场宽度和风险偏好，如【板块资金流向】数据存在则据此分析主力资金动向）
+（解读成交额、涨跌停结构、市场宽度、风险偏好和东方财富评级数据，综合分析主力资金动向与市场情绪）
 {capital_flow_text or ""}
+{eastmoney_text or ""}
 
 ### 五、消息催化
 （结合近三日新闻，提炼真正影响明日交易的催化或扰动）
@@ -1603,9 +1665,15 @@ Market conditions can change quickly. The data above is for reference only and d
         if capital_flow_text:
             logger.info("[大盘] 板块资金流向: 已加载")
 
-        # 4. 生成复盘报告（LLM 自动包含上期建议验证 + 自选股分析 + 资金流向）
+        # 3d. 获取东方财富评级数据（市场情绪+个股映射）
+        eastmoney_text = self._get_eastmoney_rating_text()
+        if eastmoney_text:
+            logger.info("[大盘] 东方财富评级: 已加载")
+
+        # 4. 生成复盘报告（LLM 自动包含上期建议验证 + 自选股分析 + 资金流向 + 东方财富评级）
         report = self.generate_market_review(overview, news, previous_plan, session_label,
-                                              stock_data=stock_data, capital_flow_text=capital_flow_text)
+                                              stock_data=stock_data, capital_flow_text=capital_flow_text,
+                                              eastmoney_text=eastmoney_text)
 
         logger.info("========== 大盘复盘分析完成 ==========")
 
@@ -1638,7 +1706,9 @@ Market conditions can change quickly. The data above is for reference only and d
                             sig = item.get("signal_name", "")
                             price_str = self._fetch_realtime_price_str(code)
                             price_col = f"  当前价={price_str}" if price_str else ""
-                            lines.append(f"- {name}({code})  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}{price_col}")
+                            em_suffix = self._get_eastmoney_stock_map().get(code, "")
+                            em_col = f"  {em_suffix}" if em_suffix else ""
+                            lines.append(f"- {name}({code})  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}{price_col}{em_col}")
                         return "\n".join(lines)
         except Exception as e:
             logger.debug(f"[大盘] 自选股融合数据加载失败: {e}")
@@ -1670,7 +1740,9 @@ Market conditions can change quickly. The data above is for reference only and d
                     name = q.name or code
                     chg = f"{q.change_pct:+.2f}%" if q.change_pct is not None else ""
                     vol_r = f"  量比{q.volume_ratio:.2f}" if q.volume_ratio is not None else ""
-                    lines.append(f"- {name}({code})  ¥{q.price:.2f}  {chg}{vol_r}")
+                    em_suffix = self._get_eastmoney_stock_map().get(code, "")
+                    em_col = f"  {em_suffix}" if em_suffix else ""
+                    lines.append(f"- {name}({code})  ¥{q.price:.2f}  {chg}{vol_r}{em_col}")
                 else:
                     lines.append(f"- {code}  行情暂不可用")
             except Exception:
