@@ -653,7 +653,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         up_ratio = overview.up_count / participation if participation else 0.0
         limit_spread = overview.limit_up_count - overview.limit_down_count
         lines = [
-            f"- **盘面信号**：{score}/100（{label}，{light['label']}）",
+            f"- **盘面信号**：{score}/100（{light['temperature_label']}，{light['label']}）",
             f"- **信号依据**：{'；'.join(light['reasons'])}",
             f"- **操作建议**：{light['guidance']}",
             "",
