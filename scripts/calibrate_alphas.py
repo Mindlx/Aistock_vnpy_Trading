@@ -34,10 +34,10 @@ def load_backtest_summaries(min_samples: int = 30) -> dict[str, dict]:
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT code, completed_count, sentiment_direction_accuracy_pct
+        SELECT code, completed_count, direction_accuracy_pct
         FROM backtest_summaries
         WHERE scope = 'stock' AND eval_window_days = 5
-          AND sentiment_direction_accuracy_pct IS NOT NULL
+          AND direction_accuracy_pct IS NOT NULL
           AND completed_count >= ?
         ORDER BY code
     """, (min_samples,))
