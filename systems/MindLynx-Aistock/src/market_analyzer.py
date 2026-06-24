@@ -491,7 +491,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     def generate_market_review(self, overview: MarketOverview, news: list,
                                previous_plan: str | None = None,
-                               session_label: str = "全天") -> str:
+                               session_label: str = "全天",
+                               stock_data: str | None = None) -> str:
         """
         使用大模型生成大盘复盘报告
 
@@ -506,8 +507,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             logger.warning("[大盘] AI分析器未配置或不可用，使用模板生成报告")
             return self._generate_template_review(overview, news)
 
-        # 构建 Prompt
-        prompt = self._build_review_prompt(overview, news, previous_plan, session_label)
+        # 构建 Prompt（含自选股数据，如有）
+        prompt = self._build_review_prompt(overview, news, previous_plan, session_label, stock_data=stock_data)
 
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point — never access private analyzer attributes.
@@ -1076,7 +1077,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     def _build_review_prompt(self, overview: MarketOverview, news: list,
                              previous_plan: str | None = None,
-                             session_label: str = "全天") -> str:
+                             session_label: str = "全天",
+                             stock_data: str | None = None) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
 
@@ -1295,6 +1297,11 @@ Output the report content directly, no extra commentary.
 
 ### 七、风险提示
 （列出需要关注的风险点；文末用引用形式补充：“> 以上数据仅供参考，不构成投资建议”）
+
+### 八、自选股操盘建议
+（如果【自选股因子数据】或【自选股实时行情】不为空，基于这些数据和当日大盘背景，对每只自选股给出独立操盘建议：明确操作方向、仓位参考和关键价位。数据为空则跳过此章节。）
+
+{stock_data or ""}
 
 ---
 
@@ -1553,12 +1560,81 @@ Market conditions can change quickly. The data above is for reference only and d
         # 3. 读取上一期全天报告的明日交易计划，供 LLM 参考
         previous_plan = self._load_previous_plan()
 
-        # 4. 生成复盘报告（LLM 自动包含上期建议验证）
-        report = self.generate_market_review(overview, news, previous_plan, session_label)
+        # 3b. 读取当日融合系统自选股分析数据（如有）
+        stock_data = self._load_stock_pool_data()
+        logger.info(f"[大盘] 自选股数据: {'已加载' if stock_data else '无数据'}")
+
+        # 4. 生成复盘报告（LLM 自动包含上期建议验证 + 自选股分析）
+        report = self.generate_market_review(overview, news, previous_plan, session_label, stock_data=stock_data)
 
         logger.info("========== 大盘复盘分析完成 ==========")
 
         return report
+
+    def _load_stock_pool_data(self) -> str | None:
+        """加载当日融合系统自选股分析数据，供LLM生成操盘建议。
+
+        优先从融合输出文件读取（含因子信号），融合不存在时降级到实时行情。
+        """
+        try:
+            from pathlib import Path
+            today = datetime.now().strftime("%Y-%m-%d")
+            _root = Path(__file__).resolve().parent.parent.parent.parent
+            fusion_dir = _root / "data" / "fusion_output"
+            if fusion_dir.exists():
+                files = sorted(fusion_dir.glob(f"fusion_{today}*.json"))
+                if files:
+                    import json
+                    data = json.loads(files[-1].read_text(encoding="utf-8"))
+                    lines = ["## 自选股因子数据"]
+                    items = data if isinstance(data, list) else data.get("results", [])
+                    if items:
+                        for item in items:
+                            code = item.get("stock_code", item.get("code", ""))
+                            name = item.get("stock_name", "")
+                            ly = item.get("lynx_score", 0)
+                            ml = item.get("mindlynx_score", 0)
+                            fusion = item.get("fusion_score", 0)
+                            sig = item.get("signal_name", "")
+                            price_str = self._fetch_realtime_price_str(code)
+                            price_col = f"  现价{price_str}" if price_str else ""
+                            lines.append(f"- {name}({code})  ly={ly:+.2f}  ml={ml:+.2f}  融合={fusion:+.2f}  信号={sig}{price_col}")
+                        return "\n".join(lines)
+        except Exception as e:
+            logger.debug(f"[大盘] 自选股融合数据加载失败: {e}")
+
+        return self._fetch_realtime_stock_data()
+
+    def _fetch_realtime_price_str(self, stock_code: str) -> str:
+        """获取单只股票的实时价格字符串。"""
+        try:
+            q = self.data_manager.get_realtime_quote(stock_code, log_final_failure=False)
+            if q is not None and q.price is not None:
+                chg = f"{q.change_pct:+.2f}%" if q.change_pct is not None else ""
+                return f"¥{q.price:.2f}{chg}"
+        except Exception:
+            pass
+        return ""
+
+    def _fetch_realtime_stock_data(self) -> str | None:
+        """获取自选股实时行情数据（无融合因子时的降级方案）。"""
+        codes = getattr(self.config, "stock_list", [])
+        if not codes or not isinstance(codes, list):
+            return None
+        lines = ["## 自选股实时行情（融合因子数据暂不可用）"]
+        for code in codes:
+            try:
+                q = self.data_manager.get_realtime_quote(code, log_final_failure=False)
+                if q is not None and q.price is not None:
+                    name = q.name or code
+                    chg = f"{q.change_pct:+.2f}%" if q.change_pct is not None else ""
+                    vol_r = f"  量比{q.volume_ratio:.2f}" if q.volume_ratio is not None else ""
+                    lines.append(f"- {name}({code})  ¥{q.price:.2f}  {chg}{vol_r}")
+                else:
+                    lines.append(f"- {code}  行情暂不可用")
+            except Exception:
+                lines.append(f"- {code}  行情获取失败")
+        return "\n".join(lines) if len(lines) > 1 else None
 
 
 def build_sector_treemap(sectors: list[dict],    max_blocks: int = 16) -> str | None:
