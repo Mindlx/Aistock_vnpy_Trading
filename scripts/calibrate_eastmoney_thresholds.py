@@ -5,6 +5,13 @@
 统计各 w/f 分桶的上涨概率，与当前阈值对比。
 数据不足时自动跳过。
 
+2026-06-24 校准结论（354条记录）:
+  - 参与意愿(w)与T+1涨跌幅无显著正相关
+  - w≥55(理论看多)上涨78.3%, w<45(理论看空)上涨83.8%——方向相反
+  - 低意愿+高关注(理论看空)上涨87.8%——看空信号反而最强
+  - 阈值分类标签(✅📈💤📉❌)已被移除，w/f仅作为散户情绪氛围指标
+  - 后续建议: 积累至1000+条后做5分位切分分析,重新评估w/f价值
+
 用法:
     .venv/bin/python scripts/calibrate_eastmoney_thresholds.py
     .venv/bin/python scripts/calibrate_eastmoney_thresholds.py --min-samples 100  # 覆盖最小样本量
