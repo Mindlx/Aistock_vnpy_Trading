@@ -218,146 +218,158 @@ def fmt_focus_trend(df: pd.DataFrame) -> str:
     return "\n".join(lines) + f"\n\n{summary}"
 
 
+def _load_cache() -> dict:
+    """读取 services/eastmoney 写入的共享缓存（含机构/得分/主力成本等）。"""
+    cache_path = FUSION_ROOT / "data" / "realtime" / "eastmoney_rating.json"
+    if not cache_path.exists():
+        return {}
+    try:
+        import json
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.debug("共享缓存读取失败: %s (不影响主要功能)", e)
+        return {}
+
+
 def generate_report(stocks: list[dict]) -> str:
     """
-    遍历所有股票生成东方财富评级报告 Markdown 文本。
+    生成东方财富评级报告 Markdown（紧凑格式）。
+    每只股票浓缩为 1-2 行，一览表为核心输出。
     """
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    cache = _load_cache()
+    market = cache.get("market", {}) if cache else {}
+    stock_cache = cache.get("stocks", {}) if cache else {}
+
     lines = [
         f"# 📊 东方财富个股评级报告",
         f"",
-        f"**生成时间**: {now} ｜ **股票数**: {len(stocks)} 只",
-        f"**数据来源**: 东方财富 (data.eastmoney.com)",
-        f"",
-        f"---",
+        f"**生成时间**: {now} ｜ **自选股**: {len(stocks)} 只",
         f"",
     ]
 
+    # ── 市场概况（来自共享缓存） ──
+    if market and market.get("total_stocks"):
+        lines.extend([
+            f"### 市场概况",
+        ])
+        parts = [f"覆盖 {market['total_stocks']} 只 A 股"]
+        if market.get("focus_avg"): parts.append(f"关注均值 {market['focus_avg']}")
+        if market.get("score_avg"): parts.append(f"综合得分均值 {market['score_avg']}")
+        if market.get("institution_avg"): parts.append(f"机构参与度均值 {market['institution_avg']:.4f}")
+        lines.append("｜".join(parts) + "")
+        lines.append("")
+
+    # ── 单只股票紧凑行 ──
     for i, stock in enumerate(stocks, 1):
         code = stock["code"]
         name = stock["name"]
-        market = stock["market"]
-        full_code = f"{code}.{'SH' if market == 'SH' else 'SZ'}"
 
-        logger.info("[%d/%d] 正在拉取 %s(%s)...", i, len(stocks), name, code)
-        lines.append(f"## {i}. {name}（{code}）")
-        lines.append("")
+        lines.append(f"### {i}. {name}（{code}）")
 
-        # ── 参与意愿 ──
+        # 基础数据（每只都要拉）
         desire_df = fetch_desire(code)
+        focus_df = fetch_focus(code)
+
+        # 基础指标行
+        metrics = []
+
+        # 参与意愿
         if desire_df is not None and not desire_df.empty:
             latest = desire_df.iloc[0]
-            latest_val = latest.get("参与意愿", "?")
-            latest_change = latest.get("参与意愿变化", 0)
+            dv = latest.get("参与意愿", "?")
+            dc = latest.get("参与意愿变化", 0)
             try:
-                lc = float(latest_change) if latest_change else 0
-                arrow = "🟢 上升" if lc > 5 else ("🔴 下降" if lc < -5 else ("🟡 微幅变动" if abs(lc) > 0 else "⚪ 持平"))
+                dc_f = float(dc) if dc else 0
+                arrow = "🟢" if dc_f > 5 else ("🔴" if dc_f < -5 else "🟡")
             except (ValueError, TypeError):
+                dc_f = 0
                 arrow = ""
+            metrics.append(f"意愿 {dv} {arrow}{dc_f:+.0f}")
 
-            ma5_val = latest.get("5日平均参与意愿", "?")
-            lines.extend([
-                f"### 参与意愿评分",
-                f"",
-                f"| 指标 | 数值 | 评估 |",
-                f"|------|------|------|",
-                f"| 最新参与意愿 | **{latest_val}** | {arrow} |",
-                f"| 5日均值 | {ma5_val} | |",
-                f"| 日变化 | {latest_change} | {'🟢 +' if lc > 0 else '🔴 ' if lc < 0 else ''}{lc if abs(lc) > 0 else 0} |",
-                f"",
-                f"**近5日走势**:",
-                f"",
-                f"| 日期 | 参与意愿 | 5日均值 | 日变化 | 5日均变化 |",
-                f"|------|---------|---------|-------|----------|",
-            ])
-            lines.append(fmt_desire_trend(desire_df))
-        else:
-            lines.append("*参与意愿数据暂不可用*")
-
-        lines.append("")
-
-        # ── 用户关注度 ──
-        focus_df = fetch_focus(code)
+        # 关注度
         if focus_df is not None and not focus_df.empty:
-            lines.extend([
-                f"### 用户关注度",
-                f"",
-                f"**近20日关注指数走势（◀ = 近5日）**:",
-                f"",
-            ])
-            lines.append(fmt_focus_trend(focus_df))
+            vals = []
+            for _, r in focus_df.iterrows():
+                try: vals.append(float(r.get("用户关注指数", 0)))
+                except: pass
+            if vals:
+                avg_r = sum(vals[:5]) / min(len(vals[:5]), 1)
+                avg_o = sum(vals[5:10]) / min(len(vals[5:10]), 1) if len(vals) >= 10 else avg_r
+                trend = "↑" if avg_r > avg_o else ("↓" if avg_r < avg_o else "→")
+                metrics.append(f"关注 {avg_r:.0f} {trend}")
+
+        # 共享缓存数据
+        sc = stock_cache.get(code, {})
+        _score = sc.get("score")
+        if _score is not None:
+            metrics.append(f"综合 {_score}")
+        _inst = sc.get("institution")
+        if _inst is not None:
+            metrics.append(f"机构 {_inst:.4f}")
+
+        if metrics:
+            lines.append("  " + "  |  ".join(metrics))
         else:
-            lines.append("*关注度数据暂不可用*")
+            lines.append("  *数据暂不可用*")
 
         lines.append("")
-        lines.append("---")
-        lines.append("")
 
-        # 控制请求频率，避免被封
-        if i < len(stocks):
-            time.sleep(1.5)
-
-    # ── 全表汇总 ──
+    # ── 一览表 ──
     lines.extend([
-        f"## 📋 全表汇总",
+        f"## 一览表",
         f"",
-        f"| # | 代码 | 名称 | 最新参与意愿 | 近5日变化 | 关注度趋势 |",
-        f"|---|------|------|------------|----------|-----------|",
+        f"| # | 名称 | 意愿 | 意愿变化 | 关注 | 机构参与度 | 综合得分 | 排名 | 关注趋势 |",
+        f"|---|------|:----:|:--------:|:----:|:----------:|:--------:|:----:|:--------:|",
     ])
 
-    # 重新拉取一遍汇总数据（轻量展示）
     for i, stock in enumerate(stocks, 1):
         code = stock["code"]
         name = stock["name"]
+        sc = stock_cache.get(code, {})
+
+        # 意愿
+        d_val, d_chg = "—", "—"
         try:
-            df = fetch_desire(code)
-            if df is not None and not df.empty:
-                latest = df.iloc[0]
-                desire_val = latest.get("参与意愿", "?")
+            ddf = fetch_desire(code)
+            if ddf is not None and not ddf.empty:
+                r = ddf.iloc[0]
+                d_val = str(r.get("参与意愿", "—"))
                 try:
-                    total_change = sum(
-                        float(row.get("参与意愿变化", 0) or 0) for _, row in df.iterrows()
-                    )
-                    chg_str = f"{total_change:+.1f}"
-                except (ValueError, TypeError):
-                    chg_str = "?"
-                desire_str = f"{desire_val}"
-            else:
-                desire_str = "N/A"
-                chg_str = "N/A"
-        except Exception:
-            desire_str = "N/A"
-            chg_str = "N/A"
+                    d_chg = f"{float(r.get('参与意愿变化', 0) or 0):+.0f}"
+                except: pass
+        except: pass
 
+        # 关注趋势
+        focus_trend = "—"
         try:
-            focus_df = fetch_focus(code)
-            if focus_df is not None and not focus_df.empty:
+            fdf = fetch_focus(code)
+            if fdf is not None and not fdf.empty:
                 vals = []
-                for _, row in focus_df.iterrows():
-                    try:
-                        vals.append(float(row.get("用户关注指数", 0)))
-                    except (ValueError, TypeError):
-                        pass
-                recent_5 = vals[:5] if len(vals) >= 5 else vals
-                older_5 = vals[5:10] if len(vals) >= 10 else vals[-5:]
-                avg_r = sum(recent_5) / len(recent_5) if recent_5 else 0
-                avg_o = sum(older_5) / len(older_5) if older_5 else 0
-                trend = "↑" if avg_r > avg_o else ("↓" if avg_r < avg_o else "→")
-            else:
-                trend = "?"
-        except Exception:
-            trend = "?"
+                for _, r in fdf.iterrows():
+                    try: vals.append(float(r.get("用户关注指数", 0)))
+                    except: pass
+                if vals:
+                    r5 = sum(vals[:5]) / min(len(vals[:5]), 1)
+                    o5 = sum(vals[5:10]) / min(len(vals[5:10]), 1) if len(vals) >= 10 else r5
+                    focus_trend = "↑" if r5 > o5 else ("↓" if r5 < o5 else "→")
+        except: pass
 
-        lines.append(f"| {i} | {code} | {name} | {desire_str} | {chg_str} | {trend} |")
+        score = sc.get("score", "—")
+        inst = sc.get("institution", "—")
+        rank = sc.get("rank", "—")
+        if inst != "—":
+            inst = f"{inst:.4f}"
 
-        if i < len(stocks):
-            time.sleep(0.5)
+        lines.append(
+            f"| {i} | {name} | {d_val} | {d_chg} | — | {inst} | {score} | {rank} | {focus_trend} |"
+        )
 
     lines.extend([
         "",
         "---",
         "",
-        "> ⚠️ 本报告仅供学习研究参考，不构成任何投资建议。",
+        "> 数据来源: 东方财富(data.eastmoney.com) ｜ 仅供参考，不构成投资建议",
         f"> 生成时间: {now}",
     ])
 
