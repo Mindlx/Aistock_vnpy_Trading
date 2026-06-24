@@ -100,6 +100,8 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 | fusion | oneshot | - | inactive(等待19:00) | 日终融合 |
 | lynx-signal | oneshot | - | inactive(等待15:15) | 量化信号+推送 |
 | TA | oneshot | - | inactive(等待09:31) | TradingAgent辩论 |
+| calibrate-alphas | oneshot | - | ✅ timer 12:30 | Alpha权重自动校准 |
+| diagnose-agreement | oneshot | - | ✅ timer 20:30 | LY+ML同向诊断数据积累 |
 
 **常驻内存合计**: ~118MB（4个守护进程）
 
@@ -110,6 +112,7 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 10:00 ─ scheduler ─── 整点全量分析
 11:00 ─ scheduler ─── 整点全量分析
 11:45 ─ scheduler ─── 大盘复盘(文字+PDF)
+12:30 ─ calibrate-alphas.timer ── 🆕 Alpha权重自动校准
 13:00 ─ TA.timer ──── 第二轮TA深度分析
 14:00 ─ scheduler ─── 整点全量分析
 15:00 ─ scheduler ─── 整点全量分析
@@ -120,6 +123,7 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 # 因子计算 持续每5分钟扫描(仅工作日)
 
 19:00 ─ fusion.timer ── 日终融合+龙虎榜+评级PDF
+20:30 ─ diagnose-agreement.timer ── 🆕 LY+ML同向诊断
 Sun 20:00 ─ scheduler ─ 周末情报推送
 Mon 07:30 ─ scheduler ─ 周末情报补量
 ```
