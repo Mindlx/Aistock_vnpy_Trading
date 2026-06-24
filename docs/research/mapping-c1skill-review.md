@@ -1,4 +1,7 @@
-# c1skill 论证：融合映射优化方案
+# c1skill 论证：融合映射优化方案（已取代）
+
+> ⚠️ **此文档已被 `docs/decisions/l7-mapping.md` 取代**。当前实现基于更新后的 L7 映射方案。
+> 本文保留仅用于历史参考。
 
 > **审阅目标**: `docs/research/mapping-optimization-analysis.md`
 > **审阅方法**: c1skill Stage 0 + Stage 1 + Stage 2 + Stage 4 + Stage 5
