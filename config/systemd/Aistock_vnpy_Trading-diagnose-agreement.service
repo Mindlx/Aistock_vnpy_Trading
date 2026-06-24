@@ -1,0 +1,15 @@
+[Unit]
+Description=Aistock_vnpy_Trading — LY+ML 同向/反向融合诊断（每日）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/diagnose_agreement.py --compact
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

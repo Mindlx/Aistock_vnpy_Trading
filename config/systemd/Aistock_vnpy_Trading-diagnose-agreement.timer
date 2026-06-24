@@ -1,0 +1,10 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 融合诊断定时器（每日 20:30，融合19:00运行后）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=*-*-* 20:30:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
