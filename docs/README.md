@@ -14,7 +14,7 @@
 | 查看当前运行状态 | `architecture/current-state.md` |
 | 了解数据从哪里来 | `operations/data-sources.md` |
 | 跑回测验证 | `testing/backtest.md` |
-| 查看推送格式规范 | `operations/push-format.md` |
+| 查看推送格式规范 | `push/format.md` |
 | 了解融合权重怎么来的 | `decisions/weight-strategy.md` |
 | 查看 ML 提示词 | `subsystems/ml/prompts.md` |
 
@@ -34,8 +34,12 @@ docs/
 │
 ├── operations/                            # 运维/配置
 │   ├── data-sources.md                    # 数据源配置与依赖审计
-│   ├── deployment.md                      # 部署指南
-│   └── push-format.md                     # 推送格式规范
+│   └── deployment.md                      # 部署指南
+│
+├── push/                                  # 信息推送
+│   ├── format.md                          # 推送格式规范
+│   ├── architecture-review.md             # 推送架构评估
+│   └── wechat-architecture.md             # 微信推送架构
 │
 ├── testing/                               # 回测验证
 │   └── backtest.md                        # 融合系统回测
@@ -80,7 +84,8 @@ docs/
 |------|------|
 | 部署指南 | `operations/deployment.md` |
 | 数据源配置 | `operations/data-sources.md` |
-| 推送格式 | `operations/push-format.md` |
+| 推送格式 | `push/format.md` |
+| 推送架构 | `push/architecture-review.md` |
 | 当前状态 | `architecture/current-state.md` |
 
 #### 👨‍💻 开发者
