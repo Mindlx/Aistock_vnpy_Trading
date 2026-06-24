@@ -102,8 +102,13 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 | TA | oneshot | - | inactive(等待09:31) | TradingAgent辩论 |
 | calibrate-alphas | oneshot | - | ✅ timer 12:30 | Alpha权重自动校准 |
 | diagnose-agreement | oneshot | - | ✅ timer 20:30 | LY+ML同向诊断数据积累 |
+| eastmoney-rating | oneshot | - | ✅ timer 09:53/13:53 | 东方财富数据获取+存档 |
 
-**常驻内存合计**: ~118MB（4个守护进程）
+**常驻内存合计**: ~245+95+32 = **372MB**（0.6% of 62GB 总内存）
+
+> 注意：monitor 245MB 主要来自 litellm+httpx 库加载，非内存泄漏。
+> 基线值 2026-06-24：ml_factor=32MB, scheduler=95MB, monitor=245MB。
+> 如 monitor 长期运行后超过 400MB 需排查。
 
 ### 2.2 timer 触发时间线
 

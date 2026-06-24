@@ -12,9 +12,10 @@
 | 🔗 **数据链** | `data-chain/overview.md`, `data-chain/data-sources.md`, `data-chain/data-warehouse.md`, `data-chain/data-warehouse-pattern.md` | LY+ML+AT+融合 |
 | 📲 **信息推送** | `push/format.md`, `push/architecture-review.md`, `push/wechat-architecture.md` | 融合+ML |
 | 🧠 **LLM/提示词** | `llm/prompts.md`, `llm/injection.md`, `llm/roadmap.md` | ML+AT |
-| 🏛 **系统架构** | `architecture/overview.md`, `architecture/current-state.md`, `architecture/deployment.md` | 全部 |
+| 🏛 **系统架构** | `architecture/overview.md`, `architecture/current-state.md`, `architecture/deployment.md`, `architecture/system-resource-profile.md` | 全部 |
 | 🧪 **回测验证** | `testing/backtest.md`, `subsystems/ml/backtest.md` | 融合+ML |
 | 📐 **架构决策** | `decisions/` (8 篇) | 全部 |
+| 💹 **东方财富数据** | `eastmoney/README.md`, `eastmoney/c1skill-analysis.md`, `eastmoney/data-ecosystem.md` | 🆕 EM |
 | 🗄 **历史研究** | `research/` (23 篇) | 全部 |
 
 ## 📖 视图 B：按子系统
@@ -25,6 +26,7 @@
 | **ML (MindLynx)** | `subsystems/ml/backtest.md`, `llm/prompts.md`, `llm/roadmap.md`, `data-chain/data-sources.md` |
 | **AT (TradingAgent)** | `llm/injection.md`, `decisions/at-optimization.md`, `data-chain/data-sources.md` |
 | **LY (lynx_vnpy)** | `data-chain/data-sources.md`, `research/lynx-vnpy-subsystem-report.md` |
+| **EM (东方财富)** | `eastmoney/README.md`, `eastmoney/c1skill-analysis.md`, `eastmoney/data-ecosystem.md` |
 
 ---
 
@@ -59,6 +61,12 @@ docs/
 │
 ├── testing/                   # 回测验证
 │   └── backtest.md            # 融合系统回测
+│
+├── eastmoney/                  # 🆕 东方财富数据（4篇）
+│   ├── README.md              # 全景总览
+│   ├── c1skill-analysis.md    # 第四子系统论证
+│   ├── data-ecosystem.md      # 14字段+3信号维度
+│   └── research-log.md        # 研究发现日志
 │
 ├── decisions/                 # 活跃架构决策（8篇）
 │

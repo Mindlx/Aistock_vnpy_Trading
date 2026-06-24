@@ -209,3 +209,24 @@ systemctl --user restart Aistock_vnpy_Trading-scheduler.service Aistock_vnpy_Tra
 2. 检查 ML .venv 是否存在（见上一条）
 3. 检查信号文件新鲜度：`ls -la data/realtime/*.json`
 4. 检查 webhook 配置：`.env` 中 `WECOM_WEBHOOK_URL` 是否正确
+
+## 硬件需求
+
+### 生产环境（当前配置）
+
+| 资源 | 需求 | 说明 |
+|------|------|------|
+| CPU | 4 核+ | 主要为 ML 子系统的 LLM 推理 |
+| 内存 | **4 GB+** | 4 个守护进程合计 ~370MB，留余量给 LLM |
+| 磁盘 | **10 GB+** | Fusion venv ~1.3GB, ML venv ~1GB |
+| OS | Linux (systemd) | 依赖 systemd timer 调度 |
+
+### 低配 VPS / 分发场景
+
+| 资源 | 最低要求 | 说明 |
+|------|---------|------|
+| 内存 | **2 GB** | 仅运行融合核心（关闭 monitor 常驻服务） |
+| 磁盘 | **5 GB** | Fusion venv 不含 GPU 包(~1.3GB)，ML venv ~1GB |
+| OS | Linux | 可用 cron 替代 systemd timer |
+
+> Fusion venv 不含 GPU 包（nvidia/torch/triton），安装时注意避免拉入 GPU 依赖。

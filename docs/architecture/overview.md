@@ -326,6 +326,8 @@ at不使用因子。它的方法论与ly和ml完全不同：
 
 三种方法论独立互补：同一个股票，ly从量价技术面看、ml从因子+AI分析看、at从多智能体辩论看。当三者形成共识时信号可靠性显著提升——这就是三系统融合的意义。
 
+此外，**东方财富数据**（散户情绪+机构行为+截面价值）已作为独立数据源注入 ML 的 LLM prompt，不参与融合投票。详见 `docs/eastmoney/c1skill-analysis.md`。
+
 ### D5: 为什么不从 0 重建？
 
 **决策时间**: 2026-06-06
@@ -361,16 +363,28 @@ Aistock_vnpy_Trading/
 │   └── deploy-systemd.sh       # systemd 部署脚本
 │
 ├── services/
-│   ├── ml_factor_service.py     # 12因子纯数学信号 (每5分钟)
-│   └── alpha158_service.py      # 58Alpha158因子+LGB信号 (每5分钟)
+│   ├── ml_factor_service.py      # 12因子纯数学信号 (每5分钟)
+│   ├── alpha158_service.py       # 58Alpha158因子+LGB信号 (每5分钟)
+│   ├── data_warehouse/           # 数据湖: 统一OHLCV缓存+限流
+│   └── eastmoney/                # 东方财富数据服务 (自包含,无子系统依赖)
+│       ├── fetcher.py            # 数据获取+缓存+全市场快照存档
+│       └── research.py           # 全维度IC分析(≥20天数据后)
 │
+├── data/
+│   ├── realtime/                 # 实时信号交换 (ly/ml/at/eastmoney)
+│   ├── backtest/                 # 融合回测数据库
+│   ├── fusion_output/            # 每日融合结果
+│   ├── research/                 # 研究数据统一目录
+│   │   └── eastmoney_snapshot/   # 东方财富全市场日频快照
+│   ├── unified_cache/            # OHLCV 缓存 (数据湖)
+│   └── ...
 ├── config/
 │   ├── settings.yaml           # 融合配置
 │   ├── stock_pool.csv          # 12 只股票池
 │   ├── systems.yaml            # 路径映射
 │   └── systemd/                # 所有 systemd 单元
-│       ├── *.service           # 7 个服务
-│       └── *.timer             # 4 个定时器
+│       ├── *.service           # 9 个服务
+│       └── *.timer             # 8 个定时器
 │
 ├── systems/                    # 三个深度定制子系统
 │   ├── lynx_vnpy/              # ly: RandomForest 量化
