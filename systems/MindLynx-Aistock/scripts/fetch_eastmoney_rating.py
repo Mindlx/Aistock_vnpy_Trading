@@ -85,6 +85,56 @@ def fetch_focus(symbol: str) -> pd.DataFrame | None:
     return None
 
 
+def fetch_market_snapshot() -> dict:
+    """拉取东方财富全市场快照（5186只），返回市场级统计+自选股机构数据。"""
+    try:
+        df = ak.stock_comment_em()
+        if df is None or df.empty:
+            return {}
+        import pandas as pd
+        focus = pd.to_numeric(df["关注指数"], errors="coerce")
+        score = pd.to_numeric(df["综合得分"], errors="coerce")
+        inst = pd.to_numeric(df["机构参与度"], errors="coerce")
+        return {
+            "total_stocks": len(df),
+            "focus_avg": round(float(focus.mean()), 1),
+            "focus_median": round(float(focus.median()), 1),
+            "score_avg": round(float(score.mean()), 1),
+            "score_median": round(float(score.median()), 1),
+            "institution_avg": round(float(inst.mean()), 4),
+        }
+    except Exception as e:
+        logger.warning("全市场快照拉取失败: %s", e)
+        return {}
+
+
+def fetch_market_stock_map() -> dict[str, dict]:
+    """拉取全市场快照，提取每只股票的综合得分和机构参与度。"""
+    try:
+        df = ak.stock_comment_em()
+        if df is None or df.empty:
+            return {}
+        import pandas as pd
+        result = {}
+        for _, row in df.iterrows():
+            code = str(row.get("代码", "")).strip()
+            score = pd.to_numeric(row.get("综合得分"), errors="coerce")
+            inst = pd.to_numeric(row.get("机构参与度"), errors="coerce")
+            if code:
+                entry = {}
+                if not pd.isna(score):
+                    entry["score"] = round(float(score), 1)
+                if not pd.isna(inst):
+                    entry["institution"] = round(float(inst), 4)
+                if entry:
+                    result[code] = entry
+        logger.info("全市场个股数据已获取: %d 只", len(result))
+        return result
+    except Exception as e:
+        logger.warning("全市场个股数据获取失败: %s", e)
+        return {}
+
+
 def _calc_focus_trend(df: pd.DataFrame) -> tuple[float, str]:
     """计算近5日关注度均值及趋势方向。"""
     values = []
@@ -203,8 +253,21 @@ def fetch_all(stocks: list[dict]) -> dict[str, Any] | None:
 
     result = {
         "fetched_at": fetched_at,
+        "market": fetch_market_snapshot(),
         "stocks": entries,
     }
+
+    # 从全市场快照补充机构参与度和综合得分
+    try:
+        market_map = fetch_market_stock_map()
+        for code, entry in result["stocks"].items():
+            extra = market_map.get(code, {})
+            if extra.get("institution") is not None:
+                entry["institution"] = extra["institution"]
+            if extra.get("score") is not None:
+                entry["score"] = extra["score"]
+    except Exception:
+        pass
 
     # 成功获取到数据才写入缓存
     success_count = sum(1 for e in entries.values() if e["desire"] is not None or e["focus_avg"] is not None)

@@ -175,7 +175,7 @@ class MarketAnalyzer:
             return ""
 
     def _get_eastmoney_rating_text(self) -> str:
-        """读取东方财富评级缓存，生成市场情绪摘要文本块。"""
+        """读取东方财富评级缓存，返回全市场情绪统计（供大盘复盘"四"注入）。"""
         try:
             from pathlib import Path
             _root = Path(__file__).resolve().parent.parent.parent.parent
@@ -184,30 +184,25 @@ class MarketAnalyzer:
                 return ""
             import json
             data = json.loads(cache_path.read_text(encoding="utf-8"))
-            stocks_data = data.get("stocks", {})
-            if not stocks_data:
+            market = data.get("market", {})
+            if not market or not market.get("total_stocks"):
                 return ""
-            lines = ["## 东方财富参与意愿（散户情绪指标）"]
-            # 统计意愿均值
-            desires = [s["desire"] for s in stocks_data.values() if isinstance(s.get("desire"), (int, float))]
-            if desires:
-                avg_desire = sum(desires) / len(desires)
-                lines.append(f"- 参与意愿均值: {avg_desire:.1f}/100（0-100，平台用户行为聚合）")
-            # 统计关注度均值
-            focuses = [s["focus_avg"] for s in stocks_data.values() if isinstance(s.get("focus_avg"), (int, float))]
-            if focuses:
-                avg_focus = sum(focuses) / len(focuses)
-                lines.append(f"- 关注度均值: {avg_focus:.1f}/100")
-            lines.append(f"- 注意: 该数据反映散户对个股的当前关注度和参与意愿,与T+1涨跌幅无显著相关性,仅供参考")
+            lines = ["## 东方财富市场情绪（全市场统计）"]
+            lines.append(f"- 覆盖{market['total_stocks']}只A股")
+            lines.append(f"- 关注指数: 均值{market['focus_avg']}/100, 中位数{market['focus_median']}/100")
+            lines.append(f"- 综合得分: 均值{market['score_avg']}/100, 中位数{market['score_median']}/100")
+            if market.get("institution_avg"):
+                lines.append(f"- 机构参与度均值: {market['institution_avg']}")
+            lines.append(f"- 数据来源: 东方财富平台用户行为聚合,仅供参考")
             fetched = data.get("fetched_at", "?")
             lines.append(f"- 数据时间: {fetched}")
             return "\n".join(lines)
         except Exception as e:
-            logger.debug(f"[大盘] 东方财富评级加载失败: {e}")
+            logger.debug(f"[大盘] 东方财富市场情绪加载失败: {e}")
             return ""
 
     def _get_eastmoney_stock_map(self) -> dict[str, str]:
-        """读取东方财富评级缓存，返回 {stock_code: 'EM意愿XX 关注XX'} 映射。"""
+        """读取东方财富评级缓存，返回 {stock_code: 'EM意愿XX 关注XX 机构X.XX'}. """
         try:
             from pathlib import Path
             _root = Path(__file__).resolve().parent.parent.parent.parent
@@ -219,13 +214,16 @@ class MarketAnalyzer:
             stocks_data = data.get("stocks", {})
             result = {}
             for code, s in stocks_data.items():
-                d = s.get("desire")
-                f = s.get("focus_avg")
                 parts = ["EM"]
+                d = s.get("desire")
                 if d is not None:
                     parts.append(f"意愿{d}/100")
+                f = s.get("focus_avg")
                 if f is not None:
                     parts.append(f"关注{f}/100")
+                inst = s.get("institution")
+                if inst is not None:
+                    parts.append(f"机构{inst}")
                 result[code] = " ".join(parts)
             return result
         except Exception:
@@ -1380,7 +1378,7 @@ Output the report content directly, no extra commentary.
 （分析领涨/领跌板块背后的逻辑、持续性和是否形成主线）
 
 ### 四、资金与情绪
-（解读成交额、涨跌停结构、市场宽度和东方财富参与意愿数据，综合分析主力资金动向与市场情绪）
+（解读成交额、涨跌停结构、市场宽度和东方财富全市场情绪数据，综合分析主力资金动向与市场情绪）
 {capital_flow_text or ""}
 {eastmoney_text or ""}
 

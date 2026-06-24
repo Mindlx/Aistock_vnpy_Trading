@@ -1197,13 +1197,19 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             stock = data.get("stocks", {}).get(code)
             if not stock:
                 return ""
-            parts = ["东方财富参与意愿(0-100,平台用户行为聚合)"]
+            parts = ["东方财富(平台用户行为聚合)"]
             d = stock.get("desire")
             if d is not None:
                 parts.append(f"意愿={d}")
             f_avg = stock.get("focus_avg")
             if f_avg is not None:
                 parts.append(f"关注度={f_avg}")
+            inst = stock.get("institution")
+            if inst is not None:
+                parts.append(f"机构参与度={inst}")
+            score = stock.get("score")
+            if score is not None:
+                parts.append(f"综合得分={score}")
             fetched = data.get("fetched_at", "")
             if fetched:
                 parts.append(f"数据时间:{fetched}")
