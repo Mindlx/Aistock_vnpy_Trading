@@ -1,0 +1,16 @@
+[Unit]
+Description=Aistock_vnpy_Trading — Alpha 权重校准（每日）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/calibrate_alphas.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

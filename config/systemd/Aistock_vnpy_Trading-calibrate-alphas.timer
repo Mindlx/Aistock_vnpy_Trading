@@ -1,0 +1,10 @@
+[Unit]
+Description=Aistock_vnpy_Trading — Alpha 权重校测定时器（每日 12:30）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=*-*-* 12:30:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
