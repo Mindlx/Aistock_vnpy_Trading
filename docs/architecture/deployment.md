@@ -183,3 +183,29 @@ data/realtime/at_signal.json                   # TA 评级（准实时文件交�
 ```bash
 .venv/bin/python -m pytest tests/test_fusion.py -v
 ```
+
+## 故障排查
+
+### ML 子系统所有服务启动失败（scheduler/monitor 反复重启）
+
+**症状**: `systemctl --user status Aistock_vnpy_Trading-scheduler.service` 显示 `activating` + 重启计数器持续增长。推送消息全天无更新。
+
+**根因**: 执行 `sync_systems.sh` 后，ML 子系统目录的 `.venv` 被 rsync --delete 移除（该脚本会排除 `.venv/` 但会删除原目录）。systemd 服务指向的 Python 解释器路径 `systems/MindLynx-Aistock/.venv/bin/python` 不存在。
+
+**修复**:
+```bash
+# 建立软链接到 fork 仓库的 .venv（fork 仓库与 sync 源路径需一致）
+ln -sf /path/to/MindLynx-Aistock/.venv systems/MindLynx-Aistock/.venv
+
+# 重启服务
+systemctl --user restart Aistock_vnpy_Trading-scheduler.service Aistock_vnpy_Trading-monitor.service
+```
+
+**预防**: `sync_systems.sh` 的 `--exclude='.venv/'` 只能阻止同步时覆盖，但 `--delete` 会删除目标端不存在于源端的文件。已将 `.venv/` 加入排除列表。如果 fork 仓库的父路径改变，需要重新建立软链接。
+
+### 推送消息无更新
+
+1. 检查服务状态：`systemctl --user list-units --all | grep aistock`
+2. 检查 ML .venv 是否存在（见上一条）
+3. 检查信号文件新鲜度：`ls -la data/realtime/*.json`
+4. 检查 webhook 配置：`.env` 中 `WECOM_WEBHOOK_URL` 是否正确
