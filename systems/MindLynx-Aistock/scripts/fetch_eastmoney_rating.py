@@ -95,7 +95,7 @@ def _calc_focus_trend(df: pd.DataFrame) -> tuple[float, str]:
             pass
     if not values:
         return 0.0, "?"
-    avg = sum(values[:5]) / min(len(values[:5]), 1)
+    avg = sum(values[:5]) / len(values[:5])
     if len(values) >= 2:
         trend = "↑" if values[0] > values[-1] else ("↓" if values[0] < values[-1] else "→")
     else:
