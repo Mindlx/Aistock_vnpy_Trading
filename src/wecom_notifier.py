@@ -197,7 +197,7 @@ class WeComNotifier:
 
         ts = self._tz_cn_now()
         lines = [
-            f"## 🛟 {ts.strftime('%H:%M')} 融合决策",
+            f"🛟 {ts.strftime('%H:%M')} 融合决策",
             "",
         ]
 
@@ -242,14 +242,14 @@ class WeComNotifier:
             all_stocks = bucket["consensus"] + bucket["disagreement"]
             if not all_stocks:
                 continue
-            lines.append(f"**{title}** ({len(all_stocks)})")
+            lines.append(f"{title} ({len(all_stocks)})")
             for r in all_stocks:
                 lines.append(self._stock_line(r))
             lines.append("")
 
         # ── 无信号 ──
         if invalid:
-            lines.append("**⚠️ 无信号**")
+            lines.append("⚠️ 无信号")
             for r in invalid:
                 lines.append(f"- {r['stock_code']}: {r.get('message', '')}")
             lines.append("")
@@ -258,9 +258,7 @@ class WeComNotifier:
         ly_ok = sum(1 for r in valid if r.get("lynx_valid", False))
         ml_ok = sum(1 for r in valid if r.get("mindlynx_valid", False))
         at_ok = sum(1 for r in valid if r.get("tradingagent_valid", False))
-        health = f"ly{ly_ok}/{len(valid)} ml{ml_ok}/{len(valid)} at{at_ok}/{len(valid)}"
-        lines.append(f"🛟 {health}")
-
+        lines.append(f"📡 ly{ly_ok}/12｜ml{ml_ok}/12｜at{at_ok}/12")
         return "\n".join(lines)
 
     def push_daily_decision(self, results: List[Dict[str, Any]], date: Optional[str] = None,

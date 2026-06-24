@@ -128,7 +128,7 @@ def _markdown_to_image_wkhtml(markdown_text: str) -> bytes | None:
         return None
 
 
-def markdown_to_pdf(markdown_text: str, font_size: str = "16pt") -> bytes | None:
+def markdown_to_pdf(markdown_text: str, font_size: str = "18pt") -> bytes | None:
     """
     Convert Markdown to PDF bytes via WeasyPrint.
 
@@ -137,7 +137,7 @@ def markdown_to_pdf(markdown_text: str, font_size: str = "16pt") -> bytes | None
 
     Args:
         markdown_text: Raw Markdown content.
-        font_size: Base font size for body text. Default "16pt" (三号字).
+        font_size: Base font size for body text. Default "18pt" (手机端适配).
 
     Returns:
         PDF bytes, or None if conversion fails.
@@ -152,30 +152,32 @@ def markdown_to_pdf(markdown_text: str, font_size: str = "16pt") -> bytes | None
         # Strip embedded CSS from markdown_to_html_document so our PDF CSS takes effect
         html = _re.sub(r"<style>.*?</style>", "", html, flags=_re.DOTALL)
 
-        mobile_css = CSS(string=f"""
+        mobile_css = CSS(string=f"""\
             @page {{ size: A4; margin: 1.2cm 1.5cm; }}
             body {{
                 font-family: -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
                 font-size: {font_size};
-                line-height: 1.5;
+                line-height: 1.6;
                 color: #1a1a1a;
                 max-width: 100%;
             }}
-            h1 {{ font-size: 22pt; margin: 0.4em 0 0.2em; color: #1a1a1a; border: none; }}
-            h2 {{ font-size: 18pt; margin: 0.3em 0 0.15em; color: #333; border: none; }}
-            h3 {{ font-size: 16pt; margin: 0.25em 0 0.1em; color: #444; }}
-            p {{ margin: 0.3em 0; text-indent: 2em; }}
-            blockquote p {{ margin: 0.3em 0; text-indent: 0; }}
+            h1 {{ font-size: 28pt; margin: 0.6em 0 0.3em; color: #1a1a1a; }}
+            h2 {{ font-size: 18pt; margin: 0.4em 0 0.2em; color: #333; }}
+            h3 {{ font-size: 20pt; font-weight: bold; margin: 0.6em 0 0.2em; color: #333; page-break-after: avoid; }}
+            p {{ margin: 0.5em 0; text-indent: 2em; }}
+            h3 + p, h2 + p {{ text-indent: 0; }}
+            blockquote p {{ margin: 0.4em 0; text-indent: 0; }}
             blockquote {{ margin: 0.3em 0; }}
-            table {{ width: 100%; border-collapse: collapse; font-size: {font_size}; }}
-            td, th {{ padding: 4px 6px; border: 1px solid #ccc; text-align: center; }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 12pt; margin: 0.6em 0; }}
+            th {{ background: #f3f4f6; }}
+            td, th {{ padding: 4px 8px; border: 1px solid #ccc; text-align: center; }}
             blockquote {{
                 margin: 0.5em 0; padding: 0.3em 1em;
-                border-left: 4px solid #999; color: #555;
+                border-left: 4px solid #999; color: #444;
             }}
-            img {{ max-width: 100%; height: auto; }}
-            code {{ font-size: 90%; background: #f5f5f5; padding: 1px 4px; }}
-            pre {{ font-size: 90%; background: #f5f5f5; padding: 8px; overflow-x: auto; }}
+            img {{ max-width: 100%; height: auto; display: block; margin: 0.5em auto; }}
+            code {{ font-size: 85%; background: #f5f5f5; padding: 1px 4px; }}
+            pre {{ font-size: 85%; background: #f5f5f5; padding: 8px; overflow-x: auto; }}
         """)
 
         pdf_bytes = HTML(string=html).write_pdf(stylesheets=[mobile_css])

@@ -489,8 +489,7 @@ def push_wecom(signals: list[dict]):
         parts.append(_label)
         lines.append("｜".join(parts))
 
-    lines.append("\n> 数据源: efinance")
-    lines.append("> 模型: RF+LGB集成")
+    lines.append("📡 efinance｜RF+LGB集成")
     text = "\n".join(lines)
 
     result = _send(text)

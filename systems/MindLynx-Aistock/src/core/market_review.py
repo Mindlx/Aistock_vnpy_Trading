@@ -297,7 +297,7 @@ def run_market_review(
                     # 企业微信通道：PDF 生成 + 推送（treemap 已在 report_content 中）
                     pdf_date = datetime.now().strftime("%Y%m%d")
                     pdf_filename = f"{pdf_date}大盘复盘报告_{session_label}.pdf"
-                    pdf_data = markdown_to_pdf(report_content, font_size="16pt")
+                    pdf_data = markdown_to_pdf(report_content, font_size="18pt")
 
                     # 2. 先发文字摘要（PDF 生成成功则附带链接）
                     summary = _extract_summary_text(review_report, pdf_ok=bool(pdf_data), session_label=session_label)
