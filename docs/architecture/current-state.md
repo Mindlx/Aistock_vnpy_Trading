@@ -375,6 +375,7 @@ DB: `data/backtest/bt_results.db`，60列schema覆盖子系统有效性、ML das
 | vnpy依赖安装+数据桥接 | polars/lightgbm/plotly/talib, DB→Parquet | 0b7f83d |
 | Pipeline管线 | Alpha158计算+LGB训练+IC分析 | 0b7f83d |
 | Alpha158+LGB生产集成 | lynx_signal.py --alpha, 58因子predictor | 7f44621 |
+| **Alpha158特征数修复** | alpha_predictor.py:180 dropna→fillna(0), 57→58特征对齐 | 待提交 |
 | 双模型集成(默认) | RF+LGB并行, predict_ensemble() | 36dca84 |
 | ml_factor融合接入 | 12因子15% blend进ly | f4b09da |
 | vnpy独立回测 | BacktestingEngine集成 | 890f7b6 |

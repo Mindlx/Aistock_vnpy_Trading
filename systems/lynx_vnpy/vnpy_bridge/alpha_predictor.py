@@ -177,8 +177,8 @@ def alpha_predict(df: pd.DataFrame, code: str | None = None) -> float | None:
         factors = _compute_alpha_factors(pdf)
         factors = _normalize(factors)
 
-        last = factors.iloc[-1:].dropna(axis=1)
-        if last.empty or last.shape[1] == 0:
+        last = factors.iloc[-1:].fillna(0)
+        if last.empty:
             return None
 
         model = lgb.Booster(model_file=str(MODEL_PATH))
