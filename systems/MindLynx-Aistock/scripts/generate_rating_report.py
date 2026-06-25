@@ -427,7 +427,7 @@ def generate_summary_rows(stocks: list[dict]) -> list[dict]:
         f = focus_val or 50
         is_st = name.startswith("*ST")
         icon, conclusion = _combined_grade(w, f, is_st)
-        short_line = f"{_desire_level(w)} {_focus_level(f)} {_conclusion_short(w,f)}"
+        short_line = _conclusion_short(w, f)
 
         rows.append({
             "code": code,

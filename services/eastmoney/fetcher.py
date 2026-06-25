@@ -311,13 +311,33 @@ def fetch_all(stocks: list[dict]) -> dict[str, Any] | None:
 def _generate_brief_text(result: dict, session: str) -> str:
     now = datetime.now().strftime("%H:%M")
     stocks_data = result["stocks"]
-    lines = [f"💰 {now} 东方财富参与意愿（{session}）"]
-    sorted_codes = sorted(stocks_data.keys(), key=lambda c: stocks_data[c].get("desire") or 0, reverse=True)
-    for code in sorted_codes:
-        data = stocks_data[code]
-        d = data.get("desire", "--")
-        f = data.get("focus_avg", "--")
-        lines.append(f"**{data['name']}**｜意愿{d} 关注{f}")
+
+    # 构建带图标和结论的行（与 generate_rating_report.py 格式一致）
+    _ICON_ORDER = {"✅": 0, "📈": 1, "💤": 2, "📉": 3, "❌": 4}
+    rows = []
+    for code, data in stocks_data.items():
+        name = data["name"]
+        w = float(data.get("desire") or 50)
+        f = float(data.get("focus_avg") or 50)
+        is_st = name.startswith("*ST")
+        icon, _conclusion = _combined_grade(w, f, is_st)
+        dl = _desire_level(w)
+        fl = _focus_level(f)
+        cs = _conclusion_short(w, f)
+        short_line = cs
+        rows.append({
+            "icon": icon,
+            "name": name,
+            "desire_val": f"{w:.1f}",
+            "focus_val": f"{f:.1f}",
+            "short_line": short_line,
+        })
+
+    rows.sort(key=lambda r: _ICON_ORDER.get(r["icon"], 99))
+    lines = [f"💰 {now} 东方财富评级"]
+    for r in rows:
+        lines.append(f"{r['icon']} **{r['name']}**｜{r['desire_val']}/{r['focus_val']}｜{r['short_line']}")
+
     return "\n".join(lines)
 
 

@@ -139,7 +139,8 @@ Mon 07:30 ─ scheduler ─ 周末情报补量
 data/realtime/
 ├── ly_signal.json    ← lynx_signal.py (write_ly_signal.py) 写入
 ├── ml_signal.json    ← ml_factor_service.py 写入 (因子层，非LLM)
-└── at_signal.json    ← mind_TradingAgent 写入
+├── at_signal.json    ← mind_TradingAgent 写入
+└── alpha158_signal.json ← alpha158 daemon 写入（LGB+58因子）
 ```
 
 ---
@@ -375,7 +376,7 @@ DB: `data/backtest/bt_results.db`，60列schema覆盖子系统有效性、ML das
 | vnpy依赖安装+数据桥接 | polars/lightgbm/plotly/talib, DB→Parquet | 0b7f83d |
 | Pipeline管线 | Alpha158计算+LGB训练+IC分析 | 0b7f83d |
 | Alpha158+LGB生产集成 | lynx_signal.py --alpha, 58因子predictor | 7f44621 |
-| **Alpha158特征数修复** | alpha_predictor.py:180 dropna→fillna(0), 57→58特征对齐 | 待提交 |
+| **Alpha158特征数修复** | alpha_predictor.py:180 dropna→fillna(0), 57→58特征对齐 | 83310bc |
 | 双模型集成(默认) | RF+LGB并行, predict_ensemble() | 36dca84 |
 | ml_factor融合接入 | 12因子15% blend进ly | f4b09da |
 | vnpy独立回测 | BacktestingEngine集成 | 890f7b6 |
