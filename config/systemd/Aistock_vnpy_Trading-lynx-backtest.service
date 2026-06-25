@@ -8,6 +8,7 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
 ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python systems/lynx_vnpy/lynx_signal.py --backtest
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/backtest_lgb.py
 StandardOutput=journal
 StandardError=journal
 TimeoutStopSec=120
