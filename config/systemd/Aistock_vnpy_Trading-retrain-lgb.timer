@@ -1,0 +1,10 @@
+[Unit]
+Description=Aistock_vnpy_Trading — LGB 模型重训定时器（工作日 15:20，ly 信号推送后）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=Mon..Fri 15:20:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

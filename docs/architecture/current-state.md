@@ -103,6 +103,7 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 | calibrate-alphas | oneshot | - | ✅ timer 12:30 | Alpha权重自动校准 |
 | diagnose-agreement | oneshot | - | ✅ timer 20:30 | LY+ML同向诊断数据积累 |
 | eastmoney-rating | oneshot | - | ✅ timer 09:53/13:53 | 东方财富数据获取+存档 |
+| retrain-lgb | oneshot | - | ✅ timer 15:20 | LGB模型自动重训(≥20天触发) |
 
 **常驻内存合计**: ~245+95+32 = **372MB**（0.6% of 62GB 总内存）
 
@@ -122,6 +123,7 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 14:00 ─ scheduler ─── 整点全量分析
 15:00 ─ scheduler ─── 整点全量分析
 15:15 ─ lynx-signal ─ 量化信号建模+推送
+15:20 ─ retrain-lgb.timer ── 🆕 LGB 模型自动重训
 15:45 ─ scheduler ─── 大盘复盘(文字+PDF)
 
 # 准实时融合 09:33~15:00 每5分钟扫描(仅工作日)
