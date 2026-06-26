@@ -2173,6 +2173,92 @@ class SearchService:
     _DIRECT_NEWS_CATEGORY = "direct_company_news"
     _SECTOR_NEWS_CATEGORY = "sector_related_news"
     _MACRO_NEWS_CATEGORY = "macro_market_news"
+    # ── 新闻准入过滤（来源上游 daily_stock_analysis v3.23, 增量合并） ──
+    _OFFICIAL_SOURCE_HOSTS = (  # {@calibration 官方新闻源白名单}
+        "cninfo.com.cn", "sse.com", "sse.com.cn", "szse.cn", "hkexnews.hk",
+        "sec.gov", "nasdaq.com", "nyse.com",
+    )
+    _OFFICIAL_SOURCE_LABELS = (  # {@calibration 官方新闻标签}
+        "cninfo", "hkexnews", "巨潮资讯", "巨潮资讯网",
+        "上交所", "深交所", "港交所", "证券交易所",
+        "上海证券交易所", "深圳证券交易所", "香港交易所", "香港联合交易所",
+    )
+    _LOW_QUALITY_DOWNLOAD_ACTION_TERMS = (  # {@calibration 低质下载行为词}
+        "下载", "安装", "下载安装", "下载安装到手机", "下载链接",
+        "免费下载", "客户端下载", "应用下载", "官方app下载",
+        "安装包", "apk", "download", "install", "installer",
+    )
+    _LOW_QUALITY_DOWNLOAD_INTENT_TERMS = (
+        "安装包", "客户端下载", "应用下载", "下载安装", "下载安装到手机",
+        "下载链接", "免费下载", "旧版下载", "极速版下载", "官方app下载",
+    )
+    _LOW_QUALITY_APP_CONTEXT_TERMS = (
+        "好评", "评分", "版本", "大小", "适用年龄", "开发者", "应用",
+        "ratings", "reviews", "stars", "version", "developer", "package",
+    )
+    _LOW_QUALITY_APP_METADATA_TERMS = (
+        "版本", "大小", "适用年龄", "开发者", "应用", "应用商店",
+        "安卓版", "苹果版", "官方版", "最新版", "version", "developer",
+        "package", "mobile app",
+    )
+    _LOW_QUALITY_APP_PAGE_DETAIL_TERMS = (
+        "客户端", "安卓版", "苹果版", "官方版", "最新版", "应用商店",
+        "下载安装到手机", "一键下载", "旧版下载", "极速版下载",
+    )
+    _LOW_QUALITY_FILE_SIZE_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:kb|mb|gb)\b", re.IGNORECASE)
+    _LOW_QUALITY_RATING_RE = re.compile(
+        r"(?:\d{1,3}\s*%\s*好评|好评率|用户评分|"
+        r"(?:用户)?评分\s*[:：]?\s*(?:10|[0-9])(?:\.\d{1,2})?|"
+        r"\b\d(?:\.\d)?\s*(?:stars?|ratings?|reviews?)\b)",
+        re.IGNORECASE,
+    )
+    _LOW_QUALITY_URL_RE = re.compile(
+        r"(?:^|[/_.=-])(?:download|downloads|apk|ipa|exe|dmg|installer|"
+        r"software|soft|game|games|app|apps|package)(?:$|[/_.?&=-])",
+        re.IGNORECASE,
+    )
+    _BUSINESS_APP_METRIC_RE = re.compile(
+        r"(?:(?:下载量|安装量|装机量|应用下载|应用安装|app下载|app安装).{0,12}"
+        r"(?:增长|同比|环比|上升|增加|提升|突破|达到|达|超过|超|累计|接近|保持|创新高|下降|下滑|减少|回落|放缓|持平|承压|低迷)|"
+        r"(?:增长|同比|环比|上升|增加|提升|突破|达到|达|超过|超|累计|接近|保持|创新高|下降|下滑|减少|回落|放缓|持平|承压|低迷)"
+        r".{0,12}(?:下载量|安装量|装机量|应用下载|应用安装|app下载|app安装)|"
+        r"\b(?:downloads?|installs?)\b.{0,16}"
+        r"\b(?:grew|growth|rose|increase|increased|surged|reached|reach|reaches|"
+        r"hit|hits|topped|totaled|totalled|exceeded|exceeds|surpassed|surpasses|"
+        r"fell|fall|declined|decline|decreased|dropped|drop|slowed|flat|weakened)\b)",
+        re.IGNORECASE,
+    )
+    _ADULT_SERVICE_SPAM_STRONG_TERMS = (
+        "上门特殊服务", "同城约", "约炮", "援交", "楼凤", "外围女",
+        "外围服务", "包夜", "大保健", "莞式", "推油",
+        "成人服务", "adult service", "escort service",
+        "sex service", "call girl",
+    )
+    _ADULT_SERVICE_SPAM_AMBIGUOUS_TERMS = ("全套服务", "色情")
+    _ADULT_SERVICE_SPAM_CONTEXT_TERMS = (
+        "小姐", "上门", "预约", "同城", "按摩", "保健", "足浴", "桑拿",
+        "会所", "技师", "全套", "套餐", "vip",
+    )
+    _ADULT_SERVICE_SPAM_CONTACT_RE = re.compile(
+        r"(?:^|[^a-z0-9])(?:yue|vx|wx|qq|wechat|weixin|微信号?|微[信讯]|"
+        r"电话|手机|联系电话|tel|phone)"
+        r"[-_:\s：]*[a-z0-9][a-z0-9_-]{2,}(?:[^a-z0-9]|$)",
+        re.IGNORECASE,
+    )
+    _ADULT_SERVICE_SPAM_CONTACT_CONTEXT_TERMS = (
+        "小姐", "上门", "同城", "预约",
+        "全套", "包夜", "大保健", "推油",
+        "约炮", "援交", "成人", "色情",
+    )
+    _ADULT_SERVICE_REMEDIATION_TERMS = (
+        "治理", "整治", "下架", "处罚", "监管", "打击", "清理",
+        "封禁", "整改", "内容安全", "低俗内容", "平台风险",
+    )
+    _ADULT_SERVICE_SOLICITATION_TERMS = (
+        "上门", "同城", "预约", "套餐", "包夜", "大保健",
+        "推油", "联系", "咨询", "加微信", "加qq", "vip",
+    )
+
     _COMPANY_EVENT_TERMS = (
         "公告", "披露", "发布", "收购", "回购", "减持", "增持", "诉讼",
         "业绩", "财报", "营收", "净利润", "分红", "订单", "合作", "中标",
@@ -2695,6 +2781,108 @@ class SearchService:
 
         return None
 
+    # ── 新闻准入过滤（来源上游 89fab774, 增量合并）──────────────────
+    @classmethod
+    def _contains_any_news_term(cls, text: str, terms: tuple[str, ...]) -> bool:
+        lower = (text or "").lower()
+        return any(term.lower() in lower for term in terms)
+
+    @classmethod
+    def _contains_any_low_quality_news_term(cls, text: str, terms: tuple[str, ...]) -> bool:
+        lower = (text or "").lower()
+        if not lower:
+            return False
+        for term in terms:
+            normalized_term = term.lower()
+            if not normalized_term:
+                continue
+            if normalized_term.isascii() and re.search(r"[a-z0-9]", normalized_term):
+                pattern = r"(?<![A-Za-z0-9])" + re.escape(normalized_term) + r"(?![A-Za-z0-9])"
+                if re.search(pattern, lower):
+                    return True
+                continue
+            if normalized_term in lower:
+                return True
+        return False
+
+    @staticmethod
+    def _candidate_hostname(value: Any) -> str:
+        raw = str(value or "").strip().lower()
+        if not raw or re.search(r"\s", raw):
+            return ""
+        from urllib.parse import urlparse
+        parse_value = (raw if re.match(r"^[a-z][a-z0-9+.-]*://", raw) or raw.startswith("//") else f"//{raw}")
+        return (urlparse(parse_value).hostname or "").rstrip(".")
+
+    @staticmethod
+    def _source_resembles_hostname(value: Any) -> bool:
+        raw = str(value or "").strip().lower()
+        if not raw or re.search(r"\s", raw):
+            return False
+        if re.match(r"^[a-z][a-z0-9+.-]*://", raw) or raw.startswith("//"):
+            return True
+        return bool(re.search(r"\.[a-z0-9-]{2,}(?::\d+)?/?$", raw))
+
+    @classmethod
+    def _is_trusted_official_news_source(cls, item: SearchResult) -> bool:
+        """Only trust official exemptions from trusted hosts; fallback to labels only when URL host is absent."""
+        url_host = cls._candidate_hostname(item.url)
+        source_label = str(item.source or "").strip().lower()
+        source_host = cls._candidate_hostname(item.source) if cls._source_resembles_hostname(item.source) else ""
+        if url_host:
+            return any(url_host == h or url_host.endswith(f".{h}") for h in cls._OFFICIAL_SOURCE_HOSTS)
+        if source_host:
+            return any(source_host == h or source_host.endswith(f".{h}") for h in cls._OFFICIAL_SOURCE_HOSTS)
+        return source_label in cls._OFFICIAL_SOURCE_LABELS
+
+    @classmethod
+    def _has_low_quality_news_page_signal(cls, item: SearchResult) -> bool:
+        """Detect app/download/listing pages without relying on a domain blocklist."""
+        content_text = " ".join(filter(None, [item.title, item.snippet])).lower()
+        from urllib.parse import urlparse, unquote
+        parsed_url = urlparse(item.url or "")
+        url_surface = unquote(" ".join(filter(None, [parsed_url.netloc, parsed_url.path, parsed_url.query]))).lower()
+        has_app_context = cls._contains_any_low_quality_news_term(content_text, cls._LOW_QUALITY_APP_CONTEXT_TERMS)
+        has_app_metadata = cls._contains_any_low_quality_news_term(content_text, cls._LOW_QUALITY_APP_METADATA_TERMS)
+        has_download_action = cls._contains_any_low_quality_news_term(content_text, cls._LOW_QUALITY_DOWNLOAD_ACTION_TERMS)
+        has_download_intent = cls._contains_any_low_quality_news_term(content_text, cls._LOW_QUALITY_DOWNLOAD_INTENT_TERMS)
+        has_app_page_detail = cls._contains_any_low_quality_news_term(content_text, cls._LOW_QUALITY_APP_PAGE_DETAIL_TERMS)
+        has_file_size = bool(cls._LOW_QUALITY_FILE_SIZE_RE.search(content_text))
+        has_rating = bool(cls._LOW_QUALITY_RATING_RE.search(content_text))
+        has_url_signal = bool(cls._LOW_QUALITY_URL_RE.search(url_surface))
+        has_business_app_metric = bool(cls._BUSINESS_APP_METRIC_RE.search(content_text))
+        has_app_listing_detail = has_file_size or has_rating or cls._contains_any_low_quality_news_term(
+            content_text, ("版本", "适用年龄", "开发者", "应用商店", "安卓版", "苹果版", "官方版", "最新版", "version", "developer", "package"))
+        has_strong_app_page_evidence = has_app_listing_detail and (has_url_signal or has_download_intent or (has_download_action and has_app_metadata))
+        has_business_app_metric_only = has_business_app_metric and not has_strong_app_page_evidence
+        has_content_page = not has_business_app_metric_only and ((has_download_intent and (has_app_page_detail or has_file_size or has_rating)) or (has_download_action and (has_app_metadata or has_file_size)))
+        has_listing_context = not has_business_app_metric_only and has_app_context and has_app_metadata and (has_download_action or has_download_intent) and (has_file_size or has_rating)
+        has_url_page = not has_business_app_metric_only and has_url_signal and (has_file_size or has_download_intent or (has_download_action and has_app_metadata) or (has_app_metadata and has_rating))
+        return has_content_page or has_listing_context or has_url_page
+
+    @classmethod
+    def _has_adult_service_spam_news_page_signal(cls, item: SearchResult) -> bool:
+        """Detect adult-service spam by content signals instead of domain names."""
+        combined_text = " ".join(filter(None, [item.title, item.snippet, item.source, item.url])).lower()
+        if cls._contains_any_news_term(combined_text, cls._ADULT_SERVICE_SPAM_STRONG_TERMS):
+            return True
+        has_contact_signal = bool(cls._ADULT_SERVICE_SPAM_CONTACT_RE.search(combined_text))
+        has_remediation_context = cls._contains_any_news_term(combined_text, cls._ADULT_SERVICE_REMEDIATION_TERMS)
+        if has_remediation_context and not has_contact_signal:
+            return False
+        if "外围" in combined_text and cls._contains_any_news_term(combined_text, ("上门", "同城", "约炮", "援交", "包夜", "大保健", "推油", "小姐", "技师")):
+            return True
+        context_hits = sum(1 for term in cls._ADULT_SERVICE_SPAM_CONTEXT_TERMS if term.lower() in combined_text)
+        has_service_anchor = cls._contains_any_news_term(combined_text, ("小姐", "按摩", "足浴", "桑拿", "会所", "技师"))
+        has_adult_specific_anchor = cls._contains_any_news_term(combined_text, ("小姐", "约炮", "援交", "楼凤", "外围", "包夜", "大保健", "莞式", "推油", "成人", "色情"))
+        if has_contact_signal:
+            return has_adult_specific_anchor and cls._contains_any_news_term(combined_text, cls._ADULT_SERVICE_SPAM_CONTACT_CONTEXT_TERMS)
+        has_solicitation_signal = cls._contains_any_news_term(combined_text, cls._ADULT_SERVICE_SOLICITATION_TERMS)
+        has_ambiguous_adult_phrase = cls._contains_any_news_term(combined_text, cls._ADULT_SERVICE_SPAM_AMBIGUOUS_TERMS)
+        if has_ambiguous_adult_phrase:
+            return has_service_anchor and has_solicitation_signal
+        return has_adult_specific_anchor and has_service_anchor and has_solicitation_signal and context_hits >= 3
+
     def _filter_news_response(
         self,
         response: SearchResponse,
@@ -3038,6 +3226,13 @@ class SearchService:
             if prefer_chinese:
                 best_to_return = best_preferred_response or fallback_response
                 if best_to_return is not None:
+                    # 准入过滤：剔除低质/垃圾新闻
+                    filtered_results = [
+                        r for r in best_to_return.results
+                        if not self._has_low_quality_news_page_signal(r)
+                        and not self._has_adult_service_spam_news_page_signal(r)
+                    ]
+                    best_to_return.results[:] = filtered_results
                     self._put_cache(cache_key, best_to_return)
                     return best_to_return
 
