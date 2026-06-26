@@ -49,7 +49,7 @@ class BacktestPerformanceMetrics:
     neutral_count: int = 0
     win_rate_pct: float | None = None
     neutral_rate_pct: float | None = None
-    direction_accuracy_pct: float | None = None
+    direction_accuracy_pct  # @calibration 回测报告指标: float | None = None
     avg_stock_return_pct: float | None = None
     avg_simulated_return_pct: float | None = None
     stop_loss_trigger_rate: float | None = None
@@ -257,7 +257,7 @@ class BacktestReportGenerator:
             neutral_count=summary.get("neutral_count", 0),
             win_rate_pct=summary.get("win_rate_pct"),
             neutral_rate_pct=summary.get("neutral_rate_pct"),
-            direction_accuracy_pct=summary.get("direction_accuracy_pct"),
+            direction_accuracy_pct  # @calibration 回测报告指标=summary.get("direction_accuracy_pct  # @calibration 回测报告指标"),
             avg_stock_return_pct=summary.get("avg_stock_return_pct"),
             avg_simulated_return_pct=summary.get("avg_simulated_return_pct"),
             stop_loss_trigger_rate=summary.get("stop_loss_trigger_rate"),
@@ -436,7 +436,7 @@ class BacktestReportGenerator:
 
         lines.append(f"| 最大回撤 | {_fmt_pct(metrics.max_drawdown_pct)} |")
         lines.append(f"| 胜率 | {_fmt_pct(metrics.win_rate_pct)} |")
-        lines.append(f"| 方向准确率 | {_fmt_pct(metrics.direction_accuracy_pct)} |")
+        lines.append(f"| 方向准确率 | {_fmt_pct(metrics.direction_accuracy_pct  # @calibration 回测报告指标)} |")
         lines.append(f"| 盈亏比 | {metrics.profit_loss_ratio if metrics.profit_loss_ratio is not None else 'N/A'} |")
         lines.append(f"| 平均盈利 | {_fmt_pct(metrics.avg_win_pct)} |")
         lines.append(f"| 平均亏损 | {_fmt_pct(metrics.avg_loss_pct)} |")

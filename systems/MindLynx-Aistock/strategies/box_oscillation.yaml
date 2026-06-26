@@ -2,7 +2,7 @@
 # Buy at box support, sell at box resistance, profit from range-bound oscillation.
 
 name: box_oscillation
-display_name: 箱体震荡
+display_name: 箱体震荡  {@calibration} 
 description: 基于达瓦斯箱体理论（Darvas Box）的区间交易策略，箱底买入、箱顶减仓。
 category: framework
 core_rules: [1, 2, 3]

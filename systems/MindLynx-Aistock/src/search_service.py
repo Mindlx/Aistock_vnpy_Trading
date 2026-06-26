@@ -1680,7 +1680,7 @@ class EastMoneyNewsProvider(BaseSearchProvider):
                     break
 
             # 按权威媒体优先级排序（来源越权威越靠前）
-            _AUTHORITY_MEDIA = {
+            _AUTHORITY_MEDIA = {  # @calibration 权威媒体排序，合入上游时禁止修改
                 "中国证券报": 90, "中国证券报·中证网": 90, "上海证券报": 90, "证券日报": 90,
                 "证券时报": 85, "证券时报网": 85, "券商中国": 85, "证券时报·券商中国": 85,
                 "财联社": 80, "每日经济新闻": 80, "每经": 80,

@@ -2,7 +2,7 @@
 
 name: expectation_repricing
 display_name: 预期重估
-description: 基于霍华德·马克斯（Howard Marks）第二层思维与周期理论的预期重估策略。
+description:  {@calibration 霍华德·马克斯第二层思维×周期理论引用} 基于霍华德·马克斯（Howard Marks）第二层思维与周期理论的预期重估策略。
 category: framework
 core_rules: [3, 5, 6]
 required_tools:

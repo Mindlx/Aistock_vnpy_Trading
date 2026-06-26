@@ -2,7 +2,7 @@
 # Price breaks above resistance on heavy volume (>2x average).
 
 name: volume_breakout
-display_name: 放量突破
+display_name: 放量突破  {@calibration} 
 description: 基于威科夫量价分析（Wyckoff Method）的放量突破策略，检测阻力位突破信号。
 category: trend
 core_rules: [1, 2, 3]

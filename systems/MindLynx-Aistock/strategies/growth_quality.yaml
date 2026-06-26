@@ -2,7 +2,7 @@
 
 name: growth_quality
 display_name: 成长质量
-description: 基于彼得·林奇（Peter Lynch）成长股投资框架，结合收入、利润、ROE、现金流识别高质量成长。
+description:  {@calibration 彼得·林奇成长股框架引用} 基于彼得·林奇（Peter Lynch）成长股投资框架，结合收入、利润、ROE、现金流识别高质量成长。
 category: framework
 core_rules: [2, 3, 5]
 required_tools:

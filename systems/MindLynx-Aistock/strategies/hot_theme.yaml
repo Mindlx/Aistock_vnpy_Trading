@@ -3,7 +3,7 @@
 
 name: hot_theme
 display_name: 热点题材
-description: 基于索罗斯反身性理论（Soros Reflexivity）与社会心理学框架的热点题材追踪策略。
+description:  {@calibration 索罗斯反身性+社会心理学引用} 基于索罗斯反身性理论（Soros Reflexivity）与社会心理学框架的热点题材追踪策略。
 category: framework
 core_rules: [2, 3, 5, 7]
 required_tools:

@@ -2,7 +2,7 @@
 # Volume shrinks during pullback to MA5/MA10, then price bounces.
 
 name: shrink_pullback
-display_name: 缩量回踩
+display_name: 缩量回踩  {@calibration} 
 description: 基于道氏理论趋势定义的缩量回踩策略，趋势延续的理想入场点。
 category: trend
 core_rules: [1, 2, 4]

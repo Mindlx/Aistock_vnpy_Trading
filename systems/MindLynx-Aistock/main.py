@@ -666,7 +666,7 @@ def _run_daily_intel(config: Config, slot: str = "midday") -> int:
         if code not in _STOCK_NAME_MAP and _re_ss.match(r'^\d{6}$', code):
             _STOCK_NAME_MAP[code] = code  # 标记位, _push_highlights 会格式化为纯代码
 
-    # ── 0. 市场级情报搜集（非个股，政策/板块/宏观） ──
+    # ── 0. 市场级情报搜集（非个股，政策/板块/宏观） ──  {@calibration 市场情报搜集}
     # 使用 akshare 免费源，替代质量不佳的 SearXNG 搜索
     try:
         import akshare as ak

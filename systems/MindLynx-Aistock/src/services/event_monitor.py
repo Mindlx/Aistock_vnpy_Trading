@@ -912,7 +912,7 @@ class EventMonitor:
 
         self.stats["total_events"] += len(triggered)
 
-        # ── 写入数据湖 (零侵入: ImportError 时跳过) ──
+        # ── 写入数据湖 (零侵入: ImportError 时跳过) ──  {@calibration 数据仓库写入}
         if triggered:
             try:
                 from services.data_warehouse.storage import DataLake

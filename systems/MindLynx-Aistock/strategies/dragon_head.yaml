@@ -3,7 +3,7 @@
 
 name: dragon_head
 display_name: 龙头策略
-description: 基于欧奈尔CANSLIM体系（William O'Neil）的龙头股识别策略，板块轮动中选强。
+description:  {@calibration 欧奈尔CANSLIM引用} 基于欧奈尔CANSLIM体系（William O'Neil）的龙头股识别策略，板块轮动中选强。
 category: trend
 core_rules: [2, 7]
 required_tools:

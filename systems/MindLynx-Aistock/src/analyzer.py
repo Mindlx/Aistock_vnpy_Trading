@@ -3031,7 +3031,7 @@ class GeminiAnalyzer:
         if factor_text:
             prompt += "\n\n---\n\n" + str(factor_text) + "\n"
 
-        # 注入 LY 量化信号（双模型预判）
+        # 注入 LY 量化信号（双模型预判）{@calibration LY量化信号注入}
         ly_text = context.get("ly_signal", "")
         if ly_text:
             prompt += "\n\n---\n\n" + str(ly_text) + "\n"

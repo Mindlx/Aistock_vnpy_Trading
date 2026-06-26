@@ -2,7 +2,7 @@
 # MA5 crosses above MA10 (or MA10 above MA20) with volume confirmation.
 
 name: ma_golden_cross
-display_name: 均线金叉
+display_name: 均线金叉  {@calibration} 
 description: 基于葛兰碧均线法则（Granville Rule）的金叉检测，经典的趋势反转/延续信号。
 category: trend
 core_rules: [1, 2, 3]

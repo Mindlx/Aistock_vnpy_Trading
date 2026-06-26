@@ -2,7 +2,7 @@
 # After extended decline, price stabilizes and volume spikes. Potential reversal.
 
 name: bottom_volume
-display_name: 底部放量
+display_name: 底部放量  {@calibration} 
 description: 基于威科夫量价分析（Wyckoff Method）的底部放量反转策略，检测吸筹阶段信号。
 category: reversal
 core_rules: [2, 5]

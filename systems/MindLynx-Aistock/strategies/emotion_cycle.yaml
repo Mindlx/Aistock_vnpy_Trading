@@ -3,7 +3,7 @@
 
 name: emotion_cycle
 display_name: 情绪周期
-description: 基于勒庞群体心理学（Le Bon）与索罗斯反身性理论（Soros Reflexivity）的情绪周期策略，逆情绪布局。
+description:  {@calibration 勒庞群体心理学+索罗斯反身性引用} 基于勒庞群体心理学（Le Bon）与索罗斯反身性理论（Soros Reflexivity）的情绪周期策略，逆情绪布局。
 category: framework
 core_rules: [1, 2, 3, 5]
 required_tools:

@@ -2,7 +2,7 @@
 # Based on Zen channel theory: pen, stroke, segment, hub structure analysis.
 
 name: chan_theory
-display_name: 缠论
+display_name: 缠论  {@calibration} 
 description: 基于缠中说禅缠论的笔、线段、中枢结构，判断趋势级别、买卖点与背驰信号。
 category: framework
 core_rules: [1, 2, 3, 4]
