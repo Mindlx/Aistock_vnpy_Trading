@@ -292,13 +292,13 @@ def _get_pred_and_next_close(conn: sqlite3.Connection, date: str,
         print(f"⚠️  数据异常: stock_code格式异常({stock_code_str})，跳过")
         return None
     if stock_code_str.startswith(("688", "689")):
-        max_pct = 20.5  # 科创板 STAR
+        max_pct = 20.5  # @calibration 科创板 STAR 涨跌幅限制 ±20% + 0.5% buffer
     elif stock_code_str.startswith(("300", "301")):
-        max_pct = 20.5  # 创业板 ChiNext
+        max_pct = 20.5  # @calibration 创业板 ChiNext 涨跌幅限制 ±20% + 0.5% buffer
     elif stock_code_str.startswith("8"):
-        max_pct = 30.5  # 北交所 BSE
+        max_pct = 30.5  # @calibration 北交所 BSE 涨跌幅限制 ±30% + 0.5% buffer
     else:
-        max_pct = 10.5  # 主板（含 ST 由数据验证兜底）
+        max_pct = 10.5  # @calibration 主板涨跌幅限制 ±10% + 0.5% buffer（含 ST 由数据验证兜底）
     if abs(pct_chg) > max_pct:
         print(f"⚠️  数据异常: {stock_code} {pred_trade_date}->{next_row['date']} "
               f"pct_chg={pct_chg:.2f}% 超出板块涨跌幅限制(±{max_pct-0.5:.0f}%)，跳过")

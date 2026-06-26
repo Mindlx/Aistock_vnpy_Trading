@@ -161,8 +161,8 @@ class BacktestService:
                         eval_status=str(evaluation.get("eval_status") or "error"),
                         evaluated_at=datetime.now(),
                         operation_advice=evaluation.get("operation_advice"),
-                        sentiment_score=evaluation.get("sentiment_score"),
-                        sentiment_direction_correct=evaluation.get("sentiment_direction_correct"),
+                        sentiment_score=evaluation.get("sentiment_score"),  # @calibration 校准参数传递
+                        sentiment_direction_correct=evaluation.get("sentiment_direction_correct"),  # @calibration 校准参数传递
                         position_recommendation=evaluation.get("position_recommendation"),
                         skill_id=None,
                         start_price=evaluation.get("start_price"),

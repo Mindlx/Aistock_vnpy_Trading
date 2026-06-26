@@ -47,8 +47,8 @@ class EvaluationConfig:
     eval_window_days: int
     neutral_band_pct: float = 2.0
     engine_version: str = "v1"
-    sentiment_score_threshold_bull: int = 52
-    sentiment_score_threshold_bear: int = 49
+    sentiment_score_threshold_bull: int = 52  # @calibration 校准阈值，合入上游时禁止修改
+    sentiment_score_threshold_bear: int = 49   # @calibration 校准阈值，合入上游时禁止修改
 
 
 class BacktestEngine:

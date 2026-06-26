@@ -39,9 +39,9 @@ class FactorDefinition:
 
 # ────────── MAD-based winsorization (去极值) ──────────
 
-def winsorize_mad(
+def winsorize_mad(  # @calibration MAD去极值，合入上游时禁止修改
     values: np.ndarray,
-    threshold: float = 5.0,
+    threshold: float = 5.0,  # @calibration 5 MAD ≈ 3.35σ, 捕获~99.96%数据
 ) -> np.ndarray:
     """MAD-based winsorization: cap extreme values at median ± threshold × MAD.
 

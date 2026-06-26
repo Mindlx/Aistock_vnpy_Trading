@@ -306,8 +306,8 @@ class BacktestResult(Base):
 
     # 建议快照（避免未来分析字段变化导致回测不可解释）
     operation_advice = Column(String(20))
-    sentiment_score = Column(Integer, nullable=True)  # LLM numerical score 0-100
-    sentiment_direction_correct = Column(Boolean, nullable=True)  # direction accuracy of sentiment_score
+    sentiment_score = Column(Integer, nullable=True)  # @calibration LLM numerical score 0-100, 合入上游时禁止修改
+    sentiment_direction_correct = Column(Boolean, nullable=True)  # @calibration direction accuracy of sentiment_score
     position_recommendation = Column(String(8))  # long/cash
 
     # 价格与收益
@@ -377,7 +377,7 @@ class BacktestSummary(Base):
 
     # 准确率/胜率
     direction_accuracy_pct = Column(Float)
-    sentiment_direction_accuracy_pct = Column(Float)
+    sentiment_direction_accuracy_pct = Column(Float)  # @calibration 回测汇总指标
     win_rate_pct = Column(Float)
     neutral_rate_pct = Column(Float)
 

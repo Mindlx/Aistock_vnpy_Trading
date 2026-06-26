@@ -1,0 +1,25 @@
+# 受保护文件清单 — 合入上游时禁止全量替换
+# 自动生成自: python scripts/scan_calibration_assets.py
+# 生成时间: 2026-06-26 21:24
+# 格式: 文件路径 | 校准内容
+#
+scripts/backtest.py | 科创板 STAR 涨跌幅限制 ±20% + 0.5% buffer
+scripts/backtest.py | 创业板 ChiNext 涨跌幅限制 ±20% + 0.5% buffer
+scripts/backtest.py | 北交所 BSE 涨跌幅限制 ±30% + 0.5% buffer
+scripts/backtest.py | 主板涨跌幅限制 ±10% + 0.5% buffer（含 ST 由数据验证兜底）
+scripts/scan_calibration_assets.py | 标记，生成受保护文件清单。
+scripts/scan_calibration_assets.py | 标记"""
+scripts/scan_calibration_assets.py | 标记')
+scripts/scan_calibration_assets.py | 标记")
+systems/MindLynx-Aistock/src/core/backtest_engine.py | 校准阈值，合入上游时禁止修改
+systems/MindLynx-Aistock/src/core/backtest_engine.py | 校准阈值，合入上游时禁止修改
+systems/MindLynx-Aistock/src/core/factor_engine.py | MAD去极值，合入上游时禁止修改
+systems/MindLynx-Aistock/src/core/factor_engine.py | 5 MAD ≈ 3.35σ, 捕获~99.96%数据
+systems/MindLynx-Aistock/src/core/prompt_shared.py | 校准阈值}
+systems/MindLynx-Aistock/src/core/prompt_shared.py | 校准阈值}
+systems/MindLynx-Aistock/src/core/prompt_shared.py | 校准阈值}
+systems/MindLynx-Aistock/src/services/backtest_service.py | 校准参数传递
+systems/MindLynx-Aistock/src/services/backtest_service.py | 校准参数传递
+systems/MindLynx-Aistock/src/storage.py | LLM numerical score 0-100, 合入上游时禁止修改
+systems/MindLynx-Aistock/src/storage.py | direction accuracy of sentiment_score
+systems/MindLynx-Aistock/src/storage.py | 回测汇总指标
