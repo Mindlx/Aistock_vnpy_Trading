@@ -1,0 +1,37 @@
+rules:
+  - id: calibration-protect
+    patterns:
+      - pattern-inside: |
+          ...
+      - pattern: |
+          @calibration ...
+    severity: ERROR
+    message: >
+      🔴 @calibration 标记的校准参数被修改或删除!
+      这些参数是经过回测验证的校准资产，合入上游时禁止全量替换。
+      如需修改，请确认原因并更新 @calibration 注释。
+    languages:
+      - python
+      - yaml
+    paths:
+      include:
+        - "*.py"
+        - "*.yaml"
+
+  - id: calibration-removed
+    pattern-regex: |
+      (?s)(?:^.*\n)*^(?!.*@calibration).*$
+    severity: WARNING
+    message: >
+      ⚠️ @calibration 标记在此文件中消失，可能是上游合入时被覆盖!
+      请检查是否意外删除了校准参数。
+    languages:
+      - python
+      - yaml
+    paths:
+      include:
+        - "systems/MindLynx-Aistock/src/core/backtest_engine.py"
+        - "systems/MindLynx-Aistock/src/core/prompt_shared.py"
+        - "systems/MindLynx-Aistock/src/core/factor_engine.py"
+        - "systems/MindLynx-Aistock/src/storage.py"
+        - "systems/MindLynx-Aistock/strategies/*.yaml"
