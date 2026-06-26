@@ -1676,8 +1676,23 @@ class EastMoneyNewsProvider(BaseSearchProvider):
                     )
                 )
 
-                if len(results) >= max_results:
+                if len(results) >= max_results * 2:  # over-fetch for ranking headroom
                     break
+
+            # 按权威媒体优先级排序（来源越权威越靠前）
+            _AUTHORITY_MEDIA = {
+                "中国证券报": 90, "中国证券报·中证网": 90, "上海证券报": 90, "证券日报": 90,
+                "证券时报": 85, "证券时报网": 85, "券商中国": 85, "证券时报·券商中国": 85,
+                "财联社": 80, "每日经济新闻": 80, "每经": 80,
+                "第一财经": 75, "经济日报": 75, "经济参考报": 75,
+                "人民财讯": 70, "新华网": 70, "新华社": 70, "人民日报": 70,
+                "界面新闻": 65, "澎湃新闻": 65, "21世纪经济报道": 65,
+            }
+            results.sort(
+                key=lambda r: (_AUTHORITY_MEDIA.get(r.source, 0), r.published_date or ""),
+                reverse=True,
+            )
+            results = results[:max_results]
 
             logger.info(
                 f"[{self.name}] 股票 {stock_code} 获取 {len(results)}/{len(df)} 条新闻，耗时 {time.time() - start_time:.2f}s"

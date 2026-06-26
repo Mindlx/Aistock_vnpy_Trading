@@ -2437,6 +2437,16 @@ class GeminiAnalyzer:
                 # 最后从映射表获取
                 name = STOCK_NAME_MAP.get(code, f"股票{code}")
 
+        # LLM prompt脱敏：替换真实代码和名称为匿名ID
+        _cfg = self._get_runtime_config()
+        if getattr(_cfg, "prompt_anonymize", False):
+            import hashlib
+            anon_code = f"STOCK_{hashlib.md5(code.encode()).hexdigest()[:8].upper()}"
+            context["code"] = anon_code
+            context["stock_name"] = "目标公司"
+            code = anon_code
+            name = "目标公司"
+
         # 如果模型不可用，返回默认结果
         if not self.is_available():
             return AnalysisResult(
@@ -3020,6 +3030,11 @@ class GeminiAnalyzer:
         factor_text = context.get("factor_profile", "")
         if factor_text:
             prompt += "\n\n---\n\n" + str(factor_text) + "\n"
+
+        # 注入 LY 量化信号（双模型预判）
+        ly_text = context.get("ly_signal", "")
+        if ly_text:
+            prompt += "\n\n---\n\n" + str(ly_text) + "\n"
 
         # 注入市场状态 (Phase 2)
         regime_text = context.get("regime_prompt", "")

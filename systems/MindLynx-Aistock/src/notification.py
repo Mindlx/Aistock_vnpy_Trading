@@ -2262,7 +2262,8 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
 
         if filename is None:
             date_str = datetime.now().strftime("%Y%m%d")
-            filename = f"report_{date_str}.md"
+            time_str = datetime.now().strftime("%H%M")
+            filename = f"report_{date_str}_{time_str}.md"
 
         # 确保 reports 目录存在（使用项目根目录下的 reports）
         reports_dir = Path(__file__).parent.parent / "reports"

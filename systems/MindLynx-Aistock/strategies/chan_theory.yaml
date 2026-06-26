@@ -3,7 +3,7 @@
 
 name: chan_theory
 display_name: 缠论
-description: 基于缠论笔、线段、中枢结构，判断趋势级别、买卖点与背驰信号。
+description: 基于缠中说禅缠论的笔、线段、中枢结构，判断趋势级别、买卖点与背驰信号。
 category: framework
 core_rules: [1, 2, 3, 4]
 required_tools:
@@ -15,7 +15,7 @@ default_priority: 70
 market_regimes: [volatile]
 
 instructions: |
-  **缠论（Chan Theory / Zen Channel Theory）**
+  **缠论（Chan Theory）— 缠中说禅**
 
   核心框架：分型 → 笔 → 线段 → 中枢 → 趋势
 

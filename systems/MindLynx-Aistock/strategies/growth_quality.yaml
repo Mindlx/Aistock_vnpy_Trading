@@ -2,7 +2,7 @@
 
 name: growth_quality
 display_name: 成长质量
-description: 结合收入利润增长、ROE、现金流和行业空间，识别高质量成长股与成长失速风险。
+description: 基于彼得·林奇（Peter Lynch）成长股投资框架，结合收入、利润、ROE、现金流识别高质量成长。
 category: framework
 core_rules: [2, 3, 5]
 required_tools:
@@ -15,7 +15,7 @@ default_priority: 55
 market_regimes: [trending_up]
 
 instructions: |
-  **成长质量策略（Growth Quality Strategy）**
+  **成长质量 — 基于彼得·林奇（Peter Lynch）成长股框架**
 
   适用场景：
   - 关注公司中长期成长能力，而不是只看短线技术形态。

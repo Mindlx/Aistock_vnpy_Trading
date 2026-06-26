@@ -22,6 +22,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -273,6 +274,35 @@ def _get_pred_and_next_close(conn: sqlite3.Connection, date: str,
 
     next_close = next_row["close"]
     pct_chg = round((next_close - pred_close) / pred_close * 100, 4)
+
+    # ── 数据质量守卫 ──────────────────────────────────────────
+    # A-share daily limit varies by market segment:
+    #   688xxx/689xxx 科创板(STAR)     ±20%
+    #   300xxx/301xxx 创业板(ChiNext)  ±20%
+    #   8xxxxx        北交所(BSE)      ±30%
+    #   股票名含 *ST/ST               ±5%
+    #   其他(主板)                     ±10%
+    # Values beyond the limit + 0.5% buffer indicate corrupted cache data.
+    # Skip silently to avoid contaminating accuracy metrics.
+    if not stock_code or not isinstance(stock_code, str):
+        print(f"⚠️  数据异常: stock_code无效({stock_code})，跳过")
+        return None
+    stock_code_str = str(stock_code).strip()
+    if not re.match(r'^\d{6}', stock_code_str):
+        print(f"⚠️  数据异常: stock_code格式异常({stock_code_str})，跳过")
+        return None
+    if stock_code_str.startswith(("688", "689")):
+        max_pct = 20.5  # 科创板 STAR
+    elif stock_code_str.startswith(("300", "301")):
+        max_pct = 20.5  # 创业板 ChiNext
+    elif stock_code_str.startswith("8"):
+        max_pct = 30.5  # 北交所 BSE
+    else:
+        max_pct = 10.5  # 主板（含 ST 由数据验证兜底）
+    if abs(pct_chg) > max_pct:
+        print(f"⚠️  数据异常: {stock_code} {pred_trade_date}->{next_row['date']} "
+              f"pct_chg={pct_chg:.2f}% 超出板块涨跌幅限制(±{max_pct-0.5:.0f}%)，跳过")
+        return None
 
     return {
         "pred_trade_date": pred_trade_date,

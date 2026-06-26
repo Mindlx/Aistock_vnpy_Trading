@@ -3,7 +3,7 @@
 
 name: ma_golden_cross
 display_name: 均线金叉
-description: 检测均线金叉配合量能确认信号，经典的趋势反转/延续信号。
+description: 基于葛兰碧均线法则（Granville Rule）的金叉检测，经典的趋势反转/延续信号。
 category: trend
 core_rules: [1, 2, 3]
 required_tools:
@@ -14,7 +14,7 @@ default_priority: 20
 market_regimes: [trending_up]
 
 instructions: |
-  **均线金叉（MA Golden Cross Strategy）**
+  **均线金叉 — 基于葛兰碧法则（Granville's Rule）**
 
   信号判定标准：
 

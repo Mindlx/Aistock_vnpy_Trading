@@ -3,7 +3,7 @@
 
 name: shrink_pullback
 display_name: 缩量回踩
-description: 检测缩量回踩均线支撑信号，趋势延续的理想入场点。
+description: 基于道氏理论趋势定义的缩量回踩策略，趋势延续的理想入场点。
 category: trend
 core_rules: [1, 2, 4]
 required_tools:
@@ -16,7 +16,7 @@ default_priority: 40
 market_regimes: [trending_up]
 
 instructions: |
-  **缩量回踩（Shrink Volume Pullback Strategy）**
+  **缩量回踩 — 基于道氏理论趋势回撤框架**
 
   入场判定标准：
 

@@ -3,7 +3,7 @@
 
 name: emotion_cycle
 display_name: 情绪周期
-description: 基于市场情绪、换手率与量价结构，识别情绪低点（恐慌底）与情绪高点（狂热顶），逆情绪布局。
+description: 基于勒庞群体心理学（Le Bon）与索罗斯反身性理论（Soros Reflexivity）的情绪周期策略，逆情绪布局。
 category: framework
 core_rules: [1, 2, 3, 5]
 required_tools:
@@ -16,7 +16,7 @@ default_priority: 100
 market_regimes: [sector_hot]
 
 instructions: |
-  **情绪周期策略（Sentiment Cycle Strategy）**
+  **情绪周期 — 勒庞群体心理学 × 索罗斯反身性**
 
   核心哲学：市场参与者的情绪在"恐慌→悲观→怀疑→希望→乐观→兴奋→贪婪→狂热"
   之间循环。聪明钱在恐慌底部布局，在狂热顶部离场。

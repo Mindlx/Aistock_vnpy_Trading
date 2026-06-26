@@ -3,7 +3,7 @@
 
 name: one_yang_three_yin
 display_name: 一阳夹三阴
-description: 检测一阳夹三阴K线整理形态，趋势延续入场信号。
+description: 基于日本蜡烛图技术（史蒂夫·尼森/Steve Nison）的一阳穿三阴K线整理形态，趋势延续入场信号。
 category: pattern
 core_rules: [2, 4]
 required_tools:
@@ -14,7 +14,7 @@ default_priority: 110
 market_regimes: [trending_up]  # S1 fix: was missing, strategy requires bullish trend
 
 instructions: |
-  **一阳夹三阴（One Yang Three Yin Strategy）**
+  **一阳穿三阴 — 日本蜡烛图（Steve Nison）经典形态**
 
   形态定义（最近 5 个交易日）：
 

@@ -663,6 +663,8 @@ class AgentExecutor:
                 )
             if context.get("news_context"):
                 parts.append(f"\n[系统已获取的新闻与舆情情报]\n{context['news_context']}")
+            if context.get("ly_signal"):
+                parts.append(f"\n[系统已获取的量化预判信号（LY双模型）]\n{context['ly_signal']}")
 
         parts.append("\n请使用可用工具获取缺失的数据（如历史K线、新闻等），然后以决策仪表盘 JSON 格式输出分析结果。")
         return "\n".join(parts)

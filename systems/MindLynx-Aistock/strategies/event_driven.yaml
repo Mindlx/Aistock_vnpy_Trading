@@ -2,7 +2,7 @@
 
 name: event_driven
 display_name: 事件驱动
-description: 围绕业绩、政策、并购、订单、产品发布等事件，评估催化强度、兑现概率和风险边界。
+description: 基于霍华德·马克斯（Howard Marks）第二层思维的事件驱动策略，评估催化与风险。
 category: framework
 core_rules: [3, 5]
 required_tools:
@@ -14,7 +14,7 @@ default_priority: 45
 market_regimes: [sector_hot, volatile]
 
 instructions: |
-  **事件驱动策略（Event Driven Strategy）**
+  **事件驱动 — 基于霍华德·马克斯第二层思维**
 
   适用场景：
   - 公司或行业出现明确事件催化，如业绩预告、订单中标、并购重组、政策落地、产品发布、监管处罚、诉讼等。
