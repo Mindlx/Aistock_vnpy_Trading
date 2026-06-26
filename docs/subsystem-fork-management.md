@@ -1,5 +1,7 @@
-# 子系统上游管理指南
+# 三子系统上游管理指南
 
+> 用途：主项目对 LY/ML/AT 子系统的优化代码，同步回独立上游 fork 的操作手册。
+> 原则：凡是对子系统自身的代码优化，都可以（且应该）同步回 fork，保持上游可追踪。
 > 最后更新: 2026-06-26
 
 ---
@@ -16,7 +18,21 @@ fork 源目录：`/home/bluekuma/workspace/{子系统目录}/`
 
 ---
 
-## 本地定制代码记录（ML 子系统）
+## 适用场景
+
+对子系统自身代码的任何优化性修改，均适用此流程：
+
+| 场景 | 示例 | 需要同步？ |
+|:-----|:------|:---------:|
+| 修复子系统 bug | `market_analyzer.py` label bug | ✅ |
+| 给子系统加功能 | TTL 缓存、整点分析注入 | ✅ |
+| 改子系统配置 | `.env` 变量调整 | ✅ |
+| 改融合引擎代码 | `fusion_engine.py` | ❌ 不属于子系统 |
+| 改测试代码 | `tests/test_fusion_engine.py` | ❌ 不属于子系统 |
+
+---
+
+## 本地定制代码记录
 
 ### 高风险文件（每次 sync 后需重点检查）
 
@@ -54,47 +70,40 @@ fork 源目录：`/home/bluekuma/workspace/{子系统目录}/`
 
 ## 同步到 fork 的操作步骤
 
+### 三子系统 fork 源目录
+
+| 子系统 | 项目目录 | fork 源目录 |
+|:-------|:---------|:------------|
+| **ML** (MindLynx-Aistock) | `systems/MindLynx-Aistock/` | `/home/bluekuma/workspace/MindLynx-Aistock/` |
+| **LY** (lynx_vnpy) | `systems/lynx_vnpy/` | `/home/bluekuma/workspace/lynx_vnpy/` |
+| **AT** (mind_TradingAgent) | `systems/mind_TradingAgent/` | `/home/bluekuma/workspace/mind_TradingAgent/` |
+
 ### 完整流程（首次同步或批量同步）
 
 ```bash
-# 1. 先看差异
-SRC="systems/MindLynx-Aistock"  # 项目中的 ML 目录
-DST="/home/bluekuma/workspace/MindLynx-Aistock"  # fork 源目录
+SUBSYSTEM="MindLynx-Aistock"  # 替换为 lynx_vnpy 或 mind_TradingAgent
+SRC="systems/$SUBSYSTEM"
+DST="/home/bluekuma/workspace/$SUBSYSTEM"
 
-# 列出有差异的文件
-for f in "src/market_analyzer.py" "src/core/market_review.py" \
-         "src/config.py" "src/notification_sender/wechat_sender.py" \
-         "src/notification.py" ".env"; do
+# 1. 列出有差异的文件
+for f in "src/market_analyzer.py" "src/config.py"; do  # 替换为实际差异文件
     diff_lines=$(diff -u "$DST/$f" "$SRC/$f" 2>/dev/null | wc -l)
     echo "$f: $diff_lines 行差异"
 done
 
-# 2. 拷贝文件
+# 2. 拷贝差异文件
 cp "$SRC/src/market_analyzer.py" "$DST/src/market_analyzer.py"
-cp "$SRC/src/core/market_review.py" "$DST/src/core/market_review.py"
-# ... 拷贝所有差异文件
 
 # 3. 提交并推送到 fork
 cd "$DST"
 git add <修改的文件>
 git commit -m "sync: 说明同步内容" --no-verify
 git push origin main
-
-# 4. 注意：.env 文件被 gitignore 忽略，不提交
-```
-
-### 单文件快速同步
-
-```bash
-cd /home/bluekuma/workspace/MindLynx-Aistock
-git add src/market_analyzer.py
-git commit -m "sync: market_analyzer.py — TTL缓存+整点分析注入"
-git push origin main
 ```
 
 ### 注意事项
 
 1. fork 仓库的 `pre-commit` hook 依赖 venv，未激活时会失败。始终用 `--no-verify` 跳过
-2. `.env` 文件在 fork 仓库中被 gitignore，不要 force-add
-3. LY 和 AT 子系统目前无定制代码差异，无需同步
+2. `.env` 文件在 fork 仓库中被 gitignore，不提交
+3. 当前仅 **ML** 子系统有定制代码差异（见上方记录），LY 和 AT 无差异
 4. 上游 sync（`sync_systems.sh`）后，需按高/中风险文件清单逐项检查并恢复
