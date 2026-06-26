@@ -241,10 +241,8 @@ def run_market_review(
             # 保存报告到文件（含 treemap，独立于推送通道）
             report_content = review_report
             try:
-                from src.market_analyzer import build_sector_treemap
-                from data_provider import create_fetcher_manager
-                _dm = create_fetcher_manager()
-                _sectors_raw = _dm.get_sector_rankings(n=40)  # 取尽量多覆盖全市场
+                from src.market_analyzer import build_sector_treemap, get_cached_sector_rankings
+                _sectors_raw = get_cached_sector_rankings(n=40)  # 复用 TTL 缓存，避免重复 API 调用
                 # get_sector_rankings 返回 (上涨板块列表, 下跌板块列表)
                 if _sectors_raw and len(_sectors_raw) == 2:
                     # 合并涨跌列表，按成交额排序取 Top 16（确保方块面积可读）

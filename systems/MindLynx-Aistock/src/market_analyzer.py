@@ -12,6 +12,7 @@
 import base64
 import io
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -24,6 +25,45 @@ from src.report_language import normalize_report_language
 from src.search_service import SearchService
 
 logger = logging.getLogger(__name__)
+
+
+# ── 市场数据 TTL 缓存（大盘复盘场景下，同一次执行无需重复拉取） ──
+# 仅在 MarketAnalyzer 实例生存期内生效，进程重启自动清除
+_MARKET_CACHE: dict[str, tuple[Any, float]] = {}
+_MARKET_CACHE_TTL: dict[str, float] = {
+    "main_indices": 300,       # 指数行情：5 分钟
+    "market_stats": 300,       # 市场统计：5 分钟
+    "sector_rankings": 300,    # 板块排行：5 分钟
+    "concept_rankings": 300,   # 概念排行：5 分钟
+    "limit_up_pool": 180,      # 涨停池：3 分钟
+    "hot_stocks": 180,         # 人气股：3 分钟
+}
+
+
+def _cached_call(cache_key: str, ttl: float, fetcher_fn, *args, **kwargs) -> Any:
+    """通用 TTL 缓存装饰函数：先查缓存，miss 时穿透到 fetcher_fn"""
+    global _MARKET_CACHE
+    now = time.monotonic()
+    if cache_key in _MARKET_CACHE:
+        data, ts = _MARKET_CACHE[cache_key]
+        if now - ts < ttl:
+            return data
+    data = fetcher_fn(*args, **kwargs)
+    _MARKET_CACHE[cache_key] = (data, now)
+    return data
+
+
+def _clear_market_cache():
+    """清空市场数据缓存（测试/诊断用）"""
+    _MARKET_CACHE.clear()
+
+
+def get_cached_sector_rankings(n: int = 40) -> tuple[list, list]:
+    """从 TTL 缓存读取板块排行数据（供 market_review.py treemap 复用，避免重复创建 DataFetcherManager）"""
+    from data_provider import create_fetcher_manager
+    _dm = create_fetcher_manager()
+    return _cached_call("sector_rankings", _MARKET_CACHE_TTL["sector_rankings"],
+                        _dm.get_sector_rankings, n=n)
 
 
 _ENGLISH_SECTION_PATTERNS = {
@@ -410,8 +450,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         try:
             logger.info("[大盘] 获取主要指数实时行情...")
 
-            # 使用 DataFetcherManager 获取指数行情（按 region 切换）
-            data_list = self.data_manager.get_main_indices(region=self.region)
+            # 使用 DataFetcherManager 获取指数行情（按 region 切换），带 TTL 缓存
+            data_list = _cached_call(f"main_indices:{self.region}", _MARKET_CACHE_TTL["main_indices"],
+                                     self.data_manager.get_main_indices, region=self.region)
 
             if data_list:
                 for item in data_list:
@@ -446,7 +487,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         try:
             logger.info("[大盘] 获取市场涨跌统计...")
 
-            stats = self.data_manager.get_market_stats()
+            stats = _cached_call("market_stats", _MARKET_CACHE_TTL["market_stats"],
+                                 self.data_manager.get_market_stats)
 
             if stats:
                 overview.up_count = stats.get("up_count", 0)
@@ -470,7 +512,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         try:
             logger.info("[大盘] 获取板块涨跌榜...")
 
-            top_sectors, bottom_sectors = self.data_manager.get_sector_rankings(5)
+            top_sectors, bottom_sectors = _cached_call("sector_rankings", _MARKET_CACHE_TTL["sector_rankings"],
+                                                        self.data_manager.get_sector_rankings, 5)
 
             if top_sectors or bottom_sectors:
                 overview.top_sectors = top_sectors
@@ -485,7 +528,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def _get_concept_rankings(self, overview: MarketOverview):
         try:
             logger.info("[大盘] 获取概念板块涨跌榜...")
-            top, bottom = self.data_manager.get_concept_rankings(5)
+            top, bottom = _cached_call("concept_rankings", _MARKET_CACHE_TTL["concept_rankings"],
+                                        self.data_manager.get_concept_rankings, 5)
             if top or bottom:
                 overview.top_concepts = top or []
                 overview.bottom_concepts = bottom or []
@@ -499,7 +543,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def _get_limit_up_detail(self, overview: MarketOverview):
         try:
             logger.info("[大盘] 获取涨停池详情...")
-            pool = self.data_manager.get_limit_up_pool()
+            pool = _cached_call("limit_up_pool", _MARKET_CACHE_TTL["limit_up_pool"],
+                                 self.data_manager.get_limit_up_pool)
             if pool:
                 overview.limit_up_pool = pool[:10]
                 logger.info("[大盘] 涨停池: %d 只", len(overview.limit_up_pool))
@@ -509,7 +554,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def _get_hot_stocks_detail(self, overview: MarketOverview):
         try:
             logger.info("[大盘] 获取人气股排行...")
-            stocks = self.data_manager.get_hot_stocks()
+            stocks = _cached_call("hot_stocks", _MARKET_CACHE_TTL["hot_stocks"],
+                                    self.data_manager.get_hot_stocks)
             if stocks:
                 overview.hot_stocks = stocks[:5]
                 logger.info("[大盘] 人气股: %d 只", len(overview.hot_stocks))
@@ -579,13 +625,15 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                                session_label: str = "全天",
                                stock_data: str | None = None,
                                capital_flow_text: str | None = None,
-                               eastmoney_text: str | None = None) -> str:
+                               eastmoney_text: str | None = None,
+                               hourly_analysis_text: str | None = None) -> str:
         """
         使用大模型生成大盘复盘报告
 
         Args:
             overview: 市场概览数据
             news: 市场新闻列表 (SearchResult 对象列表)
+            hourly_analysis_text: 当日整点分析结果（作为第三方参考观点，非客观事实）
 
         Returns:
             大盘复盘报告文本
@@ -594,10 +642,11 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             logger.warning("[大盘] AI分析器未配置或不可用，使用模板生成报告")
             return self._generate_template_review(overview, news)
 
-        # 构建 Prompt（含自选股数据 + 资金流向 + 东方财富评级，如有）
+        # 构建 Prompt（含自选股数据 + 资金流向 + 东方财富评级 + 整点分析观点，如有）
         prompt = self._build_review_prompt(overview, news, previous_plan, session_label,
                                             stock_data=stock_data, capital_flow_text=capital_flow_text,
-                                            eastmoney_text=eastmoney_text)
+                                            eastmoney_text=eastmoney_text,
+                                            hourly_analysis_text=hourly_analysis_text)
 
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point — never access private analyzer attributes.
@@ -1169,7 +1218,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                              session_label: str = "全天",
                              stock_data: str | None = None,
                              capital_flow_text: str | None = None,
-                             eastmoney_text: str | None = None) -> str:
+                             eastmoney_text: str | None = None,
+                             hourly_analysis_text: str | None = None) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
 
@@ -1395,6 +1445,8 @@ Output the report content directly, no extra commentary.
 （如果【自选股因子数据】或【自选股实时行情】不为空，基于这些数据和当日大盘背景，对每只自选股给出独立操盘建议：明确操作方向、仓位参考和关键价位。数据为空则跳过此章节。）
 
 {stock_data or ""}
+
+{hourly_analysis_text or ""}
 
 ---
 
@@ -1667,14 +1719,81 @@ Market conditions can change quickly. The data above is for reference only and d
         if eastmoney_text:
             logger.info("[大盘] 东方财富评级: 已加载")
 
-        # 4. 生成复盘报告（LLM 自动包含上期建议验证 + 自选股分析 + 资金流向 + 东方财富评级）
+        # 3e. 读取当日整点分析作为第三方观点参考
+        hourly_analysis_text = self._load_hourly_analysis(session_label)
+        if hourly_analysis_text:
+            logger.info("[大盘] 整点分析观点: 已加载")
+
+        # 4. 生成复盘报告（LLM 自动包含上期建议验证 + 自选股分析 + 资金流向 + 东方财富评级 + 整点分析观点）
         report = self.generate_market_review(overview, news, previous_plan, session_label,
                                               stock_data=stock_data, capital_flow_text=capital_flow_text,
-                                              eastmoney_text=eastmoney_text)
+                                              eastmoney_text=eastmoney_text,
+                                              hourly_analysis_text=hourly_analysis_text)
 
         logger.info("========== 大盘复盘分析完成 ==========")
 
         return report
+
+    def _load_hourly_analysis(self, session_label: str = "全天") -> str | None:
+        """读取当日整点分析报告，作为第三方观点参考注入复盘 prompt。
+
+        午盘(11:45): 加载 11:00 的分析
+        全天(15:45): 加载 11:00 + 14:00 的两份分析
+
+        LLM 应批判性参考这些观点，非客观事实。
+        """
+        try:
+            from pathlib import Path
+            today = datetime.now().strftime("%Y%m%d")
+            reports_dir = Path(__file__).resolve().parent.parent / "reports"
+
+            # 查找当天整点分析报告（新格式 report_YYYYMMDD_HHMM.md + 旧格式兼容）
+            files_1100 = list(reports_dir.glob(f"report_{today}_1100*.md"))
+            files_1400 = list(reports_dir.glob(f"report_{today}_1400*.md"))
+            # 旧格式兼容
+            old_file = reports_dir / f"report_{today}.md"
+
+            parts = []
+            if session_label == "午盘":
+                if files_1100:
+                    content = files_1100[0].read_text(encoding="utf-8")
+                    lines = content.strip().split("\n")
+                    parts.append("## 当日整点分析观点参考（第三方观点，批判性参考）")
+                    parts.append("以下为今日 11:00 整点分析结果，仅供参考，不构成分析依据：")
+                    summary_lines = [l for l in lines if "评分" in l or "操作" in l or l.startswith("🟡") or l.startswith("🟢") or l.startswith("🔴") or l.startswith("⚪") or l.startswith("🟠")]
+                    parts.extend(summary_lines[:20] if summary_lines else lines[:15])
+                elif old_file.exists():
+                    content = old_file.read_text(encoding="utf-8")
+                    lines = content.strip().split("\n")
+                    parts.append("## 当日整点分析观点参考（第三方观点，批判性参考）")
+                    parts.append("以下为今日整点分析结果，仅供参考：")
+                    parts.extend(lines[:15])
+            else:
+                loaded_any = False
+                # 全天：优先加载两份
+                for file_list, time_label in [(files_1100, "11:00"), (files_1400, "14:00")]:
+                    if file_list:
+                        content = file_list[0].read_text(encoding="utf-8")
+                        lines = content.strip().split("\n")
+                        if not loaded_any:
+                            parts.append("## 当日整点分析观点参考（第三方观点，批判性参考）")
+                            parts.append("以下为今日两份整点分析结果，LLM 应批判性参考，不视为客观事实。")
+                            loaded_any = True
+                        parts.append(f"### {time_label} 整点分析摘要")
+                        summary_lines = [l for l in lines if "评分" in l or "操作" in l or l.startswith("🟡") or l.startswith("🟢") or l.startswith("🔴") or l.startswith("⚪") or l.startswith("🟠")]
+                        parts.extend(summary_lines[:12] if summary_lines else lines[:10])
+                if not loaded_any and old_file.exists():
+                    content = old_file.read_text(encoding="utf-8")
+                    lines = content.strip().split("\n")
+                    parts.append("## 当日整点分析观点参考（第三方观点，批判性参考）")
+                    parts.append("以下为当日整点分析结果，仅供参考：")
+                    parts.extend(lines[:15])
+
+            if parts:
+                return "\n".join(parts)
+        except Exception as e:
+            logger.debug(f"[大盘] 整点分析加载失败: {e}")
+        return None
 
     def _load_stock_pool_data(self) -> str | None:
         """加载当日融合系统自选股分析数据，供LLM生成操盘建议。
