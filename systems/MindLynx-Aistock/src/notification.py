@@ -997,7 +997,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         return value
 
     # @calibration 信号排序逻辑
-def _get_signal_level(self, result: AnalysisResult) -> tuple:
+    def _get_signal_level(self, result: AnalysisResult) -> tuple:
         """Get localized signal level and color based on operation advice."""
         return get_signal_level(
             result.operation_advice,

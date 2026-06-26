@@ -19,12 +19,11 @@ rules:
         - "*.yaml"
 
   - id: calibration-removed
-    pattern-regex: |
-      (?s)(?:^.*\n)*^(?!.*@calibration).*$
+    pattern-regex: ^(?!(?:.*@calibration)?$).*$
     severity: WARNING
     message: >
-      ⚠️ @calibration 标记在此文件中消失，可能是上游合入时被覆盖!
-      请检查是否意外删除了校准参数。
+      ⚠️ @calibration 标记在此文件中消失，请检查是否意外删除了校准参数！
+      受保护文件列表请见 docs/protected_files.txt
     languages:
       - python
       - yaml
