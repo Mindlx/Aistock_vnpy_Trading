@@ -83,8 +83,8 @@ class MindTradingAgentWrapper:
             if env_path.exists():
                 load_dotenv(env_path, override=False)
                 logger.info(f"已加载 env: {env_path}")
-        except ImportError:
-            pass
+        except ImportError as _e:
+            logger.debug("[mind_agent] dotenv 未安装，跳过: %s", _e)
 
         try:
             from mind_tradingagent.graph.trading_graph import TradingAgentsGraph
@@ -147,9 +147,9 @@ class MindTradingAgentWrapper:
             if not _wr.is_fresh(stock_code, "daily_ohlcv"):
                 _wr.get_daily(stock_code, days=120)  # 触发缓存填充
         except ImportError:
-            pass
-        except Exception:
-            pass
+            logger.debug("[mind_agent] WarehouseReader 不可用")
+        except Exception as _e:
+            logger.debug("[mind_agent] 数据仓库预热失败: %s", _e)
 
         # A 股数据前置验证：akshare → efinance → yfinance 降级
         from src.ashare_data import AshareDataProvider
@@ -548,8 +548,8 @@ class MindTradingAgentWrapper:
             try:
                 if prf != "" and plgb != "":
                     ensemble = f"{(float(prf) + float(plgb)) / 2:.1f}"
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as _e:
+                logger.debug("[mind_agent] 概率计算异常: %s", _e)
 
         prob_rf = csv_row.get("prob_up_rf", "") or rf.get("prob_up", "")
         prob_lgb = csv_row.get("prob_up_lgb", "") or lgb.get("prob_up", "")
@@ -561,8 +561,8 @@ class MindTradingAgentWrapper:
             pl = float(prob_lgb) if prob_lgb else 0
             if pr and pl:
                 disagreement = f"{abs(pr - pl):.1f}%"
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as _e:
+            logger.debug("[mind_agent] 分歧度计算异常: %s", _e)
 
         # Strength
         strength = ""
@@ -571,8 +571,8 @@ class MindTradingAgentWrapper:
             if prob >= 70: strength = "强"
             elif prob >= 55: strength = "中"
             else: strength = "弱"
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as _e:
+            logger.debug("[mind_agent] 强度计算异常: %s", _e)
 
         # Format
         lines = [

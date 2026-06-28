@@ -556,8 +556,10 @@ class FundamentalsFetcher:
         # ROE — fields: ts_code(0), ann_date(1), end_date(2), ..., roe(53)
         _, items = _ts_post("fina_indicator", {"ts_code": ts_code, "limit": "1"})
         if items and len(items[0]) > 53:
-            try: result["roe"] = float(items[0][53] or 0)
-            except: pass
+            try:
+                result["roe"] = float(items[0][53] or 0)
+            except (ValueError, TypeError) as _e:
+                logger.debug("[fetcher] ROE 字段异常: %s", _e)
 
         result.setdefault("source", "tushare")
         return result
