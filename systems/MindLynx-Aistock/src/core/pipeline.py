@@ -1996,7 +1996,44 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     else "Agent 未能生成有效的决策仪表盘"
                 )
 
+        # ── 后处理：校准 operation_advice 向 sentiment_score 对齐 ──
+        StockAnalysisPipeline._calibrate_operation_advice(result, report_language)
+
         return result
+
+    @staticmethod
+    def _calibrate_operation_advice(result: "AnalysisResult", report_language: str) -> None:
+        """如果 operation_advice 方向与 sentiment_score 矛盾，修正文本建议。
+
+        sentiment_score 是 LLM+因子融合分数（方向准确率 80%+），
+        而 operation_advice 是 LLM 直接输出的文本，经常偏保守。
+        当两者方向相反时，以 sentiment_score 为准。
+        """
+        score = result.sentiment_score
+        advice = result.operation_advice or ""
+
+        if score is None or score < 0 or score > 100:
+            return
+        if not advice:
+            return
+
+        # Infer direction from score (52/49 thresholds from normalizer)
+        score_bullish = score >= 52
+        score_bearish = score <= 49
+
+        # Infer direction from advice text
+        advice_bullish = any(kw in advice for kw in ["买入", "加仓", "买", "加", "Strong Buy", "Buy"])
+        advice_bearish = any(kw in advice for kw in ["卖出", "减仓", "卖", "减", "Strong Sell", "Sell"])
+
+        # Correct contradiction: score says up, advice says down
+        if score_bullish and advice_bearish:
+            result.operation_advice = "买入" if report_language == "zh" else "Buy"
+            logger.info("[Calibrate] %s: score=%d ↑ 但 advice=%s → 修正为买入", result.code, score, advice)
+
+        # Correct contradiction: score says down, advice says up
+        elif score_bearish and advice_bullish:
+            result.operation_advice = "卖出" if report_language == "zh" else "Sell"
+            logger.info("[Calibrate] %s: score=%d ↓ 但 advice=%s → 修正为卖出", result.code, score, advice)
 
     @staticmethod
     def _agent_dashboard_value(

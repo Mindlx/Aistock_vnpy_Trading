@@ -18,6 +18,8 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+import numpy as np
 from typing import Any, Dict, Optional
 
 # ml 子系统路径
@@ -83,6 +85,7 @@ class MLFactorService:
         # 第一步：计算所有股票的原始因子
         raw_results: list = []  # FactorResult 对象列表
         code_map: dict[str, Any] = {}  # code → FactorResult
+        stock_data: dict[str, dict] = {}  # code → {close, volume} for time_series
 
         for code in self.STOCK_CODES:
             try:
@@ -95,12 +98,17 @@ class MLFactorService:
                 result = self.engine.compute_for_stock(code, daily)
                 raw_results.append(result)
                 code_map[code] = result
+                # Prepare stock_data for time_series_normalize
+                stock_data[code] = {
+                    "close": np.array([d.get("close", 0) or 0 for d in daily], dtype=float),
+                    "volume": np.array([d.get("volume", 0) or 0 for d in daily], dtype=float),
+                }
             except Exception as e:
                 continue
 
-        # 第二步：横截面归一化（所有股票一起算 z-score + composite）
+        # 第二步：时序归一化（逐股票自身历史分布，N<30 时比截面归一化更稳健）
         if raw_results:
-            self.engine.cross_sectional_normalize(raw_results)
+            self.engine.time_series_normalize(raw_results, stock_data, lookback=120)
 
         # 第三步：提取 composite_score + L7 映射
         results = {}
