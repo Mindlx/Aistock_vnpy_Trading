@@ -236,7 +236,7 @@ class BacktestRepository:
                     "loss_count",
                     "neutral_count",
                     "direction_accuracy_pct",
-                    "sentiment_direction_accuracy_pct"  # @calibration,
+                    "sentiment_direction_accuracy_pct",  # @calibration
                     "win_rate_pct",
                     "neutral_rate_pct",
                     "avg_stock_return_pct",
