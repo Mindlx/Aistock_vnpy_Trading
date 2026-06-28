@@ -705,22 +705,22 @@ class FactorEngine:
                 r.composite_label = "中性"
 
     def build_factor_profile(self, result: FactorResult) -> str:
-        """Build a human-readable factor summary for LLM prompt injection."""
-        lines = ["### 量化因子得分 (Quantitative Factor Scores)"]
-        lines.append("| 因子 | Z-Score | 含义 | IC |")
-        lines.append("|------|---------|------|-----|")
+        """Build a collapsed factor summary for LLM prompt injection."""
+        cs = result.composite_score
+        label = result.composite_label
+        direction = "↑ 偏多" if cs > 0.2 else ("↓ 偏空" if cs < -0.2 else "→ 中性")
+
+        # Find diverging factors (z-score sign opposite to composite)
+        diverging = []
         for fd in self.factors:
             z = result.z_scores.get(fd.name, 0.0)
-            direction = "↑" if z > 0.2 else ("↓" if z < -0.2 else "→")
-            label = f"{direction} {fd.display_name}"
-            details = result.details.get(fd.name, {})
-            extra = ""
-            if details:
-                items = ", ".join(f"{k}={v}" for k, v in list(details.items())[:2])
-                extra = f" ({items})"
-            lines.append(f"| {fd.display_name} | {z:+.2f}σ | {label}{extra} | {fd.ic:.1%} |")
+            if (cs > 0.2 and z < -0.2) or (cs < -0.2 and z > 0.2):
+                diverging.append(f"{fd.display_name}({z:+.1f}σ)")
 
-        lines.append(f"\n**综合得分**: {result.composite_score:+.2f} ({result.composite_label})")
-        lines.append("> 正分=因子面偏多, 负分=因子面偏空, 0=中性。该得分基于A股历史IC/IR加权。")
+        div_text = f" | 因子分歧: {', '.join(diverging)}" if diverging else ""
 
+        lines = [
+            f"### 量化因子评分",
+            f"综合: {cs:+.2f} {direction}{div_text}",
+        ]
         return "\n".join(lines)
