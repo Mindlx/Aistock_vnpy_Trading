@@ -1,10 +1,6 @@
 rules:
   - id: calibration-protect
-    patterns:
-      - pattern-inside: |
-          ...
-      - pattern: |
-          @calibration ...
+    pattern-regex: '@calibration'
     severity: ERROR
     message: >
       🔴 @calibration 标记的校准参数被修改或删除!

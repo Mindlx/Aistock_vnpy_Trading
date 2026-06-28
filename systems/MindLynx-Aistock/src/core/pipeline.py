@@ -1088,14 +1088,22 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 if val != "":
                     ly_info[key] = val
 
-            # L7 scores
-            for key, src in [("l7_score_rf", rf), ("l7_score_lgb", lgb)]:
-                val = csv_row.get(key, "") or src.get("score", "")
+            # Raw model scores (from JSON, NOT L7 — these are RF/LGB raw confidence scores)
+            for key, src in [("raw_score_rf", rf), ("raw_score_lgb", lgb)]:
+                val = src.get("score", "")
                 if val != "":
                     try:
-                        ly_info[key] = f"{float(val):+.2f}"
+                        ly_info[key] = f"{float(val):+.3f}"
                     except (ValueError, TypeError):
                         pass
+
+            # Volume ratio (raw technical indicator from ly_alpha_signal.json)
+            vr = lgb.get("volume_ratio", "")
+            if vr != "":
+                try:
+                    ly_info["volume_ratio"] = f"{float(vr):.2f}"
+                except (ValueError, TypeError):
+                    pass
 
             # Signal labels
             signal_label = rf.get("signal", "")
@@ -1147,12 +1155,16 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             lines.append(f"| RF 上涨概率 | {prob_rf}% | RandomForest 分类器（15+ 技术指标特征） |")
             lines.append(f"| LGB 上涨概率 | {prob_lgb}% | Alpha158 LightGBM（158 因子增强） |")
 
-            l7_rf = info.get("l7_score_rf", "")
-            l7_lgb = info.get("l7_score_lgb", "")
-            if l7_rf:
-                lines.append(f"| L7 决策得分(RF) | {l7_rf} | 范围 [-3,+3]，正值偏多，负值偏空 |")
-            if l7_lgb:
-                lines.append(f"| L7 决策得分(LGB) | {l7_lgb} | 范围 [-3,+3]，正值偏多，负值偏空 |")
+            raw_rf = info.get("raw_score_rf", "")
+            raw_lgb = info.get("raw_score_lgb", "")
+            if raw_rf:
+                lines.append(f"| RF 原始得分 | {raw_rf} | RandomForest 置信度（范围约 [-3,+3]），正值偏多，负值偏空 |")
+            if raw_lgb:
+                lines.append(f"| LGB 原始得分 | {raw_lgb} | Alpha158 LightGBM 置信度（范围约 [-3,+3]），正值偏多，负值偏空 |")
+
+            vr = info.get("volume_ratio", "")
+            if vr:
+                lines.append(f"| 量比(LGB) | {vr} | Alpha158 原始因子：当日成交量 / 近5日均量，>1.2 放量，<0.8 缩量 |")
 
             signal = info.get("signal_rf", "")
             if signal:

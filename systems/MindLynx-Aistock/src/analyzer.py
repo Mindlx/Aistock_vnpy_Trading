@@ -2441,11 +2441,21 @@ class GeminiAnalyzer:
         _cfg = self._get_runtime_config()
         if getattr(_cfg, "prompt_anonymize", False):
             import hashlib
+            _real_code = code  # 保留原始值供后处理替换
+            _real_name = name if name and not name.startswith("股票") else None
             anon_code = f"STOCK_{hashlib.md5(code.encode()).hexdigest()[:8].upper()}"
             context["code"] = anon_code
             context["stock_name"] = "目标公司"
             code = anon_code
             name = "目标公司"
+            # 对已生成的 prompt 片段做后处理脱敏（knowledge_prompt 等可能含真实代码/名称）
+            for _pfx in ("knowledge_prompt", "news_prompt", "history_prompt", "regime_prompt"):
+                _val = context.get(_pfx, "")
+                if _val:
+                    _val = _val.replace(_real_code, anon_code)
+                    if _real_name:
+                        _val = _val.replace(_real_name, "目标公司")
+                    context[_pfx] = _val
 
         # 如果模型不可用，返回默认结果
         if not self.is_available():
