@@ -503,14 +503,27 @@ def push_wecom(signals: list[dict]):
 
 # ===== 5.5 双模型集成 =====
 
+# IC权重：基于2026-05-29~2026-06-26测量
+# LGB Pearson IC=0.2244, RF Pearson IC=0.0226
+# 加权公式: wi = ICi / sum(ICi)
+# LGB_w = 0.2244/(0.2244+0.0226) ≈ 0.91
+# RF_w  = 0.0226/(0.2244+0.0226) ≈ 0.09
+_LGB_IC_WEIGHT = 0.91
+_RF_IC_WEIGHT = 0.09
+
 def predict_ensemble(df: pd.DataFrame, code: str, name: str) -> dict | None:
-    """同时跑RF和LGB，返回集成信号（供data_loader.py使用）"""
+    """同时跑RF和LGB，返回集成信号（供data_loader.py使用）
+
+    IC加权集成: 按实测Information Coefficient比例加权，
+    防止低IC模型稀释高IC模型信号。
+    """
     df_feat = compute_features(df)
     sig_rf = predict_signal(df_feat, code, name)
     sig_lgb = _predict_alpha(df, code, name)
 
     if sig_rf and sig_lgb:
-        prob_avg = (sig_rf['prob_up'] + sig_lgb['prob_up']) / 2.0
+        prob_avg = (sig_rf['prob_up'] * _RF_IC_WEIGHT
+                    + sig_lgb['prob_up'] * _LGB_IC_WEIGHT)
         score = _l7_score(prob_avg / 100.0)
         label = _l7_label(score)
         emoji = _l7_emoji(score)
