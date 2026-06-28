@@ -1,5 +1,5 @@
 [Unit]
-Description=Aistock_vnpy_Trading — LGB 模型自动重训（随 15:15 量化信号后）
+Description=Aistock_vnpy_Trading — LGB + RF 模型自动重训（随 15:15 量化信号后）
 Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
 After=network-online.target Aistock_vnpy_Trading-lynx-signal.service
 
@@ -7,6 +7,7 @@ After=network-online.target Aistock_vnpy_Trading-lynx-signal.service
 Type=oneshot
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
 ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python systems/lynx_vnpy/vnpy_bridge/retrain_lgb.py
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python systems/lynx_vnpy/vnpy_bridge/retrain_rf.py
 StandardOutput=journal
 StandardError=journal
 TimeoutStopSec=300

@@ -1,0 +1,11 @@
+[Unit]
+Description=Aistock IC 滚动监测 — 每周五 19:30
+Requires=aistock-ic-monitor.service
+
+[Timer]
+OnCalendar=Fri 19:30:00
+Persistent=false
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

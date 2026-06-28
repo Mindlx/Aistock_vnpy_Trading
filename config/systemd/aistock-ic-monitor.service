@@ -1,0 +1,12 @@
+[Unit]
+Description=Aistock IC 滚动监测 — 每周自动测量RF/LGB IC
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Service]
+Type=oneshot
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/scripts/ic_monitor.sh
+User=bluekuma
+Group=bluekuma
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+StandardOutput=journal
+StandardError=journal
