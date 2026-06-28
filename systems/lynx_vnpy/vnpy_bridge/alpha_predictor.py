@@ -177,7 +177,14 @@ def alpha_predict(df: pd.DataFrame, code: str | None = None) -> float | None:
         factors = _compute_alpha_factors(pdf)
         factors = _normalize(factors)
 
-        last = factors.iloc[-1:].fillna(0)
+        last = factors.iloc[-1:]
+        # @calibration fillna(0)替换 — 记录NaN比例以便监控系统性偏差
+        nan_ratios = last.isna().mean()
+        nan_cols = nan_ratios[nan_ratios > 0]
+        if len(nan_cols) > 0:
+            col_msg = ", ".join(f"{c}={r:.0%}" for c, r in nan_cols.items())
+            logger.debug(f"alpha_predict({code}): fillna(0) 列数={len(nan_cols)}/58, {col_msg}")
+        last = last.fillna(0)
         if last.empty:
             return None
 

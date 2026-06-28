@@ -152,6 +152,16 @@ if need_update and SIGNAL_PY.exists():
     content = re.sub(r'_RF_IC_WEIGHT\s*=\s*[\d.]+', f'_RF_IC_WEIGHT = {w_rf_r}', content)
     SIGNAL_PY.write_text(content)
     print(f'✅ 权重已更新: LGB={w_lgb_r} RF={w_rf_r}')
+    # Commit to git for traceability
+    import subprocess
+    repo_dir = str(PROJECT)
+    subprocess.run(['git', 'add', 'systems/lynx_vnpy/lynx_signal.py'],
+                   cwd=repo_dir, capture_output=True)
+    subprocess.run(['git', 'commit', '-m',
+                    f'auto: IC权重更新 LGB={w_lgb_r} RF={w_rf_r}',
+                    '--no-verify'],
+                   cwd=repo_dir, capture_output=True)
+    print(f'   git commit: IC权重 LGB={w_lgb_r} RF={w_rf_r}')
 
 print(f'📊 报告: {REPORT}')
 print(f'   RF  IC={ic_rf:.4f} Acc={acc_rf:.1f}%')

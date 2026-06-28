@@ -2018,8 +2018,8 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             return
 
         # Infer direction from score (52/49 thresholds from normalizer)
-        score_bullish = score >= 52
-        score_bearish = score <= 49
+        score_bullish = score >= 52  # @calibration sentiment阈值
+        score_bearish = score <= 49  # @calibration sentiment阈值
 
         # Infer direction from advice text
         advice_bullish = any(kw in advice for kw in ["买入", "加仓", "买", "加", "Strong Buy", "Buy"])
