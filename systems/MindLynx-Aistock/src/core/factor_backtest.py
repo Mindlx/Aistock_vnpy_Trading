@@ -4,14 +4,19 @@ Evaluates factor composite scores against forward returns to establish
 a quantitative baseline that the LLM-based analysis should beat.
 
 Usage:
-    python -m src.core.factor_backtest  # runs against current DB data
+    python -m src.core.factor_backtest              # 20d window (default)
+    python -m src.core.factor_backtest --window 5   # 5d window
+    python -m src.core.factor_backtest --window 10  # 10d window
 """
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sqlite3
 from datetime import date, timedelta
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +50,7 @@ def evaluate_factor_signals(
         dict with accuracy stats per stock and overall.
     """
     from src.core.factor_engine import FactorEngine
+    from src.core.regime_factor_weights import get_regime_weights, _FALLBACK_REGIME
 
     conn = sqlite3.connect(db_path)
     codes = [r[0] for r in conn.execute("SELECT DISTINCT code FROM stock_daily ORDER BY code").fetchall()]
@@ -69,6 +75,14 @@ def evaluate_factor_signals(
         if len(data) >= 60 + eval_window:
             all_stocks_data[code] = data
 
+    # Prepare stock_data dict for time_series_normalize (close + volume arrays)
+    stock_data: dict[str, dict[str, np.ndarray]] = {}
+    for code, data in all_stocks_data.items():
+        stock_data[code] = {
+            "close": np.array([d["close"] for d in data], dtype=float),
+            "volume": np.array([d["volume"] for d in data], dtype=float),
+        }
+
     for code in codes:
         all_data = all_stocks_data.get(code)
         if not all_data:
@@ -80,22 +94,27 @@ def evaluate_factor_signals(
         for i in range(60, len(all_data) - eval_window, step_days):
             lookback = all_data[i - 60:i]
             forward = all_data[i + eval_window - 1]
+            lookback_idx_end = i  # use all data up to current point
 
             r = engine.compute_for_stock(code, lookback)
-            # Cross-sectionally normalize ALL stocks at this time point
+            # Time-series normalize this stock against its own historical distribution
+            # Collect results for all stocks at this time point
             all_at_time = [r]
             for other_code, other_data in all_stocks_data.items():
                 if other_code == code:
                     continue
-                if len(other_data) > i:
-                    o_lookback = other_data[i - 60:i]
+                if len(other_data) > lookback_idx_end:
+                    o_lookback = other_data[lookback_idx_end - 60:lookback_idx_end]
                     o_r = engine.compute_for_stock(other_code, o_lookback)
                     all_at_time.append(o_r)
+
             if len(all_at_time) >= 2:
-                engine.cross_sectional_normalize(all_at_time)
-            else:
-                r.z_scores = {fd.name: 0.0 for fd in engine.factors}
-                r.composite_score = sum(r.raw_factors.values()) / max(1, len(r.raw_factors))
+                engine.time_series_normalize(all_at_time, stock_data, lookback=120)
+
+            # Apply regime-conditional factor weights (use fallback regime)
+            regime_weights = get_regime_weights(_FALLBACK_REGIME)
+            if regime_weights:
+                engine.apply_regime_weights(regime_weights)
 
             start_price = float(lookback[-1]["close"])
             end_price = float(forward["close"])
@@ -140,11 +159,12 @@ def evaluate_factor_signals(
     return overall
 
 
-def print_factor_backtest_report(results: dict) -> None:
+def print_factor_backtest_report(results: dict, eval_window: int = 20) -> None:
     """Print a human-readable factor backtest report."""
     print("=" * 60)
     print("  因子-only 回测基准 (Factor Backtest Baseline)")
-    print(f"  评估窗口: 20 交易日  步长: 5 天")
+    print(f"  评估窗口: {eval_window} 交易日  步长: 5 天")
+    print(f"  归一化: time_series (每只股票自身上百天历史分布)")
     print("=" * 60)
 
     per_stock = results.get("per_stock", {})
@@ -171,8 +191,18 @@ def print_factor_backtest_report(results: dict) -> None:
 
 
 if __name__ == "__main__":
-    results = evaluate_factor_signals()
-    if "error" in results:
-        print(f"Error: {results['error']}")
-    else:
-        print_factor_backtest_report(results)
+    parser = argparse.ArgumentParser(description="Factor-only backtest")
+    parser.add_argument("--window", type=int, default=20, choices=[5, 10, 20],
+                        help="Evaluation window in trading days (default: 20)")
+    parser.add_argument("--all-windows", action="store_true",
+                        help="Run all windows (5d, 10d, 20d)")
+    args = parser.parse_args()
+
+    windows = [5, 10, 20] if args.all_windows else [args.window]
+    for w in windows:
+        results = evaluate_factor_signals(eval_window=w)
+        if "error" in results:
+            print(f"Error: {results['error']}")
+        else:
+            print_factor_backtest_report(results, eval_window=w)
+            print()
