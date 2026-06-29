@@ -1,0 +1,10 @@
+[Unit]
+Description=Aistock_vnpy_Trading — c1test 统一回测定时器（每日 20:00，融合回测完成后）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=Mon..Fri 20:00:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

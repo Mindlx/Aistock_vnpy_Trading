@@ -1,0 +1,18 @@
+[Unit]
+Description=Aistock_vnpy_Trading — c1test 统一回测（每日）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+Wants=network-online.target
+After=fusion.service
+Wants=fusion.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/c1test.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=300
+
+[Install]
+WantedBy=default.target
