@@ -98,7 +98,7 @@ class MindTradingAgentWrapper:
             # ── A 股精简: 关闭 Sentiment Analyst（雪球/股吧情绪已由 News + 注入覆盖）──
             self._ta = TradingAgentsGraph(
                 debug=self.debug, config=config,
-                selected_analysts=["market", "social", "news", "fundamentals"],
+                selected_analysts=["market", "social", "news", "fundamentals", "policy", "capital_flow"],
             )
             self._imported = True
             logger.info("mind_TradingAgent 已加载 (TradingAgentsGraph)")
@@ -213,11 +213,11 @@ class MindTradingAgentWrapper:
 
                 self._ta.propagator.create_initial_state = _injected_create
                 try:
-                    final_state, signal = self._ta.propagate(yf_ticker, trade_date)
+                    final_state, signal = self._ta.propagate(stock_code, trade_date)
                 finally:
                     self._ta.propagator.create_initial_state = orig_create
             else:
-                final_state, signal = self._ta.propagate(yf_ticker, trade_date)
+                final_state, signal = self._ta.propagate(stock_code, trade_date)
 
             rating = signal if isinstance(signal, str) else "Hold"
             final_decision = final_state.get("final_trade_decision", "")
@@ -648,7 +648,7 @@ class MindTradingAgentWrapper:
             df = cache.get_daily_ohlcv(stock_code, days=60)
             if df is not None and len(df) >= 10:
                 recent = df.tail(5)
-                lines = ["日期|开盘|最高|最低|收盘|成交量"]
+                lines = ["日期|开盘|最高|最低|收盘|成交量(股)"]
                 lines.append("---|---|---|---|---|---")
                 for _, r in recent.iterrows():
                     try:
@@ -762,7 +762,7 @@ class MindTradingAgentWrapper:
                         if pb is not None:
                             fund_parts.append(f"PB={pb}")
                         if mv is not None:
-                            fund_parts.append(f"市值={mv:.0f}亿" if mv > 1e8 else "")
+                            fund_parts.append(f"市值={mv/1e8:.0f}亿" if mv > 1e8 else "")
                         if fund_parts:
                             fund_md = "**基本面:** " + " | ".join(fund_parts)
                     except Exception:

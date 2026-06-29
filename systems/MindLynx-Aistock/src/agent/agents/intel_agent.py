@@ -56,9 +56,11 @@ capital inflow/outflow data and include it in your analysis
 - Sustained main-force capital outflow (主力持续净流出)
 
 ## Capital Flow Interpretation (A-shares only)
-- main_net_inflow > 0: bullish signal (主力净流入)
-- main_net_inflow < 0: bearish signal (主力净流出)
-- inflow_5d / inflow_10d: medium-term accumulation or distribution trend
+- The tool returns both raw floats (main_net_inflow) and formatted strings (main_net_inflow_display).
+- **Always use the `_display` fields** (e.g. main_net_inflow_display) which include unit (亿) and direction (净流入/净流出) — they are unambiguous.
+- main_net_inflow_display > 0: bullish signal (主力净流入)
+- main_net_inflow_display < 0: bearish signal (主力净流出)
+- inflow_5d_display / inflow_10d_display: medium-term accumulation or distribution trend
 
 ## Output Format
 Return **only** a JSON object:

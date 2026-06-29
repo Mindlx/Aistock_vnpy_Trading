@@ -262,6 +262,12 @@ def _handle_get_realtime_quote(stock_code: str) -> dict:
         "total_mv": quote.total_mv,
         "circ_mv": quote.circ_mv,
         "change_60d": quote.change_60d,
+        # Formatted display strings with units, preventing LLM
+        # from hallucinating magnitude of large numbers.
+        "amount_display": _fmt_yi(quote.amount),
+        "total_mv_display": _fmt_yi(quote.total_mv),
+        "circ_mv_display": _fmt_yi(quote.circ_mv),
+        "volume_display": _fmt_volume(quote.volume),
         "source": quote.source.value if hasattr(quote.source, "value") else str(quote.source),
     }
 
@@ -487,6 +493,10 @@ def _handle_get_stock_info(stock_code: str) -> dict:
         "pb_ratio": valuation.get("pb_ratio"),
         "total_mv": valuation.get("total_mv"),
         "circ_mv": valuation.get("circ_mv"),
+        # Formatted display strings preventing LLM from hallucinating
+        # magnitude of large market cap numbers.
+        "total_mv_display": _fmt_yi(valuation.get("total_mv")),
+        "circ_mv_display": _fmt_yi(valuation.get("circ_mv")),
         "fundamental_context": compact_context,
         "belong_boards": belong_boards,
         # Compatibility alias for existing callers; prefer belong_boards.
@@ -640,6 +650,31 @@ ALL_DATA_TOOLS = [
 # ============================================================
 
 
+def _fmt_yi(yuan: float | None) -> str:
+    """Format a yuan-denominated value to human-readable 亿 string with direction.
+
+    Returns e.g. '-0.39亿', '+2.07亿', or 'N/A'.
+    Handles sign for inflow/outflow context; pure magnitude display.
+    """
+    if yuan is None:
+        return "N/A"
+    yi = yuan / 100_000_000
+    return f"{yi:+.4f}亿"
+
+
+def _fmt_volume(shares: float | None) -> str:
+    """Format a volume-in-shares value to human-readable string (万股 or 亿股).
+
+    Returns e.g. '1,200.00万股', '5.23亿股', or 'N/A'.
+    """
+    if shares is None:
+        return "N/A"
+    if abs(shares) >= 100_000_000:
+        return f"{shares / 100_000_000:,.2f}亿股"
+    else:
+        return f"{shares / 10_000:,.2f}万股"
+
+
 def _handle_get_capital_flow(stock_code: str) -> dict:
     """Get main-force capital flow data for a stock."""
     manager = _get_fetcher_manager()
@@ -666,12 +701,22 @@ def _handle_get_capital_flow(stock_code: str) -> dict:
     sector_rankings = data.get("sector_rankings") or {}
     errors = ctx.get("errors") or []
 
+    main_raw = stock_flow.get("main_net_inflow")
+    inflow_5d_raw = stock_flow.get("inflow_5d")
+    inflow_10d_raw = stock_flow.get("inflow_10d")
+
     return {
         "stock_code": stock_code,
         "status": status,
-        "main_net_inflow": stock_flow.get("main_net_inflow"),
-        "inflow_5d": stock_flow.get("inflow_5d"),
-        "inflow_10d": stock_flow.get("inflow_10d"),
+        # Raw values (preserved for any downstream numeric consumers)
+        "main_net_inflow": main_raw,
+        "inflow_5d": inflow_5d_raw,
+        "inflow_10d": inflow_10d_raw,
+        # Formatted display strings with units, so the LLM cannot hallucinate
+        # magnitude or direction from a bare float like -39375202.0.
+        "main_net_inflow_display": _fmt_yi(main_raw),
+        "inflow_5d_display": _fmt_yi(inflow_5d_raw),
+        "inflow_10d_display": _fmt_yi(inflow_10d_raw),
         "sector_rankings": {
             "top_inflow_sectors": sector_rankings.get("top", [])[:3],
             "top_outflow_sectors": sector_rankings.get("bottom", [])[:3],

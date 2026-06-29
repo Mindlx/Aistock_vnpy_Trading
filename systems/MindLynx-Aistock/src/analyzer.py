@@ -2727,9 +2727,9 @@ class GeminiAnalyzer:
 | 指标 | 数值 | 说明 |
 |------|------|------|
 | 最近报告期 | {report_date} | 来自结构化财报字段 |
-| 营业收入 | {financial_report.get("revenue", "N/A")} | |
-| 归母净利润 | {financial_report.get("net_profit_parent", "N/A")} | |
-| 经营现金流 | {financial_report.get("operating_cash_flow", "N/A")} | |
+| 营业收入 | {self._format_amount(financial_report.get("revenue"))} | |
+| 归母净利润 | {self._format_amount(financial_report.get("net_profit_parent"))} | |
+| 经营现金流 | {self._format_amount(financial_report.get("operating_cash_flow"))} | |
 | ROE | {financial_report.get("roe", "N/A")} | |
 | 近12个月每股现金分红 | {ttm_cash} | 仅现金分红、税前口径 |
 | TTM 股息率 | {ttm_yield} | 公式：近12个月每股现金分红 / 当前价格 × 100% |
@@ -2770,9 +2770,9 @@ class GeminiAnalyzer:
 ### 主力资金流向（操作建议过滤器）
 | 指标 | 数值 | 决策含义 |
 |------|------|----------|
-| 主力净流入 | {stock_flow.get("main_net_inflow", "N/A")} | 正值偏支持，负值偏压制 |
-| 5日净流入 | {stock_flow.get("inflow_5d", "N/A")} | 用于判断资金持续性 |
-| 10日净流入 | {stock_flow.get("inflow_10d", "N/A")} | 用于判断资金持续性 |
+| 主力净流入 | {self._format_amount(stock_flow.get("main_net_inflow"))} | 正值偏支持，负值偏压制 |
+| 5日净流入 | {self._format_amount(stock_flow.get("inflow_5d"))} | 用于判断资金持续性 |
+| 10日净流入 | {self._format_amount(stock_flow.get("inflow_10d"))} | 用于判断资金持续性 |
 | 资金流入靠前板块 | {top_sector_text} | 板块资金共振参考 |
 | 资金流出靠前板块 | {bottom_sector_text} | 板块风险参考 |
 
@@ -3082,15 +3082,16 @@ class GeminiAnalyzer:
             return f"{volume:.0f} 股"
 
     def _format_amount(self, amount: float | None) -> str:
-        """格式化成交额显示"""
+        """格式化金额显示（支持正负值）"""
         if amount is None:
             return "N/A"
-        if amount >= 1e8:
+        abs_val = abs(amount)
+        if abs_val >= 1e8:
             return f"{amount / 1e8:.2f} 亿元"
-        elif amount >= 1e4:
+        elif abs_val >= 1e4:
             return f"{amount / 1e4:.2f} 万元"
         else:
-            return f"{amount:.0f} 元"
+            return f"{amount:.2f} 元"
 
     def _format_percent(self, value: float | None) -> str:
         """格式化百分比显示"""

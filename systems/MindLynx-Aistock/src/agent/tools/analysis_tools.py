@@ -12,6 +12,22 @@ from src.agent.tools.registry import ToolDefinition, ToolParameter
 logger = logging.getLogger(__name__)
 
 
+def _fmt_yi(yuan: float | None) -> str:
+    """Format yuan-denominated value to 亿 string (e.g. '+8.40亿', 'N/A')."""
+    if yuan is None:
+        return "N/A"
+    return f"{yuan / 100_000_000:+.4f}亿"
+
+
+def _fmt_volume(shares: float | None) -> str:
+    """Format volume-in-shares to 万股/亿股 (e.g. '1,200.00万股', '5.23亿股')."""
+    if shares is None:
+        return "N/A"
+    if abs(shares) >= 100_000_000:
+        return f"{shares / 100_000_000:,.2f}亿股"
+    return f"{shares / 10_000:,.2f}万股"
+
+
 def _fetch_trend_data(stock_code: str):
     """Fetch historical OHLCV (DataFrame) for trend analysis. DB first, then DataFetcher fallback."""
     from src.services.history_loader import load_history_df
@@ -278,6 +294,13 @@ def _handle_get_volume_analysis(stock_code: str, days: int = 30) -> dict:
         "high_volume_days": high_vol_days,
         "volume_price_corr": vp_corr,
         "pattern": pattern,
+        # Formatted display strings preventing LLM from hallucinating
+        # magnitude of large volume numbers.
+        "latest_volume_display": _fmt_volume(latest_vol),
+        "avg_volume_5d_display": _fmt_volume(avg_vol_5),
+        "avg_volume_20d_display": _fmt_volume(avg_vol_20),
+        "avg_up_day_volume_display": _fmt_volume(avg_up_vol),
+        "avg_down_day_volume_display": _fmt_volume(avg_down_vol),
     }
 
 
