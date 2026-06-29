@@ -100,10 +100,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "checkpoint_enabled": False,
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality
-    "output_language": "English",
+    "output_language": "Chinese",
     # Debate and discussion settings
-    "max_debate_rounds": 1,
-    "max_risk_discuss_rounds": 1,
+    "max_debate_rounds": 2,
+    "max_risk_discuss_rounds": 2,
     "max_recur_limit": 100,
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
@@ -114,11 +114,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Search queries used by get_global_news for macro headlines. Extend or
     # replace to broaden geographic / sector coverage.
     "global_news_queries": [
-        "Federal Reserve interest rates inflation",
-        "S&P 500 earnings GDP economic outlook",
-        "geopolitical risk trade war sanctions",
-        "ECB Bank of England BOJ central bank policy",
-        "oil commodities supply chain energy",
+        "中国人民银行 PBOC monetary policy LPR loan prime rate RRR reserve requirement ratio",
+        "中国 CPI PPI inflation 国家统计局 economic data PMI GDP",
+        "A股 沪深300 上证指数 CSI 300 SSE Composite market trend north-bound capital 北向资金",
+        "证监会 CSRC regulatory policy IPO reform delisting rules margin trading",
+        "全国两会 国务院 发改委 NDRC fiscal stimulus industry policy China macro",
     ],
     # Data vendor configuration
     # Category-level configuration (default for all tools in category).
@@ -126,12 +126,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # routed to vendors you didn't choose. For ordered fallback, list several,
     # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
-        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
-        "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
-        "prediction_markets": "polymarket",  # Options: polymarket (keyless)
+        "core_stock_apis": "warehouse",        # Options: warehouse, yfinance, alpha_vantage
+        "technical_indicators": "warehouse",   # Options: warehouse, yfinance, alpha_vantage
+        "fundamental_data": "warehouse",       # Options: warehouse, yfinance, alpha_vantage
+        "news_data": "warehouse",              # Options: warehouse, yfinance, alpha_vantage
+        "macro_data": "warehouse",             # Options: warehouse, fred (needs FRED_API_KEY)
+        "prediction_markets": "warehouse",     # Options: warehouse, polymarket (keyless)
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

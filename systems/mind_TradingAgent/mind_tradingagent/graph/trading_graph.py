@@ -234,21 +234,51 @@ class TradingAgentsGraph:
     ) -> tuple[float | None, float | None, int | None]:
         """Fetch raw and alpha return for ticker over holding_days from trade_date.
 
+        Uses WarehouseReader for A-share stocks (bare 6-digit code),
+        falls back to yfinance for non-A-share symbols.
+
         ``benchmark`` is the index used as the alpha baseline (resolved by the
         caller via ``_resolve_benchmark``). Returns ``(raw_return, alpha_return,
         actual_holding_days)`` or ``(None, None, None)`` if price data is
         unavailable (too recent, delisted, or network error).
         """
-        from mind_tradingagent.dataflows.symbol_utils import normalize_symbol
-
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
-            end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
+            end = start + timedelta(days=holding_days + 7)
             end_str = end.strftime("%Y-%m-%d")
 
-            # Normalize so the realized-return lookup hits the same instrument
-            # the analysis priced (e.g. XAUUSD -> GC=F) (#984). The benchmark is
-            # already a canonical Yahoo symbol from ``_resolve_benchmark``.
+            bare = ticker.replace(".SS", "").replace(".SZ", "").replace(".SH", "").strip()
+
+            # A-share: use WarehouseReader
+            if len(bare) == 6 and bare.isdigit():
+                from services.data_warehouse import WarehouseReader
+                reader = WarehouseReader()
+                stock_df = reader.get_daily_df(bare, start=trade_date, end=end_str)
+                if stock_df.empty:
+                    return None, None, None
+                stock_close = stock_df["close"].values
+                stock_close_start = stock_close[0]
+                stock_close_end = stock_close[min(holding_days, len(stock_close) - 1)]
+                raw = float((stock_close_end - stock_close_start) / stock_close_start)
+
+                # Benchmark is a yfinance-compatible ticker (e.g. 000001.SS)
+                try:
+                    import yfinance as yf
+                    bench_ticker = yf.Ticker(benchmark)
+                    bench_data = bench_ticker.history(start=trade_date, end=end_str)
+                    if len(bench_data) >= 2:
+                        bench_days = min(holding_days, len(bench_data) - 1)
+                        bench_close = bench_data["Close"].values
+                        bench_ret = float((bench_close[bench_days] - bench_close[0]) / bench_close[0])
+                        alpha = raw - bench_ret
+                        return raw, alpha, holding_days
+                    return raw, None, holding_days
+                except Exception:
+                    return raw, None, holding_days
+
+            # Non-A-share: keep original yfinance logic
+            from mind_tradingagent.dataflows.symbol_utils import normalize_symbol
+            import yfinance as yf
             stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
             bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
 

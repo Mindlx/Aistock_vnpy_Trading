@@ -1,15 +1,13 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from mind_tradingagent.agents.utils.agent_utils import (
     build_instrument_context,
-    get_global_news,
+    get_capital_flows,
     get_language_instruction,
-    get_news,
 )
-from mind_tradingagent.dataflows.config import get_config
 
 
-def create_news_analyst(llm):
-    def news_analyst_node(state):
+def create_capital_flow_tracker(llm):
+    def capital_flow_node(state):
         current_date = state["trade_date"]
         asset_type = state.get("asset_type", "stock")
         asset_label = "company" if asset_type == "stock" else "asset"
@@ -17,14 +15,22 @@ def create_news_analyst(llm):
             state["company_of_interest"], asset_type
         )
 
-        tools = [
-            get_news,
-            get_global_news,
-        ]
+        tools = [get_capital_flows]
 
         system_message = (
-            f"You are a news researcher tasked with analyzing recent news and trends over the past week for Chinese A-share stocks. Focus specifically on A-share market news: (1) regulatory changes from CSRC (证监会 / China Securities Regulatory Commission) — policy shifts, IPO pace, margin trading rules, delisting reforms; (2) industry policy from NDRC (发改委 / National Development and Reform Commission) and MIIT (工信部) — sector subsidies, capacity controls, tech policy; (3) company announcements disclosed via 上交所 (Shanghai Stock Exchange) and 深交所 (Shenzhen Stock Exchange) — earnings pre-announcements, major asset restructurings, share buybacks, rights issues; (4) important macro data released by 国家统计局 (National Bureau of Statistics) — CPI, PMI (official NBS and Caixin), GDP, industrial profits, fixed-asset investment, retail sales. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+            f"You are a capital flow analyst specializing in Chinese A-share market money flow. "
+            f"Your task is to analyze capital flow data for the {asset_label} {state['company_of_interest']}. "
+            f"Use get_capital_flows(ticker, days) to retrieve actual capital flow data. "
+            f"Focus on: (1) Main force net inflow/outflow trends over the past 5-10 trading days, "
+            f"(2) Distribution between super-large/large/medium/small order flows to gauge "
+            f"institutional vs retail participation, "
+            f"(3) Whether the multi-day trend is accumulating (consistent inflows) or distributing "
+            f"(consistent outflows), "
+            f"(4) Note any unusually large single-day flows (>2x the average daily absolute flow). "
+            f"Provide specific data-backed insights about where the smart money is moving. "
+            f"Note: A-share T+1 settlement means day-trading is not possible for most retail investors, "
+            f"so capital flow trends over multiple days are more meaningful than intraday flows."
+            + """ Make sure to append a Markdown table at the end of the report to organize key capital flow indicators."""
             + get_language_instruction()
         )
 
@@ -60,7 +66,7 @@ def create_news_analyst(llm):
 
         return {
             "messages": [result],
-            "news_report": report,
+            "capital_flow_report": report,
         }
 
-    return news_analyst_node
+    return capital_flow_node

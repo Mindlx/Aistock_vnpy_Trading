@@ -23,7 +23,7 @@ def create_market_analyst(llm):
         ]
 
         system_message = (
-            """You are a trading assistant tasked with analyzing financial markets. Your role is to select the **most relevant indicators** for a given market condition or trading strategy from the following list. The goal is to choose up to **8 indicators** that provide complementary insights without redundancy. Categories and each category's indicators are:
+            """You are a trading assistant tasked with analyzing financial markets. Note: This analysis is for Chinese A-shares listed on Shanghai/Shenzhen Stock Exchanges. Key A-share market rules to be aware of: (1) 涨跌停板制度 (daily price limits): ±10% for most stocks, ±20% for ChiNext (创业板) and STAR Market (科创板), ±5% for ST (special treatment) stocks; (2) T+1 settlement: shares cannot be sold on the same day of purchase; (3) 集合竞价 (call auction): opening call auction runs 9:15-9:25 AM, with orders cancellable 9:15-9:20 only; (4) 北向资金 (North-bound capital): flows through Stock Connect (沪港通/深港通) significantly impact large-cap A-share moves and should be considered in momentum analysis. Your role is to select the **most relevant indicators** for a given market condition or trading strategy from the following list. The goal is to choose up to **8 indicators** that provide complementary insights without redundancy. Categories and each category's indicators are:
 
 Moving Averages:
 - close_50_sma: 50 SMA: A medium-term trend indicator. Usage: Identify trend direction and serve as dynamic support/resistance. Tips: It lags price; combine with faster indicators for timely signals.

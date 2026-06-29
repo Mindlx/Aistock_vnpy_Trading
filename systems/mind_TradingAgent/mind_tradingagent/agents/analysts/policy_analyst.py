@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from mind_tradingagent.agents.utils.agent_utils import (
     build_instrument_context,
+    get_fundamentals,
     get_global_news,
     get_language_instruction,
     get_news,
@@ -8,8 +9,8 @@ from mind_tradingagent.agents.utils.agent_utils import (
 from mind_tradingagent.dataflows.config import get_config
 
 
-def create_news_analyst(llm):
-    def news_analyst_node(state):
+def create_policy_analyst(llm):
+    def policy_analyst_node(state):
         current_date = state["trade_date"]
         asset_type = state.get("asset_type", "stock")
         asset_label = "company" if asset_type == "stock" else "asset"
@@ -20,11 +21,23 @@ def create_news_analyst(llm):
         tools = [
             get_news,
             get_global_news,
+            get_fundamentals,
         ]
 
         system_message = (
-            f"You are a news researcher tasked with analyzing recent news and trends over the past week for Chinese A-share stocks. Focus specifically on A-share market news: (1) regulatory changes from CSRC (证监会 / China Securities Regulatory Commission) — policy shifts, IPO pace, margin trading rules, delisting reforms; (2) industry policy from NDRC (发改委 / National Development and Reform Commission) and MIIT (工信部) — sector subsidies, capacity controls, tech policy; (3) company announcements disclosed via 上交所 (Shanghai Stock Exchange) and 深交所 (Shenzhen Stock Exchange) — earnings pre-announcements, major asset restructurings, share buybacks, rights issues; (4) important macro data released by 国家统计局 (National Bureau of Statistics) — CPI, PMI (official NBS and Caixin), GDP, industrial profits, fixed-asset investment, retail sales. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+            f"You are a policy analyst specializing in China A-share regulatory and industrial policy analysis. "
+            f"Your task is to analyze how recent policy changes, regulatory announcements, and government directives "
+            f"affect the investment outlook for the {asset_label} {state['company_of_interest']}. "
+            f"Use the available tools: get_news(ticker, start_date, end_date) for {asset_label}-specific policy news, "
+            f"get_global_news(curr_date, look_back_days, limit) for broader macro-policy changes, "
+            f"and get_fundamentals(ticker, curr_date) to check the company's industry classification and market cap. "
+            f"Focus on: (1) Recent CSRC (证监会) regulatory changes affecting the company's industry, "
+            f"(2) National industrial policy (国家产业政策) directives (e.g. '新质生产力', '碳中和', '数字经济'), "
+            f"(3) Tax/incentive policy changes, (4) Trade policy and export control impacts, "
+            f"(5) State Council (国务院) and NDRC (发改委) policy signals. "
+            f"Note: A-share market is heavily policy-driven — government directives can create sector-wide "
+            f"rallies or selloffs within days. Policy analysis is HIGH PRIORITY for A-share investing."
+            + """ Make sure to append a Markdown table at the end of the report to organize key policy indicators and their market implications."""
             + get_language_instruction()
         )
 
@@ -60,7 +73,7 @@ def create_news_analyst(llm):
 
         return {
             "messages": [result],
-            "news_report": report,
+            "policy_report": report,
         }
 
-    return news_analyst_node
+    return policy_analyst_node

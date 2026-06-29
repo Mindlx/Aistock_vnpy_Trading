@@ -50,6 +50,20 @@ ANALYST_NODE_SPECS: dict[str, AnalystNodeSpec] = {
         tool_node="tools_fundamentals",
         report_key="fundamentals_report",
     ),
+    "policy": AnalystNodeSpec(
+        key="policy",
+        agent_node="Policy Analyst",
+        clear_node="Msg Clear Policy",
+        tool_node="tools_policy",
+        report_key="policy_report",
+    ),
+    "capital_flow": AnalystNodeSpec(
+        key="capital_flow",
+        agent_node="Capital Flow Tracker",
+        clear_node="Msg Clear Capital Flow",
+        tool_node="tools_capital_flow",
+        report_key="capital_flow_report",
+    ),
 }
 
 

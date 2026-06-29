@@ -29,6 +29,20 @@ from .y_finance import (
     get_YFin_data_online,
 )
 from .yfinance_news import get_global_news_yfinance, get_news_yfinance
+from .warehouse import (
+    get_stock_data as get_warehouse_stock_data,
+    get_indicators as get_warehouse_indicators,
+    get_fundamentals as get_warehouse_fundamentals,
+    get_balance_sheet as get_warehouse_balance_sheet,
+    get_cashflow as get_warehouse_cashflow,
+    get_income_statement as get_warehouse_income_statement,
+    get_news as get_warehouse_news,
+    get_global_news as get_warehouse_global_news,
+    get_insider_transactions as get_warehouse_insider_transactions,
+    get_capital_flows as get_warehouse_capital_flows,
+    get_macro_indicators as get_warehouse_macro_indicators,
+    get_prediction_markets as get_warehouse_prediction_markets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +70,12 @@ TOOLS_CATEGORIES = {
         ]
     },
     "news_data": {
-        "description": "News and insider data",
+        "description": "News, insider, and capital flow data",
         "tools": [
             "get_news",
             "get_global_news",
             "get_insider_transactions",
+            "get_capital_flows",
         ]
     },
     "macro_data": {
@@ -82,6 +97,7 @@ VENDOR_LIST = [
     "fred",
     "polymarket",
     "alpha_vantage",
+    "warehouse",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -97,49 +113,63 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "warehouse": get_warehouse_stock_data,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "warehouse": get_warehouse_indicators,
     },
     # fundamental_data
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
+        "warehouse": get_warehouse_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
+        "warehouse": get_warehouse_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
+        "warehouse": get_warehouse_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
+        "warehouse": get_warehouse_income_statement,
     },
     # news_data
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
+        "warehouse": get_warehouse_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
+        "warehouse": get_warehouse_global_news,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
+        "warehouse": get_warehouse_insider_transactions,
+    },
+    "get_capital_flows": {
+        "warehouse": get_warehouse_capital_flows,
     },
     # macro_data
     "get_macro_indicators": {
         "fred": get_fred_macro_data,
+        "warehouse": get_warehouse_macro_indicators,
     },
     # prediction_markets
     "get_prediction_markets": {
         "polymarket": get_polymarket_prediction_markets,
+        "warehouse": get_warehouse_prediction_markets,
     },
 }
 
