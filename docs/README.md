@@ -59,8 +59,9 @@ docs/
 ├── subsystems/                # 子系统独立文档
 │   └── ml/backtest.md         # ML 子系统回测
 │
-├── testing/                   # 回测验证
-│   └── backtest.md            # 融合系统回测
+├── testing/                   # 回测验证（3篇）
+│   ├── backtest.md             # 融合系统回测 + 🆕 c1test 统一回测
+│   └── backtest-inventory.md   # 🆕 回测资产全清单
 │
 ├── eastmoney/                  # 🆕 东方财富数据（4篇）
 │   ├── README.md              # 全景总览

@@ -100,9 +100,13 @@ ml_cases = [
     (80, "看多", 52, 49),       # ≥80 → +1.5 (S2 bull, capped for low accuracy)
     (60, "谨慎看多", 52, 49),   # 60-79 → +1.0 (S3, dampened 38.2% acc)
     (55, "中性", 52, 49),       # 52-59 → +0.8 (S4+, 56.2% acc, below S3 threshold)
+    (52, "中性", 52, 49),       # boundary: threshold_bull 精确值 → +0.8
     (50, "中性", 52, 49),       # flat zone → 0.0
+    (49, "谨慎看空", 52, 49),   # boundary: threshold_bear 精确值 → -1.5
     (45, "谨慎看空", 52, 49),   # 41-48 → -1.5 (S5, preserved)
+    (40, "看空", 52, 49),       # boundary: 31-40 上界 → -2.0
     (30, "看空", 52, 49),       # 20-30 → -2.5 (S6/S7 boundary, 89.0% acc)
+    (19, "强烈看空", 52, 49),   # boundary: ≤19 上界 → -3.0
     (10, "强烈看空", 52, 49),   # ≤19 → -3.0 (S7, 100.0% acc)
 ]
 for score, desc, tb, tbr in ml_cases:

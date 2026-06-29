@@ -104,6 +104,8 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 | diagnose-agreement | oneshot | - | ✅ timer 20:30 | LY+ML同向诊断数据积累 |
 | eastmoney-rating | oneshot | - | ✅ timer 09:53/13:53 | 东方财富数据获取+存档 |
 | retrain-lgb | oneshot | - | ✅ timer 15:20 | LGB+RF模型自动重训(≥7天触发) |
+| c1test-daily | oneshot | - | ✅ timer 20:00 | 🆕 统一回测快速模式 |
+| c1test-weekly | oneshot | - | ✅ timer 周日10:30 | 🆕 统一回测全面模式 |
 
 **常驻内存合计**: ~245+95+32 = **372MB**（0.6% of 62GB 总内存）
 
@@ -419,6 +421,30 @@ ly的58因子提供体系化覆盖(K线形态/多窗口统计/分位数等)。
 **文件**: `src/normalizer.py:260-284` (替换), `docs/decisions/accuracy-calibrated-mapping.md` (新建)。
 
 **验证**: 68/68 测试通过，0 回归，风险 LOW。
+
+### 2026-06-29 — c1test 统一回测系统 (里程碑)
+
+**问题**: 三套独立回测系统（融合/ML/LY）使用不同 DB、入口、指标、报告格式，无法一站对比。AT 无独立回测。ML 独立回测只测 operation_advice（22%），严重低估 ML。
+
+**方案**:
+```
+c1test.py (编排器, ~340行)
+├── Phase 1: 融合回测 (子进程 backtest.py + 直查 bt_results.db)
+├── Phase 2: LY 独立回测 (子进程 lynx_signal.py --backtest)
+├── Phase 3: ML 独立回测 (直查 stock_analysis.db 双路径)
+├── Phase 4: AT 独立回测 (TA JSON 日志 + stock_daily T+1 匹配)  🆕
+├── 变化检测: 对比 last_run.json → 红黄绿告警
+└── 统一报告: unified_report.json + .md + last_run.json
+```
+
+**盲区修复**:
+- AT 独立回测: ❌ → ✅ 54.8% (34/62)
+- ML sentiment 方向准确率: ❌ 融合间接看 → ✅ 直查 **67.7%**
+- 统一回测入口: ❌ 3 套不同命令 → ✅ `c1test.py`
+- 变化检测: ❌ 人工对比 → ✅ 自动红黄绿告警
+
+**文件**: `scripts/c1test.py`, `.claude/skills/c1test/SKILL.md`, 4 systemd 文件
+**定时器**: `c1test-daily.timer` (20:00), `c1test-weekly.timer` (周日10:30)
 
 ### ✅ 已完成 — AT价值评估 (2026-06-24)
 

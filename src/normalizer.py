@@ -268,7 +268,7 @@ class SignalNormalizer:
         20-30: 89.0% acc → -2.5 (S6/S7 boundary)
         31-40: 92.8% acc → -2.0 (S6 bearish)
         41-48: 92.8% acc → -1.5 (S5 cautious_bearish, preserved)
-        49-51:  0.0% acc →  0.0 (S4 neutral)
+        50-51:  0.0% acc →  0.0 (S4 neutral)
         52-59: 56.2% acc → +0.8 (S4+, barely bullish, conservative)
         60-79: 38.2% acc → +1.0 (S3 cautious_bullish, dampened)
         ≥80:   (extrap)   → +1.5 (S2-, extrapolated)

@@ -261,11 +261,76 @@ ML 的 Agent 系统自动使用回测数据做技能加权：
 
 ---
 
-## 六、使用场景
+## 六、c1test 统一回测系统 (2026-06-29)
+
+> 从零到一的里程碑：解决三套独立回测系统各自为政、AT 无独立回测、ML sentiment 不可见三大问题。
+
+### 6.1 架构
+
+```
+c1test.py (编排器, ~340行)
+├── Phase 1: 融合回测 (子进程 backtest.py + 直查 bt_results.db)
+├── Phase 2: LY 独立回测 (子进程 lynx_signal.py --backtest)
+├── Phase 3: ML 独立回测 (直查 stock_analysis.db)
+│   ├── backtest_summaries → operation_advice 方向准确率
+│   └── analysis_history + stock_daily JOIN → sentiment_score 方向准确率 ✅
+├── Phase 4: AT 独立回测 (TA JSON 日志 + stock_daily T+1 匹配) ✅ 盲区填补
+├── 变化检测: 对比 last_run.json → 红黄绿告警
+└── 统一报告: unified_report.json + .md + last_run.json
+```
+
+### 6.2 入口
+
+```bash
+# 快速模式（日常）：融合回测 + 缓存子系统数据
+.venv/bin/python scripts/c1test.py
+
+# 全面模式（每周/变更后）：融合 + LY + ML + AT 全量
+.venv/bin/python scripts/c1test.py --full
+
+# 只看上次报告，不重跑
+.venv/bin/python scripts/c1test.py --report
+```
+
+### 6.3 盲区填补对比
+
+| 盲区 | 之前 | 之后 |
+|------|------|------|
+| AT 独立回测 | ❌ 不存在 | ✅ 54.8% (34/62) |
+| ML sentiment 方向准确率 | ❌ 只从融合间接看(62.3%) | ✅ 直查 **67.7%** |
+| 统一回测入口 | ❌ 3 套系统不同命令 | ✅ `c1test.py` 一个命令 |
+| 变化检测 | ❌ 每次人工比数字 | ✅ 自动红黄绿告警 |
+| LY 格式健壮性 | ⚠️ 无保护 | ✅ 格式守卫+原始输出回退 |
+
+### 6.4 自动执行
+
+| 定时器 | 时间 | 命令 |
+|--------|------|------|
+| `c1test-daily.timer` | 工作日 20:00 | `c1test --quick` |
+| `c1test-weekly.timer` | 周日 10:30 | `c1test --full` |
+
+### 6.5 输出解读
+
+| 指标 | 健康区间 | 说明 |
+|------|---------|------|
+| 融合准确率 | >55% | 三系统融合方向判定 |
+| ML sentiment | >55% | LLM 评分方向准确率 (真实指标) |
+| LY OOS | >50% | RF 模型 out-of-sample |
+| AT 准确率 | >45% | 多智能体辩论方向 (参考值) |
+
+**告警阈值**：
+- 🔴 下降 ≥5% → regression
+- 🟡 下降 2-5% 或 ML 语义差距 >30% → warning
+- 🟢 提升 ≥3% → improvement
+
+---
+
+## 七、使用场景
 
 | 场景 | 命令 | 说明 |
 |------|------|------|
-| **每日检查融合准确率** | `scripts/backtest.py report` | 快速查看当日 + 累计准确率 |
+| **一键全系统回测** | `scripts/c1test.py --full` | 🆕 统一入口，推荐默认 |
+| **每日快速检查** | `scripts/c1test.py` | 🆕 融合回测+缓存数据 |
 | **评估模型是否退化** | `lynx_signal.py --backtest` | 每周日自动运行，也可手动触发对比历史变化 |
 | **分析 LLM 建议质量** | `main.py --backtest --backtest-report` | 看 ML 独立报告 (Sharpe/回撤/NAV) |
 | **对比 LLM vs 因子** | `python -m src.core.factor_backtest` | LLM 是否比纯因子组合更优 |
@@ -273,12 +338,13 @@ ML 的 Agent 系统自动使用回测数据做技能加权：
 
 ---
 
-## 七、待改进
+## 八、待改进
 
 | 项目 | 优先级 | 说明 |
 |------|--------|------|
 | ly walk-forward 验证 | ✅ 已完成 | 当前为 expanding window walk-forward（每20天重训练）|
+| AT 独立回测 | ✅ 已完成 | c1test Phase 4，TA JSON 日志 + stock_daily JOIN |
+| ML sentiment 方向准确率 | ✅ 已完成 | c1test Phase 3，analysis_history + stock_daily JOIN |
 | 模拟交易回测 | 🟡 中 | 当前只有方向准确率，缺 portfolio 模拟（仓位/止损/资金管理） |
-| at 独立回测 | 🟢 低 | TradingAgent 无独立回测系统，仅在融合层面评估 |
 | 更多历史数据 | 🟢 低 | 每日自动积累，1-2 月后 ML 20d 窗口才够用 |
 | 贝叶斯 vs 线性模式对比 | 🟢 低 | 融合 JSON 中已有 dual 模式数据，但回测只用了 linear |
