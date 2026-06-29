@@ -68,7 +68,17 @@ docs/
 │   ├── data-ecosystem.md      # 14字段+3信号维度
 │   └── research-log.md        # 研究发现日志
 │
-├── decisions/                 # 活跃架构决策（8篇）
+├── decisions/                 # 活跃架构决策（10篇）
+│   ├── l7-mapping.md            # L7 映射对齐 (Oracle+c1skill)
+│   ├── semantic-alignment.md    # 三系统语义对齐原设计
+│   ├── accuracy-calibrated-mapping.md # 🆕 ml精度校准映射 v4.0
+│   ├── ly-ml-agreement-boost.md # ly+ml同向增益
+│   ├── at-optimization.md       # AT 优化
+│   ├── full-system-audit.md     # 全系统审计
+│   ├── weight-c1skill-review.md # 权重 c1skill 审阅
+│   ├── weight-strategy.md       # 权重策略
+│   ├── realtime-fusion.md       # 准实时融合
+│   └── mapping-optimization.md  # 映射优化分析
 │
 └── research/                  # 历史研究存档（23篇）
     ├── archive/

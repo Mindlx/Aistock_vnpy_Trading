@@ -133,3 +133,7 @@ S7_STRONG_SELL = -0.80  # ly: prob_up<25%,   ml: —,           at: Sell
 | P1 | 将"减仓"从 -0.45 升至 -0.30 | 与 ly"谨慎"对齐 |
 | P2 | 将"Underweight"从 -0.45 升至 -0.30 | 与"减仓"一致 |
 | P3 | 将 prob_up 阈值从 65/55/45/35 改为 75/65/55/45/35/25 | 释放 ly 的完整 7 级潜力 |
+
+> **后续演进 (2026-06-29)**: ml 的 `normalize_mindlynx_score` 已从语义对齐升级为精度校准映射（v4.0）。
+> 详见 `docs/decisions/accuracy-calibrated-mapping.md`。此文档的设计框架仍然正确（L7 空间、三系统参考系差异），
+> 但 ml 的映射方法论已从"语义对齐"升级为"精度校准"。

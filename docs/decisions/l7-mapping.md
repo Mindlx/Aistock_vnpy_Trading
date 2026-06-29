@@ -163,4 +163,5 @@ self.probability_k = rel_config.get("probability_k", 2.5)  # 仍默认 2.5
 - `docs/research/semantic-alignment-analysis.md` — 原语义对齐设计文档
 - `docs/research/mapping-optimization-analysis.md` — 映射优化分析
 - `docs/research/mapping-c1skill-review.md` — 首轮 c1skill 审阅
+- `docs/decisions/accuracy-calibrated-mapping.md` — 2026-06-29: ml 精度校准映射升级 (v4.0)
 - Oracle session: `ses_17ca9b37affeWbkc3Rtse5Fz94`

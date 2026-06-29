@@ -1,0 +1,21 @@
+{
+  "trace_id": "2026-06-29_003",
+  "session_id": "current_c1skill",
+  "timestamp": "2026-06-29T09:56:26.604029",
+  "requirement": {
+    "source": "direct_instruction",
+    "description": "三系统融合L7映射缺口论证 — ml的sentiment_score是否应从语义对称对齐升级为精度校准映射"
+  },
+  "oracle_analysis": {
+    "root_cause": "原始L7设计基于语义对齐(每个系统占自己自然级数)，未考虑600样本回测揭示的严重精度不对称(看空89-100% vs 看多38-56%)",
+    "initial_recommendation": "方案B(5值映射)和方案B⁺(精度校准7值非对称映射)，后者吸收了反方论据对牛市参数做保守调整"
+  },
+  "c1skill_validation": {
+    "stage_4_counter_arguments": "6个反方论据中最强为: (5)不对称是市场特征非偏差(Kahneman TFS) (6)52-59区间76样本不足(Montier)。均已在参数中吸收——52-59→+0.8非+1.0",
+    "stage_7_final_conclusion": "方案B⁺(非对称精度校准映射)获得跨学科高共识，4/5问题高共识0分歧。增强非违背。Phase 1零风险，~3h"
+  },
+  "final_outcome": {
+    "patch_summary": "docs/decisions/accuracy-calibrated-mapping.md创建 + normalizer.py 15行改动",
+    "commit_hash": "600969c64"
+  }
+}
