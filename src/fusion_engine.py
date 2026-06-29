@@ -115,44 +115,55 @@ class FusionEngine:
     def _detect_disagreement(
         lynx_score: float, mindlynx_score: float, tradingagent_score: float,
         lynx_valid: bool, mindlynx_valid: bool, tradingagent_valid: bool,
-    ) -> Tuple[bool, float]:
+    ) -> Tuple[bool, float, int]:
         """
         检测系统间分歧。
 
-        Oracle 建议: 线性融合将方向相反的强信号"归零"为中性，这是危险的。
-        当至少一个系统看多 且 至少一个系统看空时，标记为分歧。
+        Oracle v1: 线性融合将方向相反的强信号"归零"为中性，这是危险的。
+        Oracle v2 (2026-06-29, c1test分歧模式分析):
+          分歧是 ML 信号强度的隐式过滤器。分歧时 ML 准确率从 37.9%→51.0%。
+          返回 ml_minority 标记，供调用方在分歧时提升 ML 权重。
 
         返回:
-            (有分歧, 分歧分数)
-            分歧分数 = 各方向信号的标准差（仅有效系统），用于量化分歧程度
+            (有分歧, 分歧分数, ml_minority)
+            分歧分数 = 各方向信号的标准差
+            ml_minority: 1=ML是分歧中的少数方, 0=ML不是, -1=不足2个系统
         """
         scores = []
         if lynx_valid:
-            scores.append(lynx_score)
+            scores.append(("lynx", lynx_score))
         if mindlynx_valid:
-            scores.append(mindlynx_score)
+            scores.append(("mindlynx", mindlynx_score))
         if tradingagent_valid:
-            scores.append(tradingagent_score)
+            scores.append(("tradingagent", tradingagent_score))
 
         if len(scores) < 2:
-            return False, 0.0
+            return False, 0.0, -1
 
-        # 判断方向: 正=看多, 负=看空, 0=中性
-        # v3.0: 阈值从 0.1 升至 0.5（适配 [-3,+3] 宽范围）
-        has_bullish = any(s > 0.5 for s in scores)
-        has_bearish = any(s < -0.5 for s in scores)
-
+        # 判断方向: 正=看多 (>0.5), 负=看空 (<-0.5), 0=中性
+        has_bullish = any(s > 0.5 for _, s in scores)
+        has_bearish = any(s < -0.5 for _, s in scores)
         disagreement = has_bullish and has_bearish
 
-        # 分歧量化: 分数间的标准差
-        if disagreement and len(scores) > 1:
-            mean = sum(scores) / len(scores)
-            variance = sum((s - mean) ** 2 for s in scores) / len(scores)
+        # 分歧量化: 分数标准差
+        disagreement_score = 0.0
+        ml_minority = 0
+        if disagreement:
+            raw = [s for _, s in scores]
+            mean = sum(raw) / len(raw)
+            variance = sum((s - mean) ** 2 for s in raw) / len(raw)
             disagreement_score = math.sqrt(variance)
-        else:
-            disagreement_score = 0.0
 
-        return disagreement, disagreement_score
+            # ML 是否为少数方？(与多数方向不同)
+            ml_s = next(s for name, s in scores if name == "mindlynx")
+            others = [s for name, s in scores if name != "mindlynx"]
+            majority_dir = sum(1 for s in others if s > 0.5) - sum(1 for s in others if s < -0.5)
+            if abs(majority_dir) >= len(others):  # 其他系统方向一致
+                ml_dir = 1 if ml_s > 0.5 else (-1 if ml_s < -0.5 else 0)
+                if ml_dir != 0 and ml_dir != (1 if majority_dir > 0 else -1):
+                    ml_minority = 1  # ML 是少数方，分歧时可信度更高
+
+        return disagreement, disagreement_score, ml_minority
 
     @staticmethod
     def _compute_uncertainty_penalty(disagreement_score: float) -> float:
@@ -551,11 +562,19 @@ class FusionEngine:
             )
 
         # ── Step 2: 分歧检测 + 不确定性惩罚 (Oracle 建议 1) ──
-        has_disagreement, disagreement_score = self._detect_disagreement(
+        has_disagreement, disagreement_score, ml_minority = self._detect_disagreement(
             lynx_normalized, mindlynx_normalized, tradingagent_normalized,
             lynx_valid, mindlynx_valid, tradingagent_valid,
         )
         uncertainty_penalty = self._compute_uncertainty_penalty(disagreement_score)
+
+        # ⚡ 分歧时 ML 少数方信号增强 (c1skill 分歧模式分析 2026-06-29)
+        # 分析显示: 分歧时 ML 准确率从 37.9%→51.0%, ML 是分歧中最可信的参与方
+        # 当 ML 与多数方向不同时, 小幅提升融合得分以反映 ML 的实际价值
+        ml_minority_boost = 0.0
+        if has_disagreement and ml_minority == 1:
+            # 按分歧程度比例提升, 最大 +0.3 L7 (≈半步的谨慎看多方向)
+            ml_minority_boost = min(0.3, disagreement_score * 0.15)
 
         # ── Step 3: 处理缺失系统 + 权重重分配 (Oracle 建议 2) ──
         adjusted_weights, valid_count, is_degraded = self._compute_adjusted_weights(
@@ -600,6 +619,17 @@ class FusionEngine:
         # 分歧处理：不施加分数惩罚(避免退化输出)，改为置信度标记
         # Oracle验证:分歧时加权平均已产生正确方向，惩罚反而是噪声
         disagreement_capped = has_disagreement and disagreement_score > 0.5
+
+        # ML 少数方分歧增强 (c1skill 2026-06-29 分歧模式分析)
+        # 分歧时 ML 准确率 51.0%(无分歧仅37.9%), 分歧是 ML 信号强度过滤器
+        if ml_minority_boost > 0:
+            self.logger.info(
+                f"[{stock_code}] 分歧时ML少数方增强: +{ml_minority_boost:.2f} "
+                f"(分歧分数={disagreement_score:.2f})"
+            )
+            fusion_score += ml_minority_boost
+            # 钳位边界
+            fusion_score = max(-3.0, min(3.0, fusion_score))
 
         # ── Step 5: 映射到最终决策 ──
         final = self._get_final_decision(fusion_score, has_disagreement)
