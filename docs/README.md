@@ -69,6 +69,9 @@ docs/
 │   ├── data-ecosystem.md      # 14字段+3信号维度
 │   └── research-log.md        # 研究发现日志
 │
+├── reflections/               # 系统里程碑对话录（1篇）
+│   └── 2026-06-29-system-milestone.md # 🆕 c1test 上线日 — 基线诊断与愿景
+│
 ├── decisions/                 # 活跃架构决策（10篇）
 │   ├── l7-mapping.md            # L7 映射对齐 (Oracle+c1skill)
 │   ├── semantic-alignment.md    # 三系统语义对齐原设计
