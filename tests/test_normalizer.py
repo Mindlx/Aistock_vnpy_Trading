@@ -97,13 +97,13 @@ for prob_up, expected_direction, label in test_cases:
 print()
 print("=== normalize_mindlynx_score (HP3) ===")
 ml_cases = [
-    (80, "强烈看多", 52, 49),
-    (60, "看多", 52, 49),
-    (55, "谨慎看多", 52, 49),
-    (50, "中性", 52, 49),
-    (45, "谨慎看空", 52, 49),
-    (30, "看空", 52, 49),
-    (10, "强烈看空", 52, 49),
+    (80, "看多", 52, 49),       # ≥80 → +1.5 (S2 bull, capped for low accuracy)
+    (60, "谨慎看多", 52, 49),   # 60-79 → +1.0 (S3, dampened 38.2% acc)
+    (55, "中性", 52, 49),       # 52-59 → +0.8 (S4+, 56.2% acc, below S3 threshold)
+    (50, "中性", 52, 49),       # flat zone → 0.0
+    (45, "谨慎看空", 52, 49),   # 41-48 → -1.5 (S5, preserved)
+    (30, "看空", 52, 49),       # 20-30 → -2.5 (S6/S7 boundary, 89.0% acc)
+    (10, "强烈看空", 52, 49),   # ≤19 → -3.0 (S7, 100.0% acc)
 ]
 for score, desc, tb, tbr in ml_cases:
     result = SignalNormalizer.normalize_mindlynx_score(score, tb, tbr)

@@ -259,14 +259,29 @@ class SignalNormalizer:
     @classmethod
     def normalize_mindlynx_score(cls, sentiment_score: int, threshold_bull: int = 52, threshold_bear: int = 49) -> float:
         """
-        sentiment_score 直接映射到 L7（不依赖 operation_advice 文本）。
+        Accuracy-calibrated sentiment_score → L7 mapping (v4.0).
 
-        Backtest 验证 (2026-06-07, 785 samples):
-          52/49 threshold: 74.6% accuracy, 98% coverage (balanced 73.2)
-          60/40: 73.5% accuracy, 57% coverage (balanced 42.0)
+        Based on 598-sample backtest & c1skill cross-disciplinary analysis
+        (2026-06-29, docs/decisions/accuracy-calibrated-mapping.md):
 
-        Flat zone: score 在 (threshold_bear, threshold_bull) 之间 → 0.0
-        Score >= threshold_bull → +1.5; <= threshold_bear → -1.5
+        ≤19:  100.0% acc → -3.0 (S7 strong_bearish)
+        20-30: 89.0% acc → -2.5 (S6/S7 boundary)
+        31-40: 92.8% acc → -2.0 (S6 bearish)
+        41-48: 92.8% acc → -1.5 (S5 cautious_bearish, preserved)
+        49-51:  0.0% acc →  0.0 (S4 neutral)
+        52-59: 56.2% acc → +0.8 (S4+, barely bullish, conservative)
+        60-79: 38.2% acc → +1.0 (S3 cautious_bullish, dampened)
+        ≥80:   (extrap)   → +1.5 (S2-, extrapolated)
+
+        Design principles (L1 book sources):
+        - Grinold & Kahn *APM* IR=IC×√BR: precision(IC) > granularity(BR)
+        - López de Prado *AFML* meta-labeling: asymmetric accuracy→asymmetric mapping
+        - Carver *Systematic Trading*: continuous signals beat discrete bins
+        - Kahneman *TFS* WYSIATI: classification jumps lose gradient info
+        - Taleb *Black Swan*: each discretization boundary creates a Platonic fold
+
+        52-59 / 60-79 tiers use conservative parameters due to limited
+        samples (76 / 59). Re-evaluate via Phase 2 monitor when N≥300/tier.
 
         Args:
             sentiment_score: LLM score 0-100
@@ -275,13 +290,31 @@ class SignalNormalizer:
 
         返回: L7 得分 (-3 ~ +3)
         """
-        if sentiment_score >= threshold_bull:
-            base = 1.5
-        elif sentiment_score <= threshold_bear:
-            base = -1.5
-        else:
-            base = 0.0
-        return base
+        s = sentiment_score
+
+        # Flat zone — LLM has zero directional accuracy here (0.0% acc)
+        if threshold_bear < s < threshold_bull:
+            return 0.0
+
+        # ── Bearish regime (high accuracy 89-100%, sufficient samples) ──
+        if s <= threshold_bear:
+            if s <= 19:
+                return -3.0    # 100.0% acc, 9 samples → S7
+            if s <= 30:
+                return -2.5    #  89.0% acc, 93 samples → S6/S7 boundary
+            if s <= 40:
+                return -2.0    #  92.8% acc, bulk → S6
+            return -1.5        #  92.8% acc, 41-48, 351 samples → S5 (kept)
+
+        # ── Bullish regime (low accuracy 38-56%, ⚠️ limited samples 59-76) ──
+        if s >= threshold_bull:
+            if s >= 80:
+                return +1.5    # extrapolated → S2 boundary
+            if s >= 60:
+                return +1.0    # 38.2% acc, 59 samples → S3 (dampened)
+            return +0.8        # 56.2% acc, 76 samples → S4+ (conservative, not +1.0)
+
+        return 0.0
 
     @classmethod
     def normalize_tradingagent(cls, rating: str, debate_state: Optional[Dict[str, Any]] = None) -> float:
