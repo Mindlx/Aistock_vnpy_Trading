@@ -156,9 +156,9 @@ class WeComNotifier:
         sys_str = f"ly{ls:+.2f} ml{ms:+.2f} at{ts:+.2f}"
 
         return (
-            f"**{name}**｜{price_str} {chg_str}"
+            f"**{name}**{price_str} {chg_str}"
             f"｜{sys_str}"
-            f"｜仓位{pos}"
+            f"｜{pos}"
         )
 
     def format_daily_summary(self, results: List[Dict[str, Any]], date: str) -> str:
@@ -190,18 +190,18 @@ class WeComNotifier:
         if bear_count:
             overview.append(f"看空{bear_count}")
         if overview:
-            lines.append("📊 " + " ｜".join(overview))
+            lines.append("📊" + "｜".join(overview))
             lines.append("")
 
         # ── 按信号强度分组（7档，含分歧股票）──
         signal_groups = [
-            ("🚀 强烈看多", "strong_bullish"),
-            ("📈 看多", "bullish"),
-            ("📈 谨慎看多", "cautious_bullish"),
-            ("🗂 中性/持有", "neutral"),
-            ("📉 谨慎看空", "cautious_bearish"),
-            ("📉 看空", "bearish"),
-            ("🚨 强烈看空", "strong_bearish"),
+            ("🚀强烈看多", "strong_bullish"),
+            ("📈看多", "bullish"),
+            ("📈谨慎看多", "cautious_bullish"),
+            ("🗂中性/持有", "neutral"),
+            ("📉谨慎看空", "cautious_bearish"),
+            ("📉看空", "bearish"),
+            ("🚨强烈看空", "strong_bearish"),
         ]
 
         grouped = {sig: {"consensus": [], "disagreement": []} for _, sig in signal_groups}
@@ -235,7 +235,7 @@ class WeComNotifier:
         ly_ok = sum(1 for r in valid if r.get("lynx_valid", False))
         ml_ok = sum(1 for r in valid if r.get("mindlynx_valid", False))
         at_ok = sum(1 for r in valid if r.get("tradingagent_valid", False))
-        lines.append(f"📡 ly{ly_ok}/12｜ml{ml_ok}/12｜at{at_ok}/12")
+        lines.append(f"📡ly{ly_ok}/12｜ml{ml_ok}/12｜at{at_ok}/12")
         return "\n".join(lines)
 
     def push_daily_decision(self, results: List[Dict[str, Any]], date: Optional[str] = None,
