@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
@@ -44,7 +45,9 @@ class FusionEngine:
     # 仓位上限（分歧情况下硬性限制）
     MAX_POSITION_DISAGREEMENT = "1成"
 
-    def __init__(self, config_path: str = "config/settings.yaml"):
+    def __init__(self, config_path: str | None = None):
+        _root = Path(__file__).resolve().parent.parent
+        config_path = config_path or str(_root / "config/settings.yaml")
         with open(config_path, "r", encoding="utf-8") as f:
             self.config = yaml.safe_load(f)
 
@@ -155,7 +158,7 @@ class FusionEngine:
             disagreement_score = math.sqrt(variance)
 
             # ML 是否为少数方？(与多数方向不同)
-            ml_s = next(s for name, s in scores if name == "mindlynx")
+            ml_s = next((s for name, s in scores if name == "mindlynx"), 0.0)
             others = [s for name, s in scores if name != "mindlynx"]
             majority_dir = sum(1 for s in others if s > 0.5) - sum(1 for s in others if s < -0.5)
             if abs(majority_dir) >= len(others):  # 其他系统方向一致
@@ -290,6 +293,14 @@ class FusionEngine:
         w_ly = ReliabilityConfig.alpha("lynx_vnpy") * c_ly * (1.0 - h_ly)
         w_ml = ReliabilityConfig.alpha("mindlynx", stock_code=stock_code) * c_ml * (1.0 - h_ml)
         w_at = ReliabilityConfig.alpha("tradingagent") * c_at * (1.0 - h_at)
+
+        # 子系统不可用：权重归零（与 _fuse_linear 一致）
+        if not mindlynx_valid:
+            self.logger.info(f"[Bayesian][{stock_code}] mindlynx 不可用，ML 权重归零")
+            w_ml = 0.0
+        if not tradingagent_valid:
+            self.logger.info(f"[Bayesian][{stock_code}] tradingagent 不可用，AT 权重归零")
+            w_at = 0.0
 
         # ⚡ TA 数据过期处理：降低有效权重（与 linear 模式一致）
         if ta_is_stale:

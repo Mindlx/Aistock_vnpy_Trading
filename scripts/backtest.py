@@ -823,11 +823,13 @@ def cmd_simulate() -> None:
     for date, stocks in daily_portfolios.items():
         day_pnl = 0.0
         day_trades = 0
+        # 仅统计看多股票数量作为资金分配基数（去掉看空/中性股稀释）
+        long_count = sum(1 for r in stocks if r["fusion_dir"] == 1)
         for r in stocks:
             if r["fusion_dir"] == 1:  # 看多 → 买入
                 ret = (r["next_pct_chg"] or 0) / 100.0
-                # 假设等权重分配资金：每只股票分配 cash / N 的资金
-                capital_per_stock = cash / len(stocks)
+                # 等权重分配：每只看多股票分配 cash / long_count
+                capital_per_stock = cash / long_count if long_count > 0 else 0
                 pnl = capital_per_stock * ret
                 day_pnl += pnl
                 trade_count += 1
@@ -838,7 +840,7 @@ def cmd_simulate() -> None:
                     loss_count += 1
 
         total_value = cash + day_pnl
-        daily_ret = (total_value - cash - position_value) / (cash + position_value) if (cash + position_value) > 0 else 0
+        daily_ret = day_pnl / cash if cash > 0 else 0
         cash = total_value
         nav_curve.append((date, cash))
 

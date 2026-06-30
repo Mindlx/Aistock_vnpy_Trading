@@ -488,6 +488,8 @@ class SecEdgarFetcher:
             return cls._CIK_CACHE
         try:
             headers = {"User-Agent": "MindLynx-Aistock/1.0 (bluekuma@mindlynx.top)"}
+            if not _HAS_HTTPX:
+                raise RuntimeError("httpx not installed, required for SEC EDGAR CIK fetch")
             async with httpx.AsyncClient() as client:
                 resp = await client.get("https://www.sec.gov/files/company_tickers.json", headers=headers, timeout=10)
                 if resp.status_code != 200:

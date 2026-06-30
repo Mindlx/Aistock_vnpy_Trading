@@ -970,8 +970,12 @@ class UnifiedDataLoader:
                     parts = resp.text.split(',')
                     if len(parts) >= 4:
                         # 返回格式: 股票名,今开,昨收,当前价,最高,最低,...
-                        prev_close = float(parts[2]) if parts[2] else 0.0
-                        price = float(parts[3]) if parts[3] else 0.0
+                        try:
+                            prev_close = float(parts[2]) if parts[2] and parts[2].replace('.','',1).replace('-','',1).isdigit() else 0.0
+                            price = float(parts[3]) if parts[3] and parts[3].replace('.','',1).replace('-','',1).isdigit() else 0.0
+                        except (ValueError, TypeError):
+                            prev_close = 0.0
+                            price = 0.0
                         if prev_close > 0:
                             pct_chg = round((price - prev_close) / prev_close * 100, 2)
                             price_fetched = True
@@ -990,8 +994,8 @@ class UnifiedDataLoader:
                         if prev_close > 0:
                             pct_chg = round((price - prev_close) / prev_close * 100, 2)
                             price_fetched = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("[data_loader] Sina行情+lynx回退获取失败 (%s): %s", code, e)
 
             # 从 stock_daily DB 获取更丰富的技术指标（量比、均线）
             try:

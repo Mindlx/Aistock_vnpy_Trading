@@ -288,8 +288,8 @@ def fetch_all(stocks: list[dict]) -> dict[str, Any] | None:
                 entry["institution"] = extra["institution"]
             if extra.get("score") is not None:
                 entry["score"] = extra["score"]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("市场补充数据注入失败: %s", e)
 
     success_count = sum(1 for e in entries.values() if e["desire"] is not None or e["focus_avg"] is not None)
     if success_count == 0:
@@ -299,8 +299,8 @@ def fetch_all(stocks: list[dict]) -> dict[str, Any] | None:
     try:
         if _market_df is not None and not _market_df.empty:
             archive_market_snapshot(_market_df)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("市场快照存档失败: %s", e)
 
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     CACHE_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

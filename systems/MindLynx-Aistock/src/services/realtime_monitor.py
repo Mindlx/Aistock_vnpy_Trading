@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import date as dt_date
@@ -490,6 +491,7 @@ class RealtimeMonitorService:
             self._notifier = NotificationService()
 
     ALERT_FILE = "/tmp/realtime_alerts.log"
+    _alert_file_lock = threading.Lock()
 
     def _send_notification(self, text: str, route_type: str = "alert") -> None:
         """发送通知 — 推通知服务 + 写入共享文件供内部任务使用"""
@@ -502,8 +504,9 @@ class RealtimeMonitorService:
         # 通道2: 写入共享文件（供 risk_radar.py 等内部脚本读取分析）
         # 不再作为 Hermes cron 桥接用途
         try:
-            with open(self.ALERT_FILE, "a", encoding="utf-8") as f:
-                f.write(f"{text}\n---\n")
+            with self._alert_file_lock:
+                with open(self.ALERT_FILE, "a", encoding="utf-8") as f:
+                    f.write(f"{text}\n---\n")
         except Exception:
             pass
 

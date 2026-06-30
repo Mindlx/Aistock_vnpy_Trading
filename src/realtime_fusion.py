@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+
+logger = logging.getLogger(__name__)
 import math
 import os
 import sys
@@ -75,8 +77,8 @@ class RealtimeFusion:
                     "mindlynx": w.get("mindlynx", 0.40),
                     "tradingagent": w.get("tradingagent", 0.30),
                 }
-        except Exception:
-            pass  # 保持默认权重
+        except Exception as e:
+            logger.warning("权重配置加载失败，使用默认权重: %s", e)
 
     @staticmethod
     def _load_stock_names() -> Dict[str, str]:
@@ -320,8 +322,8 @@ class RealtimeFusion:
                             "pct_chg": pct,
                             "volume_ratio": 0.0,  # Sina不直接提供量比，用ly/DB值兜底
                         }
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Sina实时行情获取失败: %s", e)
         return prices
 
     @staticmethod

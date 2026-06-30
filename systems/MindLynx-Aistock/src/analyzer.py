@@ -3305,7 +3305,7 @@ class GeminiAnalyzer:
                     code=code,
                     name=name,
                     # 核心指标
-                    sentiment_score=int(data.get("sentiment_score", 50)),
+                    sentiment_score=int(float(data.get("sentiment_score", 50))),
                     trend_prediction=data.get("trend_prediction", "Sideways" if report_language == "en" else "震荡"),
                     operation_advice=data.get("operation_advice", "Hold" if report_language == "en" else "持有"),
                     decision_type=decision_type,

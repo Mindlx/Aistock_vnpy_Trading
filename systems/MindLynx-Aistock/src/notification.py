@@ -1138,7 +1138,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 current_price = result.current_price
 
                 action_parts = []
-                sniper_ok = self._sniper_is_reasonable(ideal, stop, current_price) if (ideal and stop and current_price) else False
+                sniper_ok = self._sniper_is_reasonable(ideal, stop, current_price) if (ideal is not None and stop is not None and current_price is not None) else False
                 if score >= 60 and sniper_ok:
                     action_parts.append(
                         f"📈 建议¥{ideal}附近建仓, 止损¥{stop}, 目标¥{profit}"

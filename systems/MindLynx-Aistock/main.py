@@ -577,6 +577,9 @@ def _push_highlights(
         lines.append(f"  {items}")
     lines.append(f"📊{len(highlights)}条 | {footer_text}")
 
+    if notifier is None:
+        logger.warning("%s: notifier 不可用，跳过推送", log_label)
+        return
     content = "\n".join(lines)
     content_hash = hashlib.sha256(content.encode()).hexdigest()
     notifier.send(content, route_type="alert", dedup_key=f"{dedup_key_prefix}:{content_hash}")

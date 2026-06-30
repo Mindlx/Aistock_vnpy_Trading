@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/workspace/Aistock_vnpy_Trading/.venv/bin/python3 services/alpha158_service.py --daemon
-WorkingDirectory=%h/workspace/Aistock_vnpy_Trading
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python3 services/alpha158_service.py --daemon
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
 Restart=on-failure
 RestartSec=10
