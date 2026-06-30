@@ -508,8 +508,8 @@ def push_wecom(signals: list[dict]):
 # 加权公式: wi = ICi / sum(ICi)
 # LGB_w = 0.2244/(0.2244+0.0226) ≈ 0.91
 # RF_w  = 0.0226/(0.2244+0.0226) ≈ 0.09
-_LGB_IC_WEIGHT = 0.91
-_RF_IC_WEIGHT = 0.09
+_LGB_IC_WEIGHT = 1.0
+_RF_IC_WEIGHT = 0.0
 
 def predict_ensemble(df: pd.DataFrame, code: str, name: str) -> dict | None:
     """同时跑RF和LGB，返回集成信号（供data_loader.py使用）
