@@ -459,10 +459,18 @@ def generate_brief_text(rows: list[dict]) -> str:
     for r in rows:
         icon = r["icon"]
         name = r["name"]
-        dv = r.get("desire_val", "--")
-        fv = r.get("focus_val", "--")
+        dv = int(r.get("desire_val", 0)) if r.get("desire_val") not in (None, "", "--") else 0
+        fv = int(r.get("focus_val", 0)) if r.get("focus_val") not in (None, "", "--") else 0
         short_line = r.get("short_line", "")
-        lines.append(f"{icon} **{name}**｜{dv}/{fv}｜{short_line}")
+        # 只保留正分数，去掉"参与意愿/关注度"文字解释
+        if dv > 0 and fv > 0:
+            lines.append(f"{icon} **{name}**｜{dv}/{fv}｜{short_line}")
+        elif dv > 0:
+            lines.append(f"{icon} **{name}**｜意愿{dv}｜{short_line}")
+        elif fv > 0:
+            lines.append(f"{icon} **{name}**｜关注{fv}｜{short_line}")
+        else:
+            lines.append(f"{icon} **{name}**｜{short_line}")
 
     lines.append("")
     lines.append("📎 详情见PDF报告")

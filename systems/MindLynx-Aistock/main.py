@@ -569,8 +569,8 @@ def _push_highlights(
 
     for code, entry in grouped.items():
         name = entry["name"]
-        # 名称未知时显示纯代码（避免 code(code) 重复）
-        header = f"• {code}" if name == code else f"• {name}({code})"
+        # 股票名加粗，不展示代码
+        header = f"**{name}**"
         lines.append(header)
         sep = "\n  "
         items = sep.join(entry["items"])

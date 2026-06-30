@@ -1447,8 +1447,8 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
 
         lines = [
-            f"👾ml {datetime.now().strftime('%H:%M')} 盘中报告",
-            f"共{len(results)}｜🟢买{buy_count} 🟡持{hold_count} 🔴卖{sell_count}",
+            f"👾ml {datetime.now().strftime('%H:%M')} 整点分析｜共{len(results)}",
+            f"🔴买{buy_count} 🟡持{hold_count} 🟢卖{sell_count}",
             "",
         ]
 
@@ -1522,7 +1522,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 risks = intel.get("risk_alerts", []) if intel else []
                 if risks:
                     risk_texts = [self._clean_md(str(r))[:60] for r in risks[:2]]
-                    lines.append("🚨 风险警报：" + " ｜ ".join(risk_texts))
+                    lines.append("🚨风险警报：" + "｜".join(risk_texts))
                 catalysts = intel.get("positive_catalysts", []) if intel else []
                 if catalysts:
                     cat_texts = [self._clean_md(str(c))[:50] for c in catalysts[:2]]
@@ -1536,11 +1536,11 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 stop_str = str(sniper.get("stop_loss", ""))[:30] if sniper.get("stop_loss") else ""
                 profit_str = str(sniper.get("take_profit", ""))[:30] if sniper.get("take_profit") else ""
                 if ideal_str:
-                    sniper_parts.append(f"理想买入点{ideal_str}")
+                    sniper_parts.append(f"理想买入{ideal_str}")
                 if stop_str:
-                    sniper_parts.append(f"止损位{stop_str}")
+                    sniper_parts.append(f"止损{stop_str}")
                 if profit_str:
-                    sniper_parts.append(f"目标位{profit_str}")
+                    sniper_parts.append(f"目标{profit_str}")
                 if sniper_parts:
                     line_target.append(" ｜ ".join(sniper_parts))
                 pos_advice = core.get("position_advice", {}) if core else {}
@@ -1585,15 +1585,15 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 # ⚡未通过项
                 checklist = battle.get("action_checklist", []) if battle else []
                 if checklist:
-                    failed = [self._clean_md(str(c))[:50] for c in checklist if str(c).startswith("❌") or str(c).startswith("⚠️")]
+                    failed = [self._clean_md(str(c).lstrip("❌⚠️").strip())[:50] for c in checklist if str(c).startswith("❌") or str(c).startswith("⚠️")]
                     if failed:
-                        lines.append("⚡未通过项：" + " ｜ ".join(failed[:2]))
+                        lines.append("⚡未通过项：" + "｜".join(failed[:2]))
 
                 # 空行分隔
                 lines.append("")
 
         # 底部
-        lines.append(f"⏱ {labels['report_time_label']}: {datetime.now().strftime('%H:%M')}｜源：因子+LLM分析系统")
+        lines.append(f"📡来源：ml12因子+LLM分析")
         models = self._collect_models_used(results)
         if models:
             lines.append(f"🤖 {labels['analysis_model_label']}: {', '.join(models)}")

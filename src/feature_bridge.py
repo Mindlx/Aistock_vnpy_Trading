@@ -153,14 +153,13 @@ def run_xueqiu_sentiment(stock_codes: list[str]) -> str | None:
         stock_lines = []
         for sd in stock_data:
             icon = sd["icon"]
-            w_str = f"{sd['w']:.2f}"
-            f_str = f"{sd['f']:.2f}"
-            dl = _desire_level(sd["w"])
-            fl = _focus_level(sd["f"])
+            w = int(sd["w"])
+            f = int(sd["f"])
             con = "ST风险" if sd["is_st"] else _conclusion_short(sd["w"], sd["f"])
-            stock_lines.append(
-                f"{icon}{sd['name']}｜意愿{dl} 关注{fl} {con}"
-            )
+            if w > 0 and f > 0:
+                stock_lines.append(f"{icon}{sd['name']}｜{w}/{f}｜{con}")
+            else:
+                stock_lines.append(f"{icon}{sd['name']}｜{con}")
 
         title_date = ""
         if desire_date and focus_date:
