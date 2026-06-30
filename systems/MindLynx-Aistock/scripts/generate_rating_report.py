@@ -450,7 +450,7 @@ def generate_summary_rows(stocks: list[dict]) -> list[dict]:
 def generate_brief_text(rows: list[dict]) -> str:
     """生成简短微信推送文本（简讯，不带PDF附件指引）。"""
     now = datetime.now().strftime("%H:%M")
-    lines = [f"💰ml {now} 东方财富评级"]
+    lines = [f"💰 {now} 东方财富评级"]
 
     # 按图标排序: ✅→📈→💤→📉→❌
     _ICON_ORDER = {"✅": 0, "📈": 1, "💤": 2, "📉": 3, "❌": 4}
@@ -464,7 +464,7 @@ def generate_brief_text(rows: list[dict]) -> str:
         short_line = r.get("short_line", "")
         # 只保留正分数，去掉"参与意愿/关注度"文字解释
         if dv > 0 and fv > 0:
-            lines.append(f"{icon} **{name}**｜{dv}/{fv}｜{short_line}")
+            lines.append(f"{icon} **{name}**{dv}/{fv}｜{short_line}")
         elif dv > 0:
             lines.append(f"{icon} **{name}**｜意愿{dv}｜{short_line}")
         elif fv > 0:

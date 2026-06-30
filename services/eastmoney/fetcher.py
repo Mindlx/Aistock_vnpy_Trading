@@ -334,12 +334,12 @@ def _generate_brief_text(result: dict, session: str) -> str:
         })
 
     rows.sort(key=lambda r: _ICON_ORDER.get(r["icon"], 99))
-    lines = [f"💰ml {now} 东方财富评级"]
+    lines = [f"💰 {now} 东方财富评级"]
     for r in rows:
         dv = int(float(r['desire_val'])) if float(r['desire_val']) > 0 else 0
         fv = int(float(r['focus_val'])) if float(r['focus_val']) > 0 else 0
         if dv > 0 and fv > 0:
-            lines.append(f"{r['icon']} **{r['name']}**｜{dv}/{fv}｜{r['short_line']}")
+            lines.append(f"{r['icon']} **{r['name']}**{dv}/{fv}｜{r['short_line']}")
         else:
             lines.append(f"{r['icon']} **{r['name']}**｜{r['short_line']}")
 
