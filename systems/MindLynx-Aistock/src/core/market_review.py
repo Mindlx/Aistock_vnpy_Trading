@@ -39,8 +39,8 @@ def _get_market_review_text(language: str) -> dict[str, str]:
             "separator": "> Next market recap follows",
         }
     return {
-        "root_title": "# 🎯 大盘复盘",
-        "push_title": "🎯 大盘复盘",
+        "root_title": "# 🎯ml 大盘复盘",
+        "push_title": "🎯ml 大盘复盘",
         "cn_title": "# A股大盘复盘",
         "us_title": "# 美股大盘复盘",
         "hk_title": "# 港股大盘复盘",

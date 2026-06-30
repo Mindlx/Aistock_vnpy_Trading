@@ -145,7 +145,7 @@ def _build_briefing_text(
     lines: list[str] = []
     tz = timezone(timedelta(hours=8))
     now_str = datetime.now(tz).strftime("%H:%M")
-    lines.append(f"👾 {now_str} 盘中速报")
+    lines.append(f"👾ml {now_str} 盘中速报")
 
     # 先算每支股票的状态 → 按类别 + 涨跌幅排序
     _sorted_data = []
@@ -209,12 +209,10 @@ def _build_briefing_text(
         else:
             color_icon = "🟡"  # 均线上方盘整/短线争夺/回踩企稳/震荡观望
 
-        fields = [f"{color_icon} **{name}**", f"¥{price:.2f} {change_str}"]
+        fields = [f"{color_icon}**{name}**", f"¥{price:.2f} {change_str}"]
         if s.score > 0:
             fields.append(f"评分{s.score}")
-        # 窗口区间（最近15分钟价格区间）
-        if s.window_high > 0 and s.window_low < 1e8:
-            fields.append(f"¥{s.window_low:.2f}~¥{s.window_high:.2f}")
+        # 移除窗口价格区间（用户要求精简）
         fields.append(f"量比{vol:.1f}")
         if ma_info:
             fields.append(ma_info)
@@ -327,7 +325,7 @@ def _build_atr_alert_text(
     now_str = datetime.now().strftime("%H:%M")
     change_sign = "+" if change_pct >= 0 else ""
     score_str = f"｜评分{score}" if score > 0 else ""
-    return f"🚨 {now_str} ATR止损{score_str}\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% 跌破{multiplier}×ATR ¥{stop_price:.2f}"
+    return f"🚨ml {now_str} ATR止损{score_str}\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% 跌破{multiplier}×ATR ¥{stop_price:.2f}"
 
 
 def _build_volume_alert_text(
@@ -359,7 +357,7 @@ def _build_volume_alert_text(
 
     now_str = datetime.now().strftime("%H:%M")
     score_str = f"｜评分{score}" if score > 0 else ""
-    return f"{emoji} {now_str} 异动预警{score_str}\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
+    return f"{emoji}ml {now_str} 异动预警{score_str}\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
 
 
 def _build_ma_cross_alert_text(
@@ -390,7 +388,7 @@ def _build_ma_cross_alert_text(
     change_sign = "+" if change_pct >= 0 else ""
     tip_suffix = f"｜{tip}" if tip else ""
     score_str = f"｜评分{score}" if score > 0 else ""
-    return f"{emoji} {now_str} 均线{cross_type}{score_str}\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% {cross_type}{ma_period}(¥{ma_value:.2f})"
+    return f"{emoji}ml {now_str} 均线{cross_type}{score_str}\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% {cross_type}{ma_period}(¥{ma_value:.2f})"
 
 
 # ============================================================

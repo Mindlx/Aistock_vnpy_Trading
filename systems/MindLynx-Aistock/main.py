@@ -519,7 +519,7 @@ def _push_highlights(
     import re as _re
     import html as _html
 
-    lines = [f"📰 {title_text}"]
+    lines = [f"📰ml {title_text}"]
     grouped: dict[str, dict] = {}
     for h in sorted(highlights, key=lambda x: -x["importance"]):
         code = h.get("code", "")
@@ -575,7 +575,7 @@ def _push_highlights(
         sep = "\n  "
         items = sep.join(entry["items"])
         lines.append(f"  {items}")
-    lines.append(f"📊 {len(highlights)}条 | {footer_text}")
+    lines.append(f"📊{len(highlights)}条 | {footer_text}")
 
     content = "\n".join(lines)
     content_hash = hashlib.sha256(content.encode()).hexdigest()
@@ -868,7 +868,7 @@ def _push_daily_highlights(config: Config, highlights: list[dict], label: str) -
         _push_highlights(
             notifier, highlights,
             title_text=f"每日要闻 | {label}",
-            footer_text="下个交易时段分析将自动注入",
+            footer_text="下个交易时段自动注入LLM",
             dedup_key_prefix=f"daily:{label}",
             log_label=f"每日情报 ({label})",
         )

@@ -455,13 +455,13 @@ def push_wecom(signals: list[dict]):
     ) if hasattr(resp, "json") else False
 
     now = datetime.now()
-    lines = [f"🧬 {now.strftime('%H:%M')} ly量化信号"]
+    lines = [f"🧬ly {now.strftime('%H:%M')} 量化信号"]
     for s in signals:
         _sig = s['signal']
         _emoji = _sig.split()[0] if ' ' in _sig else '⚪'
         _label = _sig[len(_emoji):].strip()
         parts = [
-            f"{_emoji} **{s['name']}**｜¥{s['price']:.2f} {s['change_pct']:+.2f}%",
+            f"{_emoji}**{s['name']}**｜¥{s['price']:.2f} {s['change_pct']:+.2f}%",
             f"L7{s['l7_score']:+0.2f}",
             f"置信{s['prob_up']}%",
         ]

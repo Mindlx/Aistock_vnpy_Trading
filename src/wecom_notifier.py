@@ -155,33 +155,10 @@ class WeComNotifier:
         # 三系统得分
         sys_str = f"ly{ls:+.2f} ml{ms:+.2f} at{ts:+.2f}"
 
-        # 量比
-        vr_str = f"量比{vr:.2f}" if vr else ""
-
-        # 支撑/压力
-        sup_str = ""
-        if ma10 and ma20:
-            support = min(ma10, ma20)
-            resist = max(ma10, ma20)
-            sup_str = f"支撑{support:.2f} 压力{resist:.2f}"
-
-        # 止损价（仅在看多/持有信号时展示）
-        stop_str = ""
-        stop_loss = r.get("mindlynx_stop_loss")
-        if stop_loss and price and float(stop_loss) > 0:
-            stop_price = float(stop_loss)
-            dist = (price - stop_price) / price * 100
-            if dist > 0:
-                stop_str = f"止损{stop_price:.2f}({dist:.1f}%)"
-
-        extras = [x for x in [vr_str, sup_str, stop_str] if x]
-        extra_str = f"｜{' '.join(extras)}" if extras else ""
-
         return (
-            f"{emoji} **{name}**｜{price_str} {chg_str}"
+            f"**{name}**｜{price_str} {chg_str}"
             f"｜{sys_str}"
             f"｜仓位{pos}"
-            f"{extra_str}"
         )
 
     def format_daily_summary(self, results: List[Dict[str, Any]], date: str) -> str:
@@ -197,7 +174,7 @@ class WeComNotifier:
 
         ts = self._tz_cn_now()
         lines = [
-            f"🛟 {ts.strftime('%H:%M')} 融合决策",
+            f"🛟lma {ts.strftime('%H:%M')} 融合决策",
             "",
         ]
 
