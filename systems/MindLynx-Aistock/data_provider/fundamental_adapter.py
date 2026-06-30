@@ -7,6 +7,9 @@ endpoint candidates. It should never raise to caller; partial data is allowed.
 
 from __future__ import annotations
 
+import json
+from datetime import date as _date_type
+from pathlib import Path
 import logging
 import re
 from datetime import datetime, timedelta
@@ -15,6 +18,40 @@ from typing import Any, cast
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+# ── 资本流缓存层 (B') ──
+
+def _capital_flow_cache_path() -> Path:
+    _root = Path(__file__).resolve().parent.parent.parent.parent
+    return _root / "data" / "realtime" / "capital_flow_cache.json"
+
+
+def _read_capital_flow_cache(stock_code: str) -> dict | None:
+    p = _capital_flow_cache_path()
+    if not p.exists():
+        return None
+    try:
+        cache = json.loads(p.read_text(encoding="utf-8"))
+        today = _date_type.today().isoformat()
+        entry = cache.get(stock_code)
+        if entry and entry.get("fetched_date") == today and entry.get("data", {}).get("stock_flow"):
+            return entry["data"]
+    except Exception:
+        pass
+    return None
+
+
+def _write_capital_flow_cache(stock_code: str, data: dict) -> None:
+    p = _capital_flow_cache_path()
+    try:
+        cache = {}
+        if p.exists():
+            cache = json.loads(p.read_text(encoding="utf-8"))
+        cache[stock_code] = {"fetched_date": _date_type.today().isoformat(), "data": data}
+        p.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
 
 _DIVIDEND_KEYWORD_MAP: dict[str, list[str]] = {
     "per_share": [
@@ -521,6 +558,10 @@ class AkshareFundamentalAdapter:
     def get_capital_flow(self, stock_code: str, top_n: int = 5) -> dict[str, Any]:
         """
         Return stock + sector capital flow.
+
+        (A') 多 akshare 同源 fallback: stock_individual_fund_flow / stock_main_fund_flow /
+             stock_fund_flow_individual / stock_fund_flow_big_deal, 多种参数组合.
+        (B') 数据湖缓存: 先查 data/realtime/capital_flow_cache.json, 成功则写入.
         """
         result: dict[str, Any] = {
             "status": "not_supported",
@@ -530,18 +571,30 @@ class AkshareFundamentalAdapter:
             "errors": [],
         }
 
-        # 根据股票代码判断市场: 6开头→沪市(sh), 否则→深市(sz)
+        # ── (B') 先查缓存 ──
+        cached = _read_capital_flow_cache(stock_code)
+        if cached is not None:
+            result.update(cached)
+            result["source_chain"].append("capital_cache:hit")
+            return result
+
+        # ── 根据股票代码判断市场 ──
         market = "sh" if stock_code[:1] in ("6", "9") else "sz"
-        stock_df, stock_source, stock_errors = self._call_df_candidates(
-            [
-                ("stock_individual_fund_flow", {"stock": stock_code, "market": market}),
-                ("stock_individual_fund_flow", {"symbol": stock_code, "market": market}),
-                ("stock_individual_fund_flow", {"stock": stock_code}),
-                ("stock_individual_fund_flow", {"symbol": stock_code}),
-                ("stock_main_fund_flow", {"symbol": stock_code}),
-                ("stock_main_fund_flow", {}),
-            ]
-        )
+        alt_market = "1" if stock_code[:1] in ("6", "9") else "0"  # akshare 部分接口用 0/1
+
+        # (A') 多 API + 多参数组合
+        stock_df, stock_source, stock_errors = self._call_df_candidates([
+            ("stock_individual_fund_flow", {"stock": stock_code, "market": market}),
+            ("stock_individual_fund_flow", {"symbol": stock_code, "market": market}),
+            ("stock_individual_fund_flow", {"stock": stock_code, "market": alt_market}),
+            ("stock_individual_fund_flow", {"symbol": stock_code, "market": alt_market}),
+            ("stock_individual_fund_flow", {"stock": stock_code}),
+            ("stock_individual_fund_flow", {"symbol": stock_code}),
+            ("stock_main_fund_flow", {"symbol": stock_code}),
+            ("stock_main_fund_flow", {}),
+            ("stock_fund_flow_individual", {"stock": stock_code}),
+            ("stock_fund_flow_big_deal", {"stock": stock_code}),
+        ])
         result["errors"].extend(stock_errors)
         if stock_df is not None:
             row = _extract_latest_row(stock_df, stock_code)
@@ -591,6 +644,11 @@ class AkshareFundamentalAdapter:
             result["stock_flow"] or result["sector_rankings"]["top"] or result["sector_rankings"]["bottom"]
         )
         result["status"] = "partial" if has_content else "not_supported"
+
+        # ── (B') 写入数据湖缓存（即使 partial 也写，供跨 task 复用）──
+        if has_content:
+            _write_capital_flow_cache(stock_code, result)
+
         return result
 
     def get_dragon_tiger_flag(self, stock_code: str, lookback_days: int = 20) -> dict[str, Any]:
