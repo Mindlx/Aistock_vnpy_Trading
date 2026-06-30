@@ -519,7 +519,7 @@ def _push_highlights(
     import re as _re
     import html as _html
 
-    lines = [f"📰ml {title_text}"]
+    lines = [f"📰 {title_text}"]
     grouped: dict[str, dict] = {}
     for h in sorted(highlights, key=lambda x: -x["importance"]):
         code = h.get("code", "")

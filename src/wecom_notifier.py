@@ -174,7 +174,7 @@ class WeComNotifier:
 
         ts = self._tz_cn_now()
         lines = [
-            f"🛟lma {ts.strftime('%H:%M')} 融合决策",
+            f"🛟 {ts.strftime('%H:%M')} 融合决策",
             "",
         ]
 
