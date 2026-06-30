@@ -450,7 +450,7 @@ def generate_summary_rows(stocks: list[dict]) -> list[dict]:
 def generate_brief_text(rows: list[dict]) -> str:
     """生成简短微信推送文本（简讯，不带PDF附件指引）。"""
     now = datetime.now().strftime("%H:%M")
-    lines = [f"💰 {now} 东方财富评级"]
+    lines = [f"💰ml {now} 东方财富评级"]
 
     # 按图标排序: ✅→📈→💤→📉→❌
     _ICON_ORDER = {"✅": 0, "📈": 1, "💤": 2, "📉": 3, "❌": 4}

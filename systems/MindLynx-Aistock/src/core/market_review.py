@@ -222,7 +222,7 @@ def run_market_review(
         date_str = datetime.now().strftime("%Y%m%d")
         date_str_display = datetime.now().strftime("%Y-%m-%d")
         review_text['root_title'] = f"# 🎯 {date_str_display} 大盘复盘（{session_label}）"
-        review_text['push_title'] = f"🎯 {date_str_display} 大盘复盘（{session_label}）"
+        review_text['push_title'] = f"🎯ml {date_str_display} 大盘复盘（{session_label}）"
 
         # 午盘复盘：明日交易计划 → 午后交易计划
         if review_report and session_label == "午盘":

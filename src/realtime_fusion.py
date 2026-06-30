@@ -242,7 +242,7 @@ class RealtimeFusion:
         if not changes:
             return
         now = datetime.now().strftime("%H:%M")
-        lines = [f"🛟 {now} 融合速报", ""]
+        lines = [f"🛟lma {now} 融合速报", ""]
         for c in sorted(changes, key=lambda x: x['score'], reverse=True):
             name = self._stock_names.get(c['code'], c['code'])
             signal_display = c.get('signal_name', c['signal'])

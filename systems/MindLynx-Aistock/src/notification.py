@@ -712,7 +712,7 @@ class NotificationService(
 
         # 标题
         report_lines = [
-            f"👾 {datetime.now().strftime('%H:%M')} 分析报告",
+            f"👾ml {datetime.now().strftime('%H:%M')} 分析报告",
             "",
             f"> {labels['analyzed_prefix']} **{len(results)}** {labels['stock_unit']} ｜ "
             f"{labels['generated_at_label']}：{datetime.now().strftime('%H:%M:%S')}",
@@ -1055,7 +1055,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
 
         report_lines = [
-            f"👾 {datetime.now().strftime('%H:%M')} 决策仪表盘",
+            f"👾ml {datetime.now().strftime('%H:%M')} 决策仪表盘",
             "",
             f"> {labels['analyzed_prefix']} **{len(results)}** {labels['stock_unit']} ｜ "
             f"🟢{labels['buy_label']}:{buy_count} 🟡{labels['watch_label']}:{hold_count} 🔴{labels['sell_label']}:{sell_count}",
@@ -1447,7 +1447,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
 
         lines = [
-            f"👾 {datetime.now().strftime('%H:%M')} 盘中报告",
+            f"👾ml {datetime.now().strftime('%H:%M')} 盘中报告",
             f"共{len(results)}｜🟢买{buy_count} 🟡持{hold_count} 🔴卖{sell_count}",
             "",
         ]
@@ -1626,7 +1626,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         avg_score = sum(r.sentiment_score for r in results) / len(results) if results else 0
 
         lines = [
-            f"👾 {datetime.now().strftime('%H:%M')} 分析报告",
+            f"👾ml {datetime.now().strftime('%H:%M')} 分析报告",
             "",
             f"> {labels['analyzed_prefix']} **{len(results)}** {labels['stock_unit_compact']} ｜ "
             f"🟢{labels['buy_label']}:{buy_count} 🟡{labels['watch_label']}:{hold_count} 🔴{labels['sell_label']}:{sell_count} ｜ "
@@ -1723,7 +1723,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         sell_count = sum(1 for r in results if getattr(r, "decision_type", "") == "sell")
         hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
         lines = [
-            f"👾 {datetime.now().strftime('%H:%M')} 决策简报",
+            f"👾ml {datetime.now().strftime('%H:%M')} 决策简报",
             "",
             f"> {len(results)} {labels['stock_unit_compact']} ｜ 🟢{buy_count} 🟡{hold_count} 🔴{sell_count}",
             "",
