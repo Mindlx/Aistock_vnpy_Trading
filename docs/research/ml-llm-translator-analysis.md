@@ -126,7 +126,7 @@ c1skill 对 Oracle 方案做了 3 项重要修正：
 
 ## 四、最终推荐：3 个 Action 并行执行
 
-### Action 1 — 扩展+重排 factor_profile [1-2h]
+### Action 1 — 扩展+重排 factor_profile [1-2h] ✅ 已完成
 
 | 改动点 | 位置 | 内容 |
 |--------|------|------|
@@ -134,15 +134,24 @@ c1skill 对 Oracle 方案做了 3 项重要修正：
 | 重排注入位置 | `analyzer.py:3040` | 从尾部移到 news section（line 2900）之前 |
 | 加锚定指引 | `analyzer.py` | "以下因子评分是本系统计算结果，sentiment_score 和 operation_advice 应以此为主要依据" |
 
-### Action 2 — 降低 operation_advice L7 映射权重 [2h]
+### Action 2 — operation_advice 完全退出 L7 裁决 [1h] ✅ 已完成
+
+**最终状态（42c01fd）**：
+
+```
+ML 的 L7 得分 = 100% 来自 sentiment_score (v4.0 精度校准映射)
+operation_advice = 纯文本解释器，不参与融合裁决
+```
 
 | 改动点 | 位置 | 内容 |
 |--------|------|------|
-| ML L7 映射路径 | `normalizer.py` | sent_map(0.80) + op_map(0.20)，替代当前纯类别映射 |
-| op_map 微调 | `normalizer.py` | 仅当 operation_advice 方向与 sentiment 一致时提供 ±0.1 调整 |
-| sent_map 使用 | `normalizer.py` | v4.0 精度校准映射表（已有，`normalizer.py:260-284`） |
+| 移除方向守卫逻辑 | `fusion_engine.py` | 原 op_advice 与 sentiment 方向相反时禁用 → 改为 op_advice 完全不参与融合 |
+| 保留文本路径 | `normalizer.py` | operation_advice 仍生成文本用于推送展示，但不影响 L7 得分 |
+| ML 输出 | — | L7 = `normalize_mindlynx_score()` 直接输出 |
 
-这样 operation_advice 的文本路径成为"解释层"而非"决策层"——保留中文语义价值但不参与主裁决。
+这意味着 ML 系统内部实现了彻底的"分析层与表达层分离"：
+- **分析层**（sentiment_score → v4.0 精度映射 → L7 得分）：参与融合裁决 ✅ 67.7%
+- **表达层**（operation_advice → 人类可读文本）：仅用于推送展示 📝 27.5%（不重要了）
 
 ### Action 3 — c1test 前后对比验证 [1h]
 
