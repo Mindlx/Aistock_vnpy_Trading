@@ -539,9 +539,17 @@ class FusionEngine:
                 threshold_bull=self.sentiment_threshold_bull,
                 threshold_bear=self.sentiment_threshold_bear,
             )
-        # 权重分配: sentiment_score 80% + operation_advice 20%
+            # 权重分配: sentiment_score 80% + operation_advice 20%
         # Oracle验证:sentiment_score方向准确率74%>操作建议24%
-        mindlynx_normalized = mindlynx_score_normalized * 0.8 + mindlynx_normalized * 0.2
+        # v2.0 (2026-06-30, c1skill): operation_advice 与 sentiment_score 方向相反时不参与融合，仅保留文本解释价值
+        if mindlynx_normalized * mindlynx_score_normalized < 0:
+            # 方向相反 → 仅用 sentiment_score（op_advice 不参与 L7 映射）
+            mindlynx_normalized = mindlynx_score_normalized * 0.8
+            self.logger.info(
+                f"[{stock_code}] ML op_advice 方向与 sentiment 相反, 已禁用 op_advice 融合贡献"
+            )
+        else:
+            mindlynx_normalized = mindlynx_score_normalized * 0.8 + mindlynx_normalized * 0.2
 
         if not tradingagent_valid:
             tradingagent_normalized = 0.0

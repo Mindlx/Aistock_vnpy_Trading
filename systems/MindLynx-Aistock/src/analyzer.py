@@ -2880,6 +2880,22 @@ class GeminiAnalyzer:
 - ⚠️ 量能异常提示：成交量较昨日放大超过10倍，可能受异常数据或一次性冲量影响，必须降权解读，不能机械视为强确认信号
 """
 
+        # ── v2.0: 系统自身定量分析（在外部新闻之前注入，作为LLM的锚定框架）──
+        factor_text = context.get("factor_profile", "")
+        if factor_text:
+            prompt += f"""
+---
+
+## 📊 系统量化分析
+
+以下为本系统基于 60 日 OHLCV 数据计算的 12 因子定量分析结论。
+你的 `sentiment_score` 和 `operation_advice` 应以此为主要方向依据，
+外部情报作为佐证和补充。
+
+{factor_text}
+"""
+        _factor_injected = bool(factor_text)  # 标记已注入，避免尾部重复
+
         # 添加新闻搜索结果（重点区域）
         news_window_days: int | None = None
         context_window = context.get("news_window_days")
@@ -3038,9 +3054,12 @@ class GeminiAnalyzer:
         prompt += signal_correlation_notice + "\n"
 
         # 注入定量因子得分 (Phase 2)
-        factor_text = context.get("factor_profile", "")
-        if factor_text:
-            prompt += "\n\n---\n\n" + str(factor_text) + "\n"
+        # factor_text 已在新闻前注入（v2.0），尾部不再重复
+        # 如需尾部补充，取消注释以下代码
+        # if not _factor_injected:
+        #     factor_text = context.get("factor_profile", "")
+        #     if factor_text:
+        #         prompt += "\n\n---\n\n" + str(factor_text) + "\n"
 
         # 注入 LY 量化信号（双模型预判）{@calibration LY量化信号注入}
         ly_text = context.get("ly_signal", "")

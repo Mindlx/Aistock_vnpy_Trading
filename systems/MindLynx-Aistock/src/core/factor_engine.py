@@ -705,22 +705,61 @@ class FactorEngine:
                 r.composite_label = "中性"
 
     def build_factor_profile(self, result: FactorResult) -> str:
-        """Build a collapsed factor summary for LLM prompt injection."""
+        """Build a structured per-factor breakdown for LLM prompt injection.
+
+        v2.0 (2026-06-30): Expanded from 2-line summary to per-factor breakdown.
+        Each factor's name, z-score, direction arrow, and category are surfaced
+        so the LLM can translate the system's quantitative analysis rather than
+        relying on external data alone.
+        """
         cs = result.composite_score
         label = result.composite_label
-        direction = "↑ 偏多" if cs > 0.2 else ("↓ 偏空" if cs < -0.2 else "→ 中性")
+        direction = "↑偏多" if cs > 0.2 else ("↓偏空" if cs < -0.2 else "→中性")
 
-        # Find diverging factors (z-score sign opposite to composite)
+        # Per-factor breakdown grouped by category
+        categories: dict[str, list[str]] = {}
+        for fd in self.factors:
+            z = result.z_scores.get(fd.name, 0.0)
+            cat = fd.category
+            raw = result.raw_factors.get(fd.name, None)
+            raw_str = f" [{raw:.2f}]" if raw is not None else ""
+
+            # Direction arrow based on higher_better
+            if fd.higher_better:
+                arrow = "↑" if z > 0.1 else ("↓" if z < -0.1 else "→")
+            else:
+                arrow = "↑" if z < -0.1 else ("↓" if z > 0.1 else "→")
+
+            strength = "★" if abs(z) > 1.5 else ("☆" if abs(z) > 0.5 else "")
+            cat_label_map = {
+                "momentum": "动量", "sentiment": "情绪",
+                "volatility": "波动", "quality": "质量", "valuation": "估值",
+            }
+            cat_cn = cat_label_map.get(cat, cat)
+            item = f"  {arrow} {fd.display_name}: {z:+.2f}σ{strength}{raw_str}"
+
+            if cat_cn not in categories:
+                categories[cat_cn] = []
+            categories[cat_cn].append(item)
+
+        # Find diverging factors
         diverging = []
         for fd in self.factors:
             z = result.z_scores.get(fd.name, 0.0)
-            if (cs > 0.2 and z < -0.2) or (cs < -0.2 and z > 0.2):
+            if (cs > 0.2 and z < -0.5) or (cs < -0.2 and z > 0.5):
                 diverging.append(f"{fd.display_name}({z:+.1f}σ)")
 
-        div_text = f" | 因子分歧: {', '.join(diverging)}" if diverging else ""
-
         lines = [
-            f"### 量化因子评分",
-            f"综合: {cs:+.2f} {direction}{div_text}",
+            f"### 系统量化分析",
+            f"综合: {cs:+.2f} {direction} ｜ 复合标签: {label}",
+            f"因子逐项:",
         ]
+        for cat in ["动量", "情绪", "波动", "质量", "估值"]:
+            if cat in categories:
+                lines.append(f"  [{cat}]")
+                lines.extend(categories[cat])
+
+        if diverging:
+            lines.append(f"⚠因子分歧: {'; '.join(diverging[:4])}")
+
         return "\n".join(lines)
