@@ -350,8 +350,8 @@ def generate_report(stocks: list[dict]) -> str:
                     try: vals.append(float(r.get("用户关注指数", 0)))
                     except: pass
                 if vals:
-                    r5 = sum(vals[:5]) / min(len(vals[:5]), 1)
-                    o5 = sum(vals[5:10]) / min(len(vals[5:10]), 1) if len(vals) >= 10 else r5
+                    r5 = sum(vals[:5]) / max(len(vals[:5]), 1)
+                    o5 = sum(vals[5:10]) / max(len(vals[5:10]), 1) if len(vals) >= 10 else r5
                     focus_trend = "↑" if r5 > o5 else ("↓" if r5 < o5 else "→")
         except: pass
 
