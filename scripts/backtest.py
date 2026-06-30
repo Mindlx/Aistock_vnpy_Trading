@@ -32,6 +32,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+# ── 回测数据 fallback (多源兜底) ────────────────────────────
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT))
+from src.market_data_fallback import (
+    get_pred_and_next_close_with_fallback,
+    get_fallback_stats,
+    reset_fallback_stats,
+)
+
 # ── 路径常量 ──────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FUSION_OUTPUT_DIR = PROJECT_ROOT / "data" / "fusion_output"
@@ -321,9 +330,10 @@ def cmd_check() -> Tuple[int, int]:
     # 检查缓存DB是否存在
     if not CACHE_DB.exists():
         print(f"⚠️ 统一缓存DB不存在: {CACHE_DB}")
-        print("  请先运行 cache_cli.py warm 预热缓存")
-        return 0, 0
+        print("  回退链将优先使用 data_warehouse (5源fallback)")
+        # Don't bail — warehouse may have data even without unified_cache
 
+    reset_fallback_stats()
     conn_bt = _get_db()
     conn_cache = sqlite3.connect(str(CACHE_DB))
     conn_cache.row_factory = sqlite3.Row
@@ -351,7 +361,9 @@ def cmd_check() -> Tuple[int, int]:
         date = row["date"]
         code = row["stock_code"]
 
-        next_day = _get_pred_and_next_close(conn_cache, date, code)
+        next_day = get_pred_and_next_close_with_fallback(
+            conn_cache, date, code, CACHE_DB
+        )
         if next_day is None:
             continue  # 还不够远,下次再查
 
@@ -416,6 +428,25 @@ def cmd_check() -> Tuple[int, int]:
         _print_accuracy_summary(correct, total)
     else:
         print("ℹ️  还没有可匹配的次日行情数据(可能cache不足或日期太近)")
+
+    # 报告 fallback 统计
+    fb = get_fallback_stats()
+    if fb["total_fallback_calls"] > 0:
+        wh = fb["warehouse_hits"]
+        uh = fb["unified_cache_hits"]
+        ah = fb["analysis_hits"]
+        ex = fb["all_exhausted"]
+        print(f"  ── 数据源兜底 ──")
+        print(f"    fallback调用: {fb['total_fallback_calls']}次")
+        if wh:
+            print(f"    data_warehouse命中(Tier1): {wh}次 ✅")
+        if uh:
+            print(f"    unified_cache命中(Tier2): {uh}次")
+        if ah:
+            print(f"    stock_analysis.db命中(Tier3): {ah}次")
+        if ex:
+            print(f"    全部源耗尽: {ex}次 ⚠️ 需要手动补数据")
+        reset_fallback_stats()
 
     return matched, correct["fusion"]
 
@@ -497,6 +528,17 @@ def _compute_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
         "SELECT COUNT(*) FROM bt_predictions WHERE next_pct_chg IS NOT NULL").fetchone()[0]
     stats["total_unmatched"] = conn.execute(
         "SELECT COUNT(*) FROM bt_predictions WHERE next_pct_chg IS NULL").fetchone()[0]
+    if stats["total_unmatched"] > 0:
+        # 列出最早未匹配的日期,便于定位数据缺失
+        oldest_unmatched = conn.execute("""
+            SELECT date, COUNT(*) as cnt
+            FROM bt_predictions
+            WHERE next_pct_chg IS NULL
+            GROUP BY date ORDER BY date ASC LIMIT 3
+        """).fetchall()
+        dates_str = ", ".join(f"{r[0]}({r[1]}条)" for r in oldest_unmatched)
+        print(f"⚠️  存在 {stats['total_unmatched']} 条未匹配预测"
+              f" (最早未匹配: {dates_str})")
 
     # 日期范围
     r = conn.execute("SELECT MIN(date), MAX(date) FROM bt_predictions").fetchone()
@@ -994,6 +1036,93 @@ def cmd_backfill() -> int:
     return total
 
 
+# ── Check Integrity ───────────────────────────────────────
+
+def cmd_check_integrity() -> None:
+    """检查回测数据库完整性: 发现异常模式、缺失数据和潜在问题."""
+    conn = _get_db()
+
+    # 1. 未匹配预测
+    unmatched = conn.execute("""
+        SELECT date, stock_code, stock_name
+        FROM bt_predictions
+        WHERE next_pct_chg IS NULL
+        ORDER BY date ASC
+    """).fetchall()
+
+    # 2. T+1 日期异常 (next_date <= date)
+    date_anomalies = conn.execute("""
+        SELECT id, date, next_date, stock_code
+        FROM bt_predictions
+        WHERE next_date IS NOT NULL AND next_date <= date
+    """).fetchall()
+
+    # 3. 涨跌幅超出板块限制 (数据污染)
+    pct_anomalies = conn.execute("""
+        SELECT id, date, stock_code, next_pct_chg
+        FROM bt_predictions
+        WHERE next_pct_chg IS NOT NULL AND ABS(next_pct_chg) > 25
+        ORDER BY ABS(next_pct_chg) DESC
+        LIMIT 10
+    """).fetchall()
+
+    # 4. 多日未匹配 (预测日期超过5天前仍未匹配到T+1)
+    import datetime
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=5)).strftime("%Y-%m-%d")
+    stale_unmatched = conn.execute("""
+        SELECT date, COUNT(*) as cnt
+        FROM bt_predictions
+        WHERE next_pct_chg IS NULL AND date < ?
+        GROUP BY date ORDER BY date ASC
+    """, (cutoff,)).fetchall()
+
+    conn.close()
+
+    print(f"\n{'='*55}")
+    print(f"  回测数据库完整性检查")
+    print(f"{'='*55}")
+
+    # 报告
+    print(f"\n  📋 未匹配预测: {len(unmatched)} 条")
+    if unmatched:
+        print(f"     (最早日期: {unmatched[0]['date']}, 最晚: {unmatched[-1]['date']})")
+        for row in unmatched[:5]:
+            print(f"      {row['stock_code']} @ {row['date']}")
+        if len(unmatched) > 5:
+            print(f"      ... 还有 {len(unmatched) - 5} 条")
+
+    if stale_unmatched:
+        print(f"\n  ⚠️ 过期未匹配 (超过5天前):")
+        for row in stale_unmatched:
+            print(f"      {row['date']}: {row['cnt']} 条")
+
+    if date_anomalies:
+        print(f"\n  🚨 T+1 日期异常 (next_date <= date): {len(date_anomalies)} 条")
+        for row in date_anomalies:
+            print(f"      id={row['id']} {row['stock_code']}: {row['date']} → {row['next_date']}")
+
+    if pct_anomalies:
+        print(f"\n  ⚠️ 涨跌幅异常 (>25%): {len(pct_anomalies)} 条")
+        for row in pct_anomalies[:5]:
+            print(f"      {row['stock_code']} @ {row['date']}: {row['next_pct_chg']:.2f}%")
+
+    total_issues = len(unmatched) + len(date_anomalies) + len(pct_anomalies)
+    if total_issues == 0:
+        print(f"\n  ✅ 数据库完整性良好, 无异常")
+    else:
+        print(f"\n  📊 共发现 {total_issues} 个问题"
+              f" (未匹配{len(unmatched)}, 日期异常{len(date_anomalies)},"
+              f" 涨跌幅异常{len(pct_anomalies)})")
+
+    # Fallback 统计
+    fb = get_fallback_stats()
+    print(f"\n  数据源兜底统计 (上次运行):")
+    print(f"    调用次数: {fb['total_fallback_calls']}")
+    print(f"    data_warehouse命中: {fb['warehouse_hits']}")
+    print(f"    stock_analysis.db命中: {fb['analysis_hits']}")
+    print(f"    全部耗尽: {fb['all_exhausted']}")
+
+
 # ── WalkForward验证 ───────────────────────────────────────────
 
 def cmd_walkforward(
@@ -1228,6 +1357,7 @@ def main() -> None:
     p_walkforward.add_argument("--train", type=int, default=20, help="训练窗口天数(默认20)")
     p_walkforward.add_argument("--test", type=int, default=10, help="验证窗口天数(默认10)")
     p_walkforward.add_argument("--step", type=int, default=5, help="滑动步长(默认5)")
+    p_integrity = sub.add_parser("check-integrity", help="检查回测数据库完整性：未匹配异常、日期异常、涨跌幅异常")
 
     args = parser.parse_args()
 
@@ -1251,6 +1381,8 @@ def main() -> None:
         cmd_weight_sweep()
     elif args.command == "walkforward":
         cmd_walkforward(train_window=args.train, test_window=args.test, step=args.step)
+    elif args.command == "check-integrity":
+        cmd_check_integrity()
 
 
 if __name__ == "__main__":
