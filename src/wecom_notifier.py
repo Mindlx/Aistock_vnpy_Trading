@@ -145,12 +145,12 @@ class WeComNotifier:
             pos = f"{up['pct']:.0f}%"
         else:
             sig_label = r.get('signal', 'neutral')
-            pct = SignalNormalizer.l7_target_pct(sig_label)
-            pos = f"{pct:.0f}%" if pct > 0 else "持有"
+            pct_target = SignalNormalizer.l7_target_pct(sig_label)
+            pos = f"{pct_target:.0f}%" if pct_target > 0 else "持有"
 
         # 股价和涨跌幅
         price_str = f"¥{price:.2f}" if price else "-"
-        chg_str = f"{pct:+.2f}%" if pct else "-"
+        chg_str = f"{pct:+.2f}%" if pct is not None else "-"
 
         # 三系统得分
         sys_str = f"ly{ls:+.2f} ml{ms:+.2f} at{ts:+.2f}"
