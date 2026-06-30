@@ -35,8 +35,9 @@
 ```
 docs/
 ├── README.md                  ← 本文档索引
-├── architecture/              # 系统架构（3篇）
+├── architecture/              # 系统架构（4篇）
 │   ├── overview.md            # 系统架构总览
+│   ├── system-overview.md     # 🆕 架构全景（分层/子系统/融合/推送/c1test）
 │   ├── current-state.md       # 运行状态快照
 │   └── deployment.md          # 部署指南
 │
