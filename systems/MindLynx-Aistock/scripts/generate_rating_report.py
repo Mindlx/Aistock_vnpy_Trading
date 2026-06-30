@@ -294,8 +294,8 @@ def generate_report(stocks: list[dict]) -> str:
                 try: vals.append(float(r.get("用户关注指数", 0)))
                 except: pass
             if vals:
-                avg_r = sum(vals[:5]) / min(len(vals[:5]), 1)
-                avg_o = sum(vals[5:10]) / min(len(vals[5:10]), 1) if len(vals) >= 10 else avg_r
+                avg_r = sum(vals[:5]) / max(len(vals[:5]), 1)
+                avg_o = sum(vals[5:10]) / max(len(vals[5:10]), 1) if len(vals) >= 10 else avg_r
                 trend = "↑" if avg_r > avg_o else ("↓" if avg_r < avg_o else "→")
                 metrics.append(f"关注 {avg_r:.0f} {trend}")
 
