@@ -84,17 +84,29 @@ _DIVIDEND_KEYWORD_MAP: dict[str, list[str]] = {
 
 
 def _safe_float(value: Any) -> float | None:
-    """Best-effort float conversion with string cleaning."""
+    """Best-effort float conversion with unit-aware string cleaning."""
     if value is None:
         return None
     if isinstance(value, (int, float)):
         v = float(value)
         return v if not (v != v) else None  # NaN → None
     try:
-        s = str(value).strip().replace(",", "").replace("%", "").replace("亿元", "00000000").replace("万元", "0000")
+        s = str(value).strip().replace(",", "").replace("%", "").replace(" ", "")
         if not s:
             return None
-        v = float(s)
+
+        # Unit-aware conversion: 亿元(×1e8), 万元(×1e4), 亿(×1e8), 万(×1e4)
+        multiplier = 1.0
+        for unit, factor in [("亿元", 1e8), ("万元", 1e4), ("亿", 1e8), ("万", 1e4)]:
+            if unit in s:
+                s = s.replace(unit, "")
+                multiplier = factor
+                break
+
+        if not s:
+            return None
+
+        v = float(s) * multiplier
         return v if not (v != v) else None
     except (ValueError, TypeError):
         return None
