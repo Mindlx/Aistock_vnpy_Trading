@@ -12,6 +12,7 @@ from datetime import date as _date_type
 from pathlib import Path
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Any, cast
 
@@ -45,6 +46,7 @@ def _read_capital_flow_cache(stock_code: str) -> dict | None:
 def _write_capital_flow_cache(stock_code: str, data: dict) -> None:
     p = _capital_flow_cache_path()
     try:
+        p.parent.mkdir(parents=True, exist_ok=True)
         cache = {}
         if p.exists():
             cache = json.loads(p.read_text(encoding="utf-8"))
@@ -52,6 +54,7 @@ def _write_capital_flow_cache(stock_code: str, data: dict) -> None:
         p.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass
+
 
 _DIVIDEND_KEYWORD_MAP: dict[str, list[str]] = {
     "per_share": [
@@ -81,139 +84,43 @@ _DIVIDEND_KEYWORD_MAP: dict[str, list[str]] = {
 
 
 def _safe_float(value: Any) -> float | None:
-    """Best-effort float conversion."""
     if value is None:
         return None
-    if isinstance(value, (int, float)):
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-    s = str(value).strip().replace(",", "").replace("%", "")
-    if not s:
-        return None
     try:
-        return float(s)
-    except (TypeError, ValueError):
+        v = float(value)
+        return v if not (v != v) else None  # NaN → None
+    except (ValueError, TypeError):
         return None
 
 
 def _safe_str(value: Any) -> str:
     if value is None:
         return ""
-    return str(value).strip()
+    try:
+        return str(value).strip()
+    except Exception:
+        return ""
 
 
-def _safe_datetime(value: Any) -> datetime | None:
+def _normalize_code(code: Any) -> str | None:
+    if code is None:
+        return None
+    c = str(code).strip().upper().replace(".", "").replace("SZ", "").replace("SH", "").replace("BJ", "")
+    if c.isdigit():
+        return c
+    return None
+
+
+def _normalize_report_date(value: Any) -> str | None:
     if value is None:
         return None
-    try:
-        parsed = pd.to_datetime(value)
-    except Exception:
-        return None
-    if pd.isna(parsed):
-        return None
-    try:
-        return cast(datetime, parsed.to_pydatetime())
-    except Exception:
-        return None
-
-
-def _normalize_code(raw: Any) -> str:
-    s = _safe_str(raw).upper()
-    if "." in s:
-        s = s.split(".", 1)[0]
-    s = re.sub(r"^(SH|SZ|BJ)", "", s)
-    return s
-
-
-def _extract_from_financial_abstract(df: pd.DataFrame) -> dict[str, Any] | None:
-    """从东方财富财务摘要（转置格式）提取核心财务指标。
-
-    stock_financial_abstract 返回的格式：
-    列: ['选项', '指标', '20260331', '20251231', '20250930', ...]
-    行: 指标名如 '营业总收入', '归母净利润', '净资产收益率(ROE)'
-    """
-    if df is None or df.empty or '指标' not in df.columns:
-        return None
-
-    date_cols = sorted([c for c in df.columns if c not in ('选项', '指标')])
-    if not date_cols:
-        return None
-    latest = date_cols[-1]
-
-    # 计算上年同期列名用于同比计算
-    prev = None
-    if len(latest) == 8:
-        prev_yy = str(int(latest[:4]) - 1)
-        prev = prev_yy + latest[4:]
-        if prev not in date_cols:
-            prev = date_cols[-2] if len(date_cols) >= 2 else None
-
-    def _m(name):
-        row = df[df['指标'] == name]
-        if row.empty:
-            return None
-        return _safe_float(row.iloc[0].get(latest))
-
-    def _m_at(name, col):
-        row = df[df['指标'] == name]
-        if row.empty or col is None:
-            return None
-        return _safe_float(row.iloc[0].get(col))
-
-    revenue = _m('营业总收入')
-    net_profit = _m('归母净利润')
-    roe = _m('净资产收益率(ROE)') or _m('净资产收益率')
-    gross_margin = _m('毛利率')
-    operating_cf = _m('经营现金流量净额')
-
-    # 同比计算
-    revenue_yoy = None
-    if revenue and prev:
-        prev_revenue = _m_at('营业总收入', prev)
-        if prev_revenue and prev_revenue != 0:
-            revenue_yoy = round((revenue - prev_revenue) / abs(prev_revenue) * 100, 2)
-
-    profit_yoy = None
-    if net_profit and prev:
-        prev_profit = _m_at('归母净利润', prev)
-        if prev_profit and prev_profit != 0:
-            profit_yoy = round((net_profit - prev_profit) / abs(prev_profit) * 100, 2)
-
-    report_date = f"{latest[:4]}-{latest[4:6]}-{latest[6:8]}" if len(latest) == 8 else None
-
-    result = {
-        "revenue_yoy": revenue_yoy,
-        "net_profit_yoy": profit_yoy,
-        "roe": roe,
-        "gross_margin": gross_margin,
-        "report_date": report_date,
-        "revenue": revenue,
-        "net_profit_parent": net_profit,
-        "operating_cash_flow": operating_cf,
-    }
-
-    if any(v is not None for v in result.values()):
-        return result
-    return None
-
-
-def _pick_by_keywords(row: pd.Series, keywords: list[str]) -> Any | None:
-    """
-    Return first non-empty row value whose column name contains any keyword.
-    """
-    for col in row.index:
-        col_s = str(col)
-        if any(k in col_s for k in keywords):
-            val = row.get(col)
-            if val is not None and str(val).strip() not in ("", "-", "nan", "None"):
-                return val
-    return None
+    raw = str(value).strip()
+    if len(raw) >= 10:
+        return raw[:10]
+    return raw if raw else None
 
 
 def _parse_dividend_plan_to_per_share(plan_text: str) -> float | None:
-    """Parse per-share cash dividend from Chinese plan text."""
     text = _safe_str(plan_text)
     if not text:
         return None
@@ -230,122 +137,165 @@ def _parse_dividend_plan_to_per_share(plan_text: str) -> float | None:
 
     match_per_share = re.search(r"每\s*股\s*派(?:发)?\s*([0-9]+(?:\.[0-9]+)?)\s*元", text)
     if match_per_share:
-        parsed = _safe_float(match_per_share.group(1))
-        if parsed is not None and parsed > 0:
-            return parsed
+        return _safe_float(match_per_share.group(1))
+
     return None
 
 
-def _extract_cash_dividend_per_share(row: pd.Series) -> float | None:
-    """Extract pre-tax cash dividend per share from a row."""
-    plan_text = _safe_str(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["plan_text"]))
-    # Keep pre-tax semantics; skip explicit after-tax plans unless pre-tax marker exists.
-    if "税后" in plan_text and "税前" not in plan_text and "含税" not in plan_text:
-        return None
+def _extract_dividend_info(bonus_df: pd.DataFrame, stock_code: str) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    if bonus_df is None or bonus_df.empty:
+        return result
 
-    direct = _safe_float(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["per_share"]))
-    if direct is not None and direct > 0:
-        return direct
-    return _parse_dividend_plan_to_per_share(plan_text)
-
-
-def _filter_rows_by_code(df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
-    if df is None or df.empty:
-        return pd.DataFrame()
     code_cols = [
-        c for c in df.columns if any(k in str(c) for k in ("代码", "股票代码", "证券代码", "symbol", "ts_code"))
+        c for c in bonus_df.columns if any(k in str(c) for k in ("代码", "股票代码", "证券代码", "ts_code", "symbol"))
     ]
-    if not code_cols:
-        return df
-
     target = _normalize_code(stock_code)
-    for col in code_cols:
+    if not code_cols:
+        row = bonus_df.iloc[0]
+    else:
+        matched = pd.DataFrame()
+        for col in code_cols:
+            try:
+                series = bonus_df[col].astype(str).map(_normalize_code)
+                cur = bonus_df[series == target]
+                if not cur.empty:
+                    matched = cur
+                    break
+            except Exception:
+                continue
+        row = matched.iloc[0] if not matched.empty else bonus_df.iloc[0]
+
+    plan_text = _safe_str(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["plan_text"]))
+    if plan_text:
+        plan_result = _parse_dividend_plan_to_per_share(plan_text)
+        if plan_result is not None:
+            result["per_share"] = plan_result
+            result["plan_text"] = plan_text
+
+    ex_date = _safe_str(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["ex_dividend_date"]))
+    if ex_date:
+        result["ex_dividend_date"] = ex_date
+
+    record_date = _safe_str(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["record_date"]))
+    if record_date:
+        result["record_date"] = record_date
+
+    announce_date = _safe_str(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["announce_date"]))
+    if announce_date:
+        result["announce_date"] = announce_date
+
+    return result
+
+
+def _safe_date_parse(value: Any) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    for fmt in ("%Y%m%d", "%Y-%m-%d", "%Y/%m/%d"):
         try:
-            series = df[col].astype(str).map(_normalize_code)
-            filtered = df[series == target]
-            if not filtered.empty:
-                return filtered
+            dt = datetime.strptime(raw[:10].replace("-", "").replace("/", ""), fmt.replace("-", "").replace("/", ""))
+            return dt.strftime("%Y-%m-%d")
         except Exception:
             continue
-    return pd.DataFrame()
+    return _normalize_report_date(value)
 
 
-def _normalize_report_date(value: Any) -> str | None:
-    parsed = _safe_datetime(value)
-    return parsed.date().isoformat() if parsed else None
+def _pick_by_keywords(row: pd.Series, keywords: list[str]) -> Any | None:
+    """
+    Return first non-empty row value whose column name contains any keyword.
+    """
+    for col in row.index:
+        col_s = str(col)
+        if any(k in col_s for k in keywords):
+            val = row.get(col)
+            if val is not None and str(val).strip() not in ("", "-", "nan", "None"):
+                return val
+    return None
 
 
-def _build_dividend_payload(
-    dividend_df: pd.DataFrame,
-    stock_code: str,
-    max_events: int = 5,
-) -> dict[str, Any]:
-    work_df = _filter_rows_by_code(dividend_df, stock_code)
-    if work_df.empty:
-        return {}
+def _quote_style_value(row: pd.Series, keywords: list[str]) -> float | None:
+    """
+    Pick a percentage-based value from a column whose name matches keywords,
+    but also matches the row-level metadata style where column values contain '%'.
+    """
+    for col in row.index:
+        col_s = str(col)
+        if any(k in col_s for k in keywords):
+            raw = row.get(col)
+            s = _safe_str(raw)
+            if s and "%" in s:
+                try:
+                    return float(s.replace("%", "").strip())
+                except Exception:
+                    pass
+    return None
 
-    now_date = datetime.now().date()
-    ttm_start_date = now_date - timedelta(days=365)
-    dedupe_keys = set()
-    events: list[dict[str, Any]] = []
 
-    for _, row in work_df.iterrows():
-        if not isinstance(row, pd.Series):
-            continue
-        ex_dt = _safe_datetime(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["ex_dividend_date"]))
-        record_dt = _safe_datetime(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["record_date"]))
-        announce_dt = _safe_datetime(_pick_by_keywords(row, _DIVIDEND_KEYWORD_MAP["announce_date"]))
-        event_dt = ex_dt or record_dt or announce_dt
-        if event_dt is None:
-            continue
-        event_date = event_dt.date()
-        if event_date > now_date:
-            continue
+def _extract_from_financial_abstract(df: pd.DataFrame) -> dict[str, Any] | None:
+    """
+    Parse transposed stock_financial_abstract format (rows=indicators, cols=dates).
+    """
+    if df is None or df.empty:
+        return None
+    if "ITEM" not in df.columns:
+        return None
 
-        per_share = _extract_cash_dividend_per_share(row)
-        if per_share is None or per_share <= 0:
-            continue
+    result: dict[str, Any] = {}
+    date_cols = [c for c in df.columns if c != "ITEM"]
 
-        dedupe_key = (event_date.isoformat(), round(per_share, 6))
-        if dedupe_key in dedupe_keys:
-            continue
-        dedupe_keys.add(dedupe_key)
+    def _pick(col_keywords: list[str]) -> pd.Series | None:
+        for keyword in col_keywords:
+            mask = df["ITEM"].astype(str).str.contains(keyword, na=False)
+            matched = df[mask]
+            if not matched.empty:
+                return matched.iloc[0]
+        return None
 
-        events.append(
-            {
-                "event_date": event_date.isoformat(),
-                "ex_dividend_date": ex_dt.date().isoformat() if ex_dt else None,
-                "record_date": record_dt.date().isoformat() if record_dt else None,
-                "announcement_date": announce_dt.date().isoformat() if announce_dt else None,
-                "cash_dividend_per_share": round(per_share, 6),
-                "is_pre_tax": True,
-            }
-        )
+    revenue_row = _pick(["营业总收入", "营业收入", "营收"])
+    profit_row = _pick(["净利润", "归母净利润", "母公司股东净利润"])
+    roe_row = _pick(["净资产收益率", "ROE"])
+    gross_row = _pick(["毛利率"])
+    ocf_row = _pick(["经营活动产生的现金流量净额", "经营活动现金流", "经营现金流"])
 
-    if not events:
-        return {}
+    if date_cols:
+        result["report_date"] = _normalize_report_date(date_cols[0])
 
-    events.sort(key=lambda item: item.get("event_date") or "", reverse=True)
-    ttm_events: list[dict[str, Any]] = []
-    for item in events:
-        event_dt = _safe_datetime(item.get("event_date"))
-        if event_dt is None:
-            continue
-        event_date = event_dt.date()
-        if ttm_start_date <= event_date <= now_date:
-            ttm_events.append(item)
+    for row_, keys, target_key in [
+        (revenue_row, ["营业总收入", "营业收入", "营收"], "revenue"),
+        (profit_row, ["净利润", "归母净利润", "母公司股东净利润"], "net_profit_parent"),
+        (roe_row, ["净资产收益率", "ROE"], "roe"),
+        (gross_row, ["毛利率"], "gross_margin"),
+        (ocf_row, ["经营活动产生的现金流量净额", "经营活动现金流", "经营现金流"], "operating_cash_flow"),
+    ]:
+        if row_ is not None:
+            for col_s in date_cols:
+                val = row_.get(col_s)
+                parsed = _safe_float(val)
+                if parsed is not None:
+                    result[target_key] = parsed
+                    break
 
-    return {
-        "events": events[: max(1, max_events)],
-        "ttm_event_count": len(ttm_events),
-        "ttm_cash_dividend_per_share": (
-            round(sum(float(item.get("cash_dividend_per_share") or 0.0) for item in ttm_events), 6)
-            if ttm_events
-            else None
-        ),
-        "coverage": "cash_dividend_pre_tax",
-        "as_of": now_date.isoformat(),
-    }
+    # Revenue YoY & Net Profit YoY from abstract (if present)
+    rev_yoy_row = _pick(["营业收入同比增长", "营收同比", "收入同比", "同比增长率"])
+    if rev_yoy_row is not None:
+        for col_s in date_cols:
+            val = rev_yoy_row.get(col_s)
+            parsed = _safe_float(val)
+            if parsed is not None:
+                result["revenue_yoy"] = parsed
+                break
+
+    profit_yoy_row = _pick(["净利润同比增长", "净利同比", "归母净利润同比增长"])
+    if profit_yoy_row is not None:
+        for col_s in date_cols:
+            val = profit_yoy_row.get(col_s)
+            parsed = _safe_float(val)
+            if parsed is not None:
+                result["net_profit_yoy"] = parsed
+                break
+
+    return result if any(v is not None for v in result.values()) else None
 
 
 def _extract_latest_row(df: pd.DataFrame, stock_code: str) -> pd.Series | None:
@@ -387,20 +337,95 @@ class AkshareFundamentalAdapter:
         except Exception as exc:
             return None, None, [f"import_akshare:{type(exc).__name__}"]
 
-        for func_name, kwargs in candidates:
-            fn = getattr(ak, func_name, None)
-            if fn is None:
-                continue
-            try:
-                df = fn(**kwargs)
-                if isinstance(df, pd.Series):
-                    df = df.to_frame().T
-                if isinstance(df, pd.DataFrame) and not df.empty:
-                    return df, func_name, errors
-            except Exception as exc:
-                errors.append(f"{func_name}:{type(exc).__name__}")
-                continue
+        for attempt in range(3):  # 原始 + 2 次重试
+            for func_name, kwargs in candidates:
+                fn = getattr(ak, func_name, None)
+                if fn is None:
+                    continue
+                try:
+                    df = fn(**kwargs)
+                    if isinstance(df, pd.Series):
+                        df = df.to_frame().T
+                    if isinstance(df, pd.DataFrame) and not df.empty:
+                        return df, func_name, errors
+                except Exception as exc:
+                    err_tag = f"{func_name}:{type(exc).__name__}"
+                    if err_tag not in errors:
+                        errors.append(err_tag)
+                    continue
+
+            # 全部候选人失败：如果是连接类错误且还有重试次数，等一秒再试
+            if attempt < 2 and any("ConnectionError" in e or "RemoteDisconnected" in e or "Timeout" in e or "ProtocolError" in e for e in errors):
+                time.sleep(1)
+                errors.append(f"retry:{attempt+1}")
+            else:
+                break
         return None, None, errors
+
+    def _try_tushare_capital_flow(self, stock_code: str) -> dict | None:
+        """Fallback: try Tushare Pro moneyflow (旧版个股资金流) when akshare all fail."""
+        try:
+            from src.config import get_config
+            cfg = get_config()
+            if not cfg.tushare_token:
+                return None
+
+            from .tushare_fetcher import _TushareHttpClient
+            client = _TushareHttpClient(cfg.tushare_token, timeout=15)
+
+            # Convert: 000592 → 000592.SZ,  601801 → 601801.SH
+            if stock_code[:1] in ("6", "9"):
+                market = "SH"
+            elif stock_code[:1] in ("4", "8"):
+                market = "BJ"
+            else:
+                market = "SZ"
+            ts_code = f"{stock_code}.{market}"
+
+            df = client.query("moneyflow", ts_code=ts_code)
+            if df is None or df.empty:
+                return None
+
+            # moneyflow 返回多条记录（多日），取最新一条
+            if "trade_date" in df.columns:
+                df = df.sort_values("trade_date", ascending=False)
+            row = df.iloc[0]
+
+            # 主力净流入 = 大单净流入(买-卖) + 超大单净流入(买-卖)
+            # moneyflow 字段: buy_lg_vol/sell_lg_vol (大单), buy_elg_vol/sell_elg_vol (超大单)
+            # 先用金额(Amount)字段，失败回退到量(Vol)字段
+            buy_lg = _safe_float(row.get("buy_lg_amount"))
+            sell_lg = _safe_float(row.get("sell_lg_amount"))
+            if buy_lg is None:
+                buy_lg = _safe_float(row.get("buy_lg_vol"))
+                sell_lg = _safe_float(row.get("sell_lg_vol"))
+
+            buy_elg = _safe_float(row.get("buy_elg_amount"))
+            sell_elg = _safe_float(row.get("sell_elg_amount"))
+            if buy_elg is None:
+                buy_elg = _safe_float(row.get("buy_elg_vol"))
+                sell_elg = _safe_float(row.get("sell_elg_vol"))
+
+            if buy_lg is not None and sell_lg is not None:
+                net_main = (buy_lg - sell_lg) + (
+                    (buy_elg - sell_elg) if buy_elg is not None and sell_elg is not None else 0.0
+                )
+            else:
+                net_main = _safe_float(row.get("net_mf_amount"))  # total net flow (万元)
+                if net_main is None:
+                    net_main = _safe_float(row.get("net_mf_vol"))
+
+            if net_main is None:
+                return None
+
+            return {
+                "main_net_inflow": net_main,
+                "inflow_5d": None,    # moneyflow 仅单日, Phase 1 暂不拉多日
+                "inflow_10d": None,
+            }
+        except Exception as exc:
+            logger.debug("[AkshareFundamentalAdapter] tushare capital flow fallback failed: %s", exc)
+            return None
 
     def get_fundamental_bundle(self, stock_code: str) -> dict[str, Any]:
         """
@@ -464,6 +489,7 @@ class AkshareFundamentalAdapter:
                         "roe": roe,
                         "gross_margin": gross_margin,
                     }
+
                     financial_report_payload = {
                         "report_date": report_date,
                         "revenue": revenue,
@@ -475,72 +501,30 @@ class AkshareFundamentalAdapter:
                         result["earnings"]["financial_report"] = financial_report_payload
                     result["source_chain"].append(f"growth:{fin_source}")
 
-        # Earnings forecast
-        forecast_df, forecast_source, forecast_errors = self._call_df_candidates(
+        # Dividend
+        bonus_df, bonus_source, bonus_errors = self._call_df_candidates(
             [
-                ("stock_yjyg_em", {}),
-                ("stock_yjbb_em", {}),
+                ("stock_dividents_cninfo", {"symbol": stock_code}),
+                ("stock_dividend_rights", {"symbol": stock_code}),
             ]
         )
-        result["errors"].extend(forecast_errors)
-        if forecast_df is not None:
-            row = _extract_latest_row(forecast_df, stock_code)
-            if row is not None:
-                result["earnings"]["forecast_summary"] = _safe_str(
-                    _pick_by_keywords(row, ["预告", "业绩变动", "内容", "摘要", "公告"])
-                )[:200]
-                result["source_chain"].append(f"earnings_forecast:{forecast_source}")
+        result["errors"].extend(bonus_errors)
+        if bonus_df is not None:
+            dividend_info = _extract_dividend_info(bonus_df, stock_code)
+            if dividend_info:
+                result["earnings"]["dividend"] = dividend_info
+                result["source_chain"].append(f"dividend:{bonus_source}")
 
-        # Earnings quick report
-        quick_df, quick_source, quick_errors = self._call_df_candidates(
-            [
-                ("stock_yjkb_em", {}),
-            ]
-        )
-        result["errors"].extend(quick_errors)
-        if quick_df is not None:
-            row = _extract_latest_row(quick_df, stock_code)
-            if row is not None:
-                result["earnings"]["quick_report_summary"] = _safe_str(
-                    _pick_by_keywords(row, ["快报", "摘要", "公告", "说明"])
-                )[:200]
-                result["source_chain"].append(f"earnings_quick:{quick_source}")
-
-        # Dividend details (cash dividend, pre-tax)
-        dividend_df, dividend_source, dividend_errors = self._call_df_candidates(
-            [
-                ("stock_fhps_detail_em", {"symbol": stock_code}),
-                ("stock_history_dividend_detail", {"symbol": stock_code, "indicator": "分红", "date": ""}),
-            ]
-        )
-        result["errors"].extend(dividend_errors)
-        if dividend_df is not None:
-            dividend_payload = _build_dividend_payload(dividend_df, stock_code, max_events=5)
-            if dividend_payload:
-                result["earnings"]["dividend"] = dividend_payload
-                result["source_chain"].append(f"dividend:{dividend_source}")
-
-        # Institution / top shareholders
-        inst_df, inst_source, inst_errors = self._call_df_candidates(
-            [
-                ("stock_institute_hold", {}),
-                ("stock_institute_recommend", {}),
-            ]
-        )
-        result["errors"].extend(inst_errors)
-        if inst_df is not None:
-            row = _extract_latest_row(inst_df, stock_code)
-            if row is not None:
-                inst_change = _safe_float(_pick_by_keywords(row, ["增减", "变化", "变动", "持股变化"]))
-                result["institution"]["institution_holding_change"] = inst_change
-                result["source_chain"].append(f"institution:{inst_source}")
+        # Institutional holdings (top10 holders)
+        if stock_code[:1] in ("6", "9"):
+            top10_symbol = stock_code
+        else:
+            top10_symbol = stock_code.zfill(6)
 
         top10_df, top10_source, top10_errors = self._call_df_candidates(
             [
-                ("stock_gdfx_top_10_em", {"symbol": stock_code}),
-                ("stock_gdfx_top_10_em", {}),
-                ("stock_zh_a_gdhs_detail_em", {"symbol": stock_code}),
-                ("stock_zh_a_gdhs_detail_em", {}),
+                ("stock_top10_holders", {"symbol": top10_symbol}),
+                ("stock_top10_holders", {"symbol": top10_symbol, "date": ""}),
             ]
         )
         result["errors"].extend(top10_errors)
@@ -559,9 +543,9 @@ class AkshareFundamentalAdapter:
         """
         Return stock + sector capital flow.
 
-        (A') 多 akshare 同源 fallback: stock_individual_fund_flow / stock_main_fund_flow /
-             stock_fund_flow_individual / stock_fund_flow_big_deal, 多种参数组合.
+        (A') Tushare Pro moneyflow_dc 优先（已付费，更稳定）.
         (B') 数据湖缓存: 先查 data/realtime/capital_flow_cache.json, 成功则写入.
+        (C') akshare 10 个 fallback 降级.
         """
         result: dict[str, Any] = {
             "status": "not_supported",
@@ -578,37 +562,42 @@ class AkshareFundamentalAdapter:
             result["source_chain"].append("capital_cache:hit")
             return result
 
-        # ── 根据股票代码判断市场 ──
-        market = "sh" if stock_code[:1] in ("6", "9") else "sz"
-        alt_market = "1" if stock_code[:1] in ("6", "9") else "0"  # akshare 部分接口用 0/1
+        # ── (A') 付费源优先：Tushare Pro moneyflow_dc ──
+        tushare_flow = self._try_tushare_capital_flow(stock_code)
+        if tushare_flow is not None:
+            result["stock_flow"] = tushare_flow
+            result["source_chain"].append("capital_stock:tushare")
+        else:
+            # ── (C') tushare 失败 → akshare 10 candidates 降级 ──
+            market = "sh" if stock_code[:1] in ("6", "9") else "sz"
+            alt_market = "1" if stock_code[:1] in ("6", "9") else "0"
+            stock_df, stock_source, stock_errors = self._call_df_candidates([
+                ("stock_individual_fund_flow", {"stock": stock_code, "market": market}),
+                ("stock_individual_fund_flow", {"symbol": stock_code, "market": market}),
+                ("stock_individual_fund_flow", {"stock": stock_code, "market": alt_market}),
+                ("stock_individual_fund_flow", {"symbol": stock_code, "market": alt_market}),
+                ("stock_individual_fund_flow", {"stock": stock_code}),
+                ("stock_individual_fund_flow", {"symbol": stock_code}),
+                ("stock_main_fund_flow", {"symbol": stock_code}),
+                ("stock_main_fund_flow", {}),
+                ("stock_fund_flow_individual", {"stock": stock_code}),
+                ("stock_fund_flow_big_deal", {"stock": stock_code}),
+            ])
+            result["errors"].extend(stock_errors)
+            if stock_df is not None:
+                row = _extract_latest_row(stock_df, stock_code)
+                if row is not None:
+                    net_inflow = _safe_float(_pick_by_keywords(row, ["主力净流入", "净流入", "净额"]))
+                    inflow_5d = _safe_float(_pick_by_keywords(row, ["5日", "五日"]))
+                    inflow_10d = _safe_float(_pick_by_keywords(row, ["10日", "十日"]))
+                    result["stock_flow"] = {
+                        "main_net_inflow": net_inflow,
+                        "inflow_5d": inflow_5d,
+                        "inflow_10d": inflow_10d,
+                    }
+                    result["source_chain"].append(f"capital_stock:{stock_source}")
 
-        # (A') 多 API + 多参数组合
-        stock_df, stock_source, stock_errors = self._call_df_candidates([
-            ("stock_individual_fund_flow", {"stock": stock_code, "market": market}),
-            ("stock_individual_fund_flow", {"symbol": stock_code, "market": market}),
-            ("stock_individual_fund_flow", {"stock": stock_code, "market": alt_market}),
-            ("stock_individual_fund_flow", {"symbol": stock_code, "market": alt_market}),
-            ("stock_individual_fund_flow", {"stock": stock_code}),
-            ("stock_individual_fund_flow", {"symbol": stock_code}),
-            ("stock_main_fund_flow", {"symbol": stock_code}),
-            ("stock_main_fund_flow", {}),
-            ("stock_fund_flow_individual", {"stock": stock_code}),
-            ("stock_fund_flow_big_deal", {"stock": stock_code}),
-        ])
-        result["errors"].extend(stock_errors)
-        if stock_df is not None:
-            row = _extract_latest_row(stock_df, stock_code)
-            if row is not None:
-                net_inflow = _safe_float(_pick_by_keywords(row, ["主力净流入", "净流入", "净额"]))
-                inflow_5d = _safe_float(_pick_by_keywords(row, ["5日", "五日"]))
-                inflow_10d = _safe_float(_pick_by_keywords(row, ["10日", "十日"]))
-                result["stock_flow"] = {
-                    "main_net_inflow": net_inflow,
-                    "inflow_5d": inflow_5d,
-                    "inflow_10d": inflow_10d,
-                }
-                result["source_chain"].append(f"capital_stock:{stock_source}")
-
+        # ── 板块排行（独立于个股资金流，两边都尝试）──
         sector_df, sector_source, sector_errors = self._call_df_candidates(
             [
                 ("stock_sector_fund_flow_rank", {}),
@@ -649,71 +638,4 @@ class AkshareFundamentalAdapter:
         if has_content:
             _write_capital_flow_cache(stock_code, result)
 
-        return result
-
-    def get_dragon_tiger_flag(self, stock_code: str, lookback_days: int = 20) -> dict[str, Any]:
-        """
-        Return dragon-tiger signal in lookback window.
-        """
-        result: dict[str, Any] = {
-            "status": "not_supported",
-            "is_on_list": False,
-            "recent_count": 0,
-            "latest_date": None,
-            "source_chain": [],
-            "errors": [],
-        }
-
-        df, source, errors = self._call_df_candidates(
-            [
-                ("stock_lhb_stock_statistic_em", {}),
-                ("stock_lhb_detail_em", {}),
-                ("stock_lhb_jgmmtj_em", {}),
-            ]
-        )
-        result["errors"].extend(errors)
-        if df is None:
-            return result
-
-        # Try code filter
-        code_cols = [c for c in df.columns if any(k in str(c) for k in ("代码", "股票代码", "证券代码"))]
-        target = _normalize_code(stock_code)
-        matched = pd.DataFrame()
-        for col in code_cols:
-            try:
-                series = df[col].astype(str).map(_normalize_code)
-                cur = df[series == target]
-                if not cur.empty:
-                    matched = cur
-                    break
-            except Exception:
-                continue
-        if matched.empty:
-            result["source_chain"].append(f"dragon_tiger:{source}")
-            result["status"] = "ok" if code_cols else "partial"
-            return result
-
-        date_col = next(
-            (c for c in matched.columns if any(k in str(c) for k in ("日期", "上榜", "交易日", "time"))), None
-        )
-        parsed_dates: list[datetime] = []
-        if date_col is not None:
-            for val in matched[date_col].astype(str).tolist():
-                try:
-                    parsed_dates.append(pd.to_datetime(val).to_pydatetime())
-                except Exception:
-                    continue
-        now = datetime.now()
-        start = now - timedelta(days=max(1, lookback_days))
-        recent_dates = [d for d in parsed_dates if start <= d <= now]
-
-        result["is_on_list"] = bool(recent_dates)
-        result["recent_count"] = len(recent_dates) if recent_dates else int(len(matched))
-        result["latest_date"] = (
-            max(recent_dates).date().isoformat()
-            if recent_dates
-            else (max(parsed_dates).date().isoformat() if parsed_dates else None)
-        )
-        result["status"] = "ok"
-        result["source_chain"].append(f"dragon_tiger:{source}")
         return result
