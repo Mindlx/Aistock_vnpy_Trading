@@ -84,11 +84,18 @@ _DIVIDEND_KEYWORD_MAP: dict[str, list[str]] = {
 
 
 def _safe_float(value: Any) -> float | None:
+    """Best-effort float conversion with string cleaning."""
     if value is None:
         return None
-    try:
+    if isinstance(value, (int, float)):
         v = float(value)
         return v if not (v != v) else None  # NaN → None
+    try:
+        s = str(value).strip().replace(",", "").replace("%", "").replace("亿元", "00000000").replace("万元", "0000")
+        if not s:
+            return None
+        v = float(s)
+        return v if not (v != v) else None
     except (ValueError, TypeError):
         return None
 
@@ -580,8 +587,7 @@ class AkshareFundamentalAdapter:
                 ("stock_individual_fund_flow", {"symbol": stock_code}),
                 ("stock_main_fund_flow", {"symbol": stock_code}),
                 ("stock_main_fund_flow", {}),
-                ("stock_fund_flow_individual", {"stock": stock_code}),
-                ("stock_fund_flow_big_deal", {"stock": stock_code}),
+                ("stock_fund_flow_individual", {"symbol": stock_code}),
             ])
             result["errors"].extend(stock_errors)
             if stock_df is not None:

@@ -2842,6 +2842,13 @@ class DataFetcherManager:
                 [{"provider": "fundamental_pipeline", "result": "failed", "duration_ms": 0}],
                 ["fundamental stage timeout"],
             )
+        if not hasattr(self._fundamental_adapter, "get_dragon_tiger_flag"):
+            return self._build_fundamental_block(
+                "not_supported",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
+                ["dragon_tiger adapter not available"],
+            )
         payload, err, cost_ms = self._run_with_retry(
             lambda: self._fundamental_adapter.get_dragon_tiger_flag(stock_code),
             timeout,
