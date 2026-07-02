@@ -1,7 +1,7 @@
 # Aistock_vnpy_Trading 系统架构文档
 
-> 最后更新: 2026-06-16
-> 覆盖: 三系统融合 + ly双模型集成 + alpha158独立因子通道 + 设计决策D8 + 数据仓库服务层
+> 最后更新: 2026-07-02
+> 覆盖: 三系统融合 + ly双模型IC加权 + v4.0精度校准 + op_advice退出L7裁决 + 分歧ML少数方增强
 
 ---
 
@@ -66,7 +66,7 @@
 | 子系统 | 方法 | 频率 | 核心输出 | 独立性 |
 |--------|------|------|---------|--------|
 | **ly** (lynx_vnpy) | RandomForest+LGB 双模型集成 + 15TA+58Alpha158因子 | 日频/准实时 | 上涨概率 + L7 信号 | 独立推送 |
-| **ml** (MindLynx-Aistock) | 12因子+15策略+LLM 推理 | 日频/实时 | 综合评分 0-100 | 独立 venv, 独立推送 |
+| **ml** (MindLynx-Aistock) | 12因子+15策略+LLM 推理 | 日频/实时 | 综合评分 0-100 (op_advice纯文本,不参与融合) | 独立 venv, 独立推送 |
 | **at** (mind_TradingAgent) | 多智能体辩论 (LangGraph) | 盘后 (09:31/13:00) | 5 级评级 | 独立 venv |
 
 ### 核心原则
@@ -115,7 +115,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 
 所以盘中真正频繁变化的只有ml因子信号。那准实时融合的价值不在于"更快发现行情变化"（这事ML实时预警已经做到了），而在于**把ml因子信号放到三系统坐标系中做上下文解读**：
 
-1. **共识漂移监测**：ml因子从+1变成+2，在ly已是+2的背景下只是确认；在ly为-1.5时则是分歧加剧——准实时融合会扣分压仓位
+1. **共识漂移监测**：ml因子从+1变成+2，在ly已是+2的背景下只是确认；在ly为-1.5时则是分歧加剧——准实时融合会触发ML少数方增强
 2. **分歧跟踪**：ML实时预警只看单只个股的技术面触发，看不到系统方向矛盾。准实时融合知道"ly看空、ml转多、at中立"，会标记分歧
 3. **仓位建议联动**：ML预警说"止损触发了"，准实时融合说"综合得分从+1.2降到-0.3，建议仓位从0.5-1成降到0成"——不同层面的信息
 
@@ -346,15 +346,14 @@ Aistock_vnpy_Trading/
 │
 ├── src/                        # 融合引擎 (Fusion venv)
 │   ├── fusion_engine.py        # 融合算法核心
-│   ├── normalizer.py           # 信号归一化 (L7 映射)
+│   ├── normalizer.py           # 信号归一化 (L7 映射 + v4.0精度校准)
 │   ├── data_loader.py          # 零侵入三系统数据读取
 │   ├── wecom_notifier.py       # 企业微信推送 (Fusion 端)
 │   ├── realtime_fusion.py      # 准实时文件交换区扫描
 │   ├── feature_bridge.py       # 可选功能 (龙虎榜/评级)
 │   ├── reliability.py          # 置信度校准 + 幻觉检测
-│   ├── logger.py               # CSV/JSON 持久化
-│   ├── mind_agent_wrapper.py   # TradingAgent 封装
-│   └── mind_stock_config.py    # A 股代码映射
+│   ├── market_data_fallback.py # 回测多源数据fallback链 (🆕)
+│   └── logger.py / unified_cache.py / mind_agent_wrapper.py / mind_stock_config.py
 │
 ├── scripts/
 │   ├── run_daily.py            # 每日融合执行入口 (19:00)

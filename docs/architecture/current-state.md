@@ -1,6 +1,6 @@
 # 当前项目状态快照
 
-> 最后更新: 2026-06-29 (周一)
+> 最后更新: 2026-07-02 (周四)
 > 范围: 代码架构 + 运行时状态 + 关键配置 + 近期变更 + 待办
 > 覆盖: src/、scripts/、services/、config/systemd/、docs/
 
@@ -39,8 +39,8 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 
 | 缩写 | 系统 | 方法 | 频率 | 核心输出 |
 |------|------|------|------|---------|
-| ly | lynx_vnpy | RandomForest + 15技术指标 | 日频 15:15 | 上涨概率 + 信号等级 |
-| ml | MindLynx-Aistock | 12因子 + 15策略 + LLM推理 | 日频/实时 | 综合评分 0-100 + 操作建议 |
+| ly | lynx_vnpy | RF+LGB双模型 + 15TA + 58Alpha158因子 | 日频 15:15 | 上涨概率 + L7信号 |
+| ml | MindLynx-Aistock | 12因子 + 15策略 + LLM推理 | 日频/实时 | 综合评分 0-100 + 文本解释(纯展示) |
 | at | mind_TradingAgent | 多智能体辩论 (LangGraph) | 09:31/13:00 | 5级评级 (Buy~Sell) |
 
 ### 1.2 两条融合路径
@@ -61,11 +61,11 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
                       │                                       │
                       ▼                                       ▼
      ┌──────────────────────────────────────┐    ┌──────────────────────────┐
-     │ fusion_engine.py                     │    │ realtime_fusion.py       │
-     │ ├─ normalizer 归一化 (L7 映射)        │    │ ├─ 读文件交换区三json    │
-     │ ├─ 分歧检测 + 不确定性惩罚             │    │ ├─ 加权融合 (同权重)     │
-     │ ├─ 缺失系统权重重分配                 │    │ ├─ 分歧检测 + 惩罚      │
-     │ └─ 决策映射 → 仓位建议                │    │ └─ 变化超阈值才推送     │
+      │ fusion_engine.py                     │    │ realtime_fusion.py       │
+      │ ├─ normalizer 归一化 (L7 映射)        │    │ ├─ 读文件交换区三json    │
+      │ ├─ 分歧检测 + ML少数方增强            │    │ ├─ 加权融合 (同权重)     │
+      │ ├─ 缺失系统权重重分配                 │    │ ├─ 分歧检测 + 标记      │
+      │ └─ 决策映射 → 仓位建议                │    │ └─ 变化超阈值才推送     │
      └──────────────────────────────────────┘    └──────────────────────────┘
                       │                                       │
                       ▼                                       ▼
@@ -194,17 +194,17 @@ Flat zone (41-59): LLM方向信号弱(1.8% acc), 整体系数乘0.5。
 
 **数学否决权**: |P_ly - 0.50| > 0.30 时触发，根据其他系统方向决定覆盖强度 (0.4~0.8)。
 
-### 3.4 L7 7级决策映射 (v3.1)
+### 3.4 L7 7级决策映射 (v3.1, emoji 2026-06-23 统一方向符号)
 
-| L7 | 得分范围 | 信号 | 仓位 | emoji |
-|----|---------|------|------|-------|
-| +3 | [2.5, 3.0] | 强烈看多 | 2-3成 | 🔴 |
-| +2 | [1.5, 2.5) | 看多 | 1-2成 | 🔴 |
-| +1 | [0.5, 1.5) | 谨慎看多 | 0.5-1成 | 🟠 |
-| 0 | (-0.5, 0.5) | 中性/持有 | 0成 | ⚪ |
-| -1 | (-1.5, -0.5] | 谨慎看空 | 减至0.5成 | 🟡 |
-| -2 | (-2.5, -1.5] | 看空 | 大幅减仓 | 🟢 |
-| -3 | [-3.0, -2.5] | 强烈看空 | 清仓 | 🟢 |
+| L7 | 得分范围 | 信号 | 仓位建议 | emoji |
+|----|---------|------|:--------:|:-----:|
+| +3 | [2.5, 3.0] | 强烈看多 | 2-3成 | 🚀 |
+| +2 | [1.5, 2.5) | 看多 | 1-2成 | 📈 |
+| +1 | [0.5, 1.5) | 谨慎看多 | 0.5-1成 | ↗️ |
+| 0 | (-0.5, 0.5) | 中性/持有 | 0成 | ➡️ |
+| -1 | (-1.5, -0.5] | 谨慎看空 | 减仓至0.5成以内 | ↘️ |
+| -2 | (-2.5, -1.5] | 看空 | 大幅减仓 | 📉 |
+| -3 | [-3.0, -2.5] | 强烈看空 | 清仓 | 🚨 |
 
 **v4.0 精度校准映射 (2026-06-29)**: ml 的 `normalize_mindlynx_score` 从 3 值对称映射升级为基于 598 样本回测精度的 7 值非对称映射。详见 `docs/decisions/accuracy-calibrated-mapping.md`。
 
@@ -291,11 +291,25 @@ DB: `data/backtest/bt_results.db`，60列schema覆盖子系统有效性、ML das
 | walkforward | 滑动窗口验证 (train=20, test=10, step=5) |
 | weight_sweep | 网格扫描权重组合 |
 
-### 5.3 WalkForward结果 (ly子系统)
+### 5.3 LY 性能演进
 
-- In-sample: 88.9% (可能过拟合信号)
-- Out-of-sample: 46.7% (接近随机)
-- WalkForward融合回测: 已实现，待积累足够窗口数据
+**2026-07-02 c1test 全量回测** (full模式):
+
+| 系统 | 准确率 | 样本 | vs 6/29 |
+|------|:-----:|:----:|:-------:|
+| 融合 | **55.3%** | 246 | -2.4% |
+| LY OOS (walk-forward) | **49.4%** | 682 | +0.4% |
+| ML sentiment | **66.3%** | 938 | -1.4% |
+| ML operation_advice | **27.5%** | 1004 | 0.0% |
+| AT | **54.8%** | 62 | 0.0% |
+
+> 📌 融合准确率下降主要受近期市场波动影响（7/1=37.5%, 6/30=45.5%）。ML 语义差距 39%——op_advice 修复(6deb8a2)未改善文本准确率。
+
+**2026-06-28 — IC加权双模型集成**: 等权→IC比例(LGB 0.91/RF 0.09)，方向准确率 53.5%→**65.3%**，Pearson IC 0.144→**0.218**。模型产物已更新。(1dc785f)
+
+**历史 WalkForward 结果** (OOS 46.7%, IS 88.9%) 使用的是旧等权模型。IC加权后的新 OOS 待积累足够窗口数据重新评估。
+
+**数据管道**: 回测匹配行情已从单源改为3层fallback — data_warehouse(5源)→unified_cache→stock_analysis.db，解决akshare失败时跳过的数据空洞问题。(baf4921)
 
 ### 5.4 因子研究核心发现 (docs/research/factor-research-report.md)
 
@@ -313,32 +327,29 @@ DB: `data/backtest/bt_results.db`，60列schema覆盖子系统有效性、ML das
 ### 6.1 src/ (Fusion venv)
 
 | 文件 | 行数 | 职责 |
-|------|------|------|
-| fusion_engine.py | 709 | 融合核心：linear/bayesian/dual 三种模式 |
-| normalizer.py | 390 | L7映射 v3.1 + 概率空间工具 |
-| reliability.py | 285 | 贝叶斯α/c/h参数 + 幻觉检测 + 置信度校准 |
-| data_loader.py | 1052 | 零侵入三系统读取 + UnifiedCache集成 |
-| realtime_fusion.py | 307 | 文件交换区扫描daemon |
-| wecom_notifier.py | 294 | 企业微信推送 v3.0 |
-| feature_bridge.py | 156 | 可选功能：龙虎榜/东方财富评级 |
-| logger.py | (内联) | CSV/JSON持久化 |
-| unified_cache.py | (内联) | SQLite共享OHLCV缓存 |
-| mind_agent_wrapper.py | (内联) | TradingAgent封装 |
-| mind_stock_config.py | (内联) | A股代码映射 |
+|------|:----:|------|
+| fusion_engine.py | 825 | 融合核心：linear/bayesian/dual 三种模式 + 分歧ML少数方增强 |
+| normalizer.py | 447 | L7映射 v3.1 + v4.0精度校准 + 概率空间工具 |
+| reliability.py | 291 | 贝叶斯α/c/h参数 + 幻觉检测 + 置信度校准 |
+| data_loader.py | 1056 | 零侵入三系统读取 + UnifiedCache集成 |
+| realtime_fusion.py | 414 | 文件交换区扫描daemon |
+| wecom_notifier.py | 261 | 企业微信推送 v3.0 |
+| feature_bridge.py | 174 | 可选功能：龙虎榜/东方财富评级 |
 
 ### 6.2 services/ (Fusion venv)
 
 | 文件 | 行数 | 职责 |
-|------|------|------|
-| ml_factor_service.py | 189 | 因子层纯数学计算(无LLM)，写ml_signal.json |
+|------|:----:|------|
+| ml_factor_service.py | 204 | 因子层纯数学计算(无LLM)，写ml_signal.json |
+| market_data_fallback.py | 375 | 回测多源数据fallback链 (🆕) |
 
 ### 6.3 scripts/
 
 | 文件 | 行数 | 职责 |
-|------|------|------|
-| run_daily.py | 575 | 日终融合入口 |
-| backtest.py | 1127 | 完整回测框架 |
-| write_ly_signal.py | - | ly信号写入文件交换区 |
+|------|:----:|------|
+| run_daily.py | 582 | 日终融合入口 |
+| backtest.py | 1391 | 完整回测框架 + 多源fallback |
+| c1test.py | ~340 | 统一回测编排器 (🆕) |
 
 ---
 
@@ -395,91 +406,79 @@ ly的58因子提供体系化覆盖(K线形态/多窗口统计/分位数等)。
 
 ---
 
+### 6/29 — c1test里程碑 + v4.0精度校准 + 分歧修复
+
+| 变更 | 描述 | commit |
+|------|------|--------|
+| c1test统一回测上线 | 编排器+PHASE1~4+变化检测+统一报告 | a065866 |
+| v4.0精度校准映射 | 3值对称→7值非对称(598样本回测) | 54136eb |
+| 分歧→ML少数方增强 | 分歧时ML自适应提分(+0~0.3) | ccc8ed0 |
+| LLM大数值幻觉修复 | 5处prompt注入数值上限保护 | fb72ad1 |
+| LLM注入数据缺失单位 | 补全prompt中单位信息 | a2f7be1 |
+| AT提示词重写 | 美股→A股适配 + 5个新模块 | a2f7be1 |
+
+### 6/30 — ML 语义差距终结 + 全系统审查 + 资金流修复
+
+| 变更 | 描述 | commit |
+|------|------|--------|
+| op_advice完全退出L7裁决 | 纯文本解释器，不参与融合打分 | 42c01fd |
+| ML-LLM 3 Actions执行 | 因子剖面2行→12行、prompt重排、方向守卫 | 6deb8a2 |
+| 全系统17项修复 | P0×2 P1×7 P2×8，覆盖13文件 | 27749fe |
+| 资金流A'+B'修复 | tushare优先+akshare降级+数据湖缓存 | 0a6521c, a879e97 |
+| 回测多源fallback | warehouse→cache→analysis_db三层降级 | baf4921 |
+
+### 7/1 — 资金流补丁 + 全系统推送精细化
+
+| 变更 | 描述 | commit |
+|------|------|--------|
+| 资金流数据链补丁 | _safe_float清洗/akshare参数名/hasattr保护 | 3efd985 |
+| PDF关注度bug | min(len,1)→max(len,1)修复 | 60ae2f7 |
+| 东方财富int(float()) | 兼容浮点数字符串崩溃 | cdf0e2e |
+| 资金流单位感知 | _safe_float单位感知转换 | d886fe9 |
+| 推送引擎标识移除 | 全系统移除lma/ly/ml引擎标记 | 7817275 |
+| 融合决策精细化 | 移除emoji空格/仓位前缀/名价分隔符 | b02c138 |
+| 中性涨跌幅bug修复 | pct变量冲突修复 | e09f232 |
+
+### 7/2 — c1test 数据链路修复 (P1/P2)
+
+| 变更 | 描述 | 涉及文件 |
+|------|------|---------|
+| LY walkforward 持久化 | c1test 将 LY OOS 结果写入 bt_meta，支持历史追溯 | `scripts/c1test.py` |
+| 子系统覆盖率展示 | unified_report 新增覆盖率板块(JSON+MD)，覆盖率<50%触发告警 | `scripts/c1test.py` |
+
 ## 八、待办与优先级
 
-### 2026-06-29 — ml accuracy-calibrated sentiment mapping (v4.0)
+### 2026-07-02 — 当前状态总览
 
-**变更**: `normalize_mindlynx_score` 从 3 值对称映射（≥52→+1.5, ≤49→-1.5）升级为基于 598 样本回测精度的 7 值非对称映射。
+| 薄弱环节 | 状态 | 最新进展 |
+|---------|:----:|---------|
+| ML 40pp语义差距 | **✅ 已关闭** | op_advice完全退出L7裁决, 纯文本解释器 |
+| v4.0精度校准映射 | **✅ 已部署** | 7值非对称映射, normalizer.py |
+| 分歧惩罚→ML少数方增强 | **✅ 已部署** | 分歧时ML自适应提分+0~0.3 |
+| 全系统代码审查 | **✅ 已完成** | 17项全部修复 |
+| 资金流数据缺失 | **✅ 已修复** | 3轮补丁: tushare优先+多API fallback+数据湖 |
+| AT美股→A股适配 | **✅ 已修复** | 提示词重写, 5个新模块, 权重仍为0.00积累数据 |
+| LY IC加权 | **✅ 已部署** | 方向准确率53.5%→65.3%, Pearson IC 0.144→0.218 |
+| LY因子管道(OOS) | **⚠️ 待验证** | 等权→IC加权后需重新评估OOS |
+| **op_advice文本准确率27.5%** | **⚠️ 修复未生效** | 3Actions(6deb8a2)未改善文本方向准确率, 仍在误导人类 |
+| 融合基线55.3% | **⏳ 待观察** | 7/2 c1test重新验证 |
 
-**核心发现**: ML 的 sentiment_score 方向准确率极端不对称——看空 89-100% vs 看多 38-56%。
+### 当前待办
 
-**映射变更**:
+| 优先级 | 任务 | 说明 |
+|:------:|------|------|
+| P1 | op_advice文本方向准确率 | 3Actions修复无效, 需评估是否限制文本方向词输出 |
+| P1 | LY OOS重新评估 | IC加权双模型后walk-forward验证 |
+| P2 | backtest --force 重算 | 用52/49阈值+HP3双路径重新评估全部历史记录 |
+| P3 | AT数据积累 | 新prompt持续运行积累forward数据 |
+| P3 | 东方财富w/f阈值校准 | 需384样本 |
 
-| Sentiment | 旧 L7 | 新 L7 | 依据 |
-|:---------:|:----:|:----:|:----:|
-| 0-19 | -1.5 | **-3.0** | 100.0% acc |
-| 20-30 | -1.5 | **-2.5** | 89.0% acc |
-| 31-40 | -1.5 | **-2.0** | 92.8% acc |
-| 41-48 | -1.5 | -1.5 | 92.8% acc, **保留** |
-| 49-51 | 0.0 | 0.0 | 0.0% acc |
-| 52-59 | +1.5 | **+0.8** | 56.2% acc, 保守 |
-| 60-79 | +1.5 | **+1.0** | 38.2% acc, 阻尼 |
-| ≥80 | +1.5 | +1.5 | extrapolated |
+### ✅ 已完成修复 — c1test 数据链路 (2026-07-02)
 
-**论证方法**: c1skill 8-stage + 3 学科 5 著作跨学科证据（Grinold & Kahn *APM*, Carver *Systematic Trading*, López de Prado *AFML*, Kahneman *TFS*, Taleb *Black Swan*）。
-
-**文件**: `src/normalizer.py:260-284` (替换), `docs/decisions/accuracy-calibrated-mapping.md` (新建)。
-
-**验证**: 68/68 测试通过，0 回归，风险 LOW。
-
-### 2026-06-29 — c1test 统一回测系统 (里程碑)
-
-**问题**: 三套独立回测系统（融合/ML/LY）使用不同 DB、入口、指标、报告格式，无法一站对比。AT 无独立回测。ML 独立回测只测 operation_advice（22%），严重低估 ML。
-
-**方案**:
-```
-c1test.py (编排器, ~340行)
-├── Phase 1: 融合回测 (子进程 backtest.py + 直查 bt_results.db)
-├── Phase 2: LY 独立回测 (子进程 lynx_signal.py --backtest)
-├── Phase 3: ML 独立回测 (直查 stock_analysis.db 双路径)
-├── Phase 4: AT 独立回测 (TA JSON 日志 + stock_daily T+1 匹配)  🆕
-├── 变化检测: 对比 last_run.json → 红黄绿告警
-└── 统一报告: unified_report.json + .md + last_run.json
-```
-
-**盲区修复**:
-- AT 独立回测: ❌ → ✅ 54.8% (34/62)
-- ML sentiment 方向准确率: ❌ 融合间接看 → ✅ 直查 **67.7%**
-- 统一回测入口: ❌ 3 套不同命令 → ✅ `c1test.py`
-- 变化检测: ❌ 人工对比 → ✅ 自动红黄绿告警
-
-**文件**: `scripts/c1test.py`, `.claude/skills/c1test/SKILL.md`, 4 systemd 文件
-**定时器**: `c1test-daily.timer` (20:00), `c1test-weekly.timer` (周日10:30)
-
-### ✅ 已完成 — AT价值评估 (2026-06-24)
-
-**结论**: AT 48.2% (p=0.745) = 纯随机噪音。权重归零，系统继续运行积累数据。
-详见上方 3.1 权重表。
-
-### P0 — 积累数据 (继续)
-
-| 任务 | 条件 | 预计完成 |
-|------|------|---------|
-| post-HP3融合记录 ≥200条 | 正常交易日5-10天 | ✅ 已超 |
-| backtest --force回数据恢复 | EastMoney等API可用 | 不确定 |
-
-### P2 — Backtest --force 重算 (API恢复后)
-
-用52/49阈值+HP3双路径重新评估全部历史记录，更新per-stock alpha。
-
-### P3 — 数据积累（被动等待）
-
-| 任务 | 条件 | 预计 |
-|------|------|------|
-| 东方财富w/f阈值校准 | 384样本 | ~6/10 |
-| prob_up + 融合回测 | 30交易日 | ~6月下旬 |
-| AT价值评估 | forward数据充足 | ~6/15 |
-
-### ✅ 已完成修复（2026-06-18 Oracle验证深度分析修复）
-
-| 变更 | 说明 | commit |
-|------|------|--------|
-| AT权重 0.10→0.05 | 回测150样本AT 47.0%(31/66)≈随机, 降权至0.05最小化噪声 | 7358ce8 |
-| 移除ml_factor死配置 | settings.yaml有定义但_compute_adjusted_weights从未加载, 清理 | 7358ce8 |
-| 移除分歧分数惩罚 | fusion_score -= penalty → disagreement_capped标记。Oracle验证: 惩罚在分歧时导致退化看空输出 | 7358ce8 |
-| ML融合80/20偏向 | 原50/50, Oracle验证sentiment_score 74% > operation_advice 24% | 7358ce8 |
-
-### ✅ 已完成修复（2026-06-09 批量修复）
+| 变更 | 说明 |
+|------|------|
+| LY walkforward 持久化到 bt_meta | c1test full 模式自动记录, 支持 OOS 趋势追踪 |
+| 子系统覆盖率加入报告 | JSON+MD 双输出, 覆盖率<50%自动告警 |
 
 **严重级别 (8项)**:
 - S1 `data_loader.py:336` — for缩进错误修复，ML数据从仅1只变为全量10只
@@ -557,10 +556,14 @@ realtime-fusion和ml-factor服务已加入 `_is_trading_day()` 检测，非工�
 | 源 | 优先级 | 用途 | 稳定性 |
 |----|--------|------|--------|
 | Sina API (hq.sinajs.cn) | 最高 | 实时行情 | 稳定 |
-| EastMoney | 中 | 龙虎榜/基本面 | 不稳定，常触发重试 |
+| Tushare Pro | 高 | OHLCV/资金流 | 稳定(有token) |
+| EastMoney | 中 | 龙虎榜/基本面/评级 | 不稳定，常触发重试 |
 | akshare | 后备 | 补充数据 | 版本依赖敏感 |
+| pytdx (TCP) | 后备 | 日K线降级 | 稳定 |
 | stock_daily DB (sqlite) | 日终 | 因子引擎计算 | 由ML scheduler写入 |
 | unified_cache (sqlite) | 缓存 | 共享OHLCV | TTL 24h |
+
+**回测数据fallback链** (baf4921, 2026-06-30): `data_warehouse(5源) → unified_cache → stock_analysis.db` — 3层降级保障回测行情匹配不停摆。详见 `src/market_data_fallback.py`。
 
 ---
 

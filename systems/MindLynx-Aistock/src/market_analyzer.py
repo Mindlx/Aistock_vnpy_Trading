@@ -1868,12 +1868,14 @@ Market conditions can change quickly. The data above is for reference only and d
         return "\n".join(lines) if len(lines) > 1 else None
 
 
-def build_sector_treemap(sectors: list[dict],    max_blocks: int = 16) -> str | None:
-    """Generate a sector treemap image and return as base64 data URI.
+def build_sector_treemap(sectors: list[dict]) -> str | None:
+    """Render a sector treemap image and return as base64 data URI.
 
-    Each sector dict: {'name': str, 'change_pct': float, 'amount': float (optional)}
-    Rectangle size ≈ amount (turnover), color = red for up, green for down.
-    Shows top N sectors by |change_pct| — all individual, no aggregation.
+    Pure renderer — no sorting or selection. Caller is responsible for
+    pre-sorting and limiting the number of sectors.
+
+    Each sector dict: {'name': str, 'change_pct': float, 'amount': float}
+    Rectangle size = amount, color = red (up) / green (down).
     Returns base64 PNG data URI string, or None if unavailable.
     """
     if not sectors:
@@ -1893,13 +1895,10 @@ def build_sector_treemap(sectors: list[dict],    max_blocks: int = 16) -> str | 
                 break
         _tk = {"fontproperties": _zh_font} if _zh_font else {}
 
-        # Sort by |change_pct|, take top N (no aggregation — each block is a real sector)
-        sectors_sorted = sorted(sectors, key=lambda s: abs(s.get("change_pct", 0)), reverse=True)[:max_blocks]
-
         labels = []
         sizes = []
         colors_list = []
-        for s in sectors_sorted:
+        for s in sectors:
             name = s.get("name", "?")[:6]
             chg = s.get("change_pct", 0)
             vol = max(abs(s.get("amount", 1) or 1), 1)

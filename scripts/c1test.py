@@ -65,6 +65,23 @@ def _today_str() -> str:
     return date.today().isoformat()
 
 
+def _save_meta(key: str, value: str) -> None:
+    """写入一条 key-value 到 bt_meta (upsert)."""
+    conn = sqlite3.connect(str(BACKTEST_DB))
+    conn.execute("INSERT OR REPLACE INTO bt_meta (key, value) VALUES (?, ?)", (key, value))
+    conn.commit()
+    conn.close()
+
+
+def _get_meta(key: str) -> Optional[str]:
+    """从 bt_meta 读取一条 key 的值."""
+    conn = sqlite3.connect(str(BACKTEST_DB))
+    cur = conn.execute("SELECT value FROM bt_meta WHERE key = ?", (key,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
 # ══════════════════════════════════════════════════════════════
 # Phase 1: 融合回测
 # ══════════════════════════════════════════════════════════════
@@ -134,6 +151,20 @@ def phase1_fusion() -> Dict[str, Any]:
             "correct": correct,
             "total": total,
             "accuracy": pct,
+        }
+
+    # 子系统数据覆盖率 (指标信号有效的比例)
+    coverage = {}
+    for sys_key in ["ly", "ml", "at"]:
+        cursor.execute(
+            f"SELECT COUNT(*) FROM bt_predictions WHERE {sys_key}_valid = 1 "
+            f"AND fusion_correct IS NOT NULL"
+        )
+        valid = cursor.fetchone()[0]
+        coverage[sys_key] = {
+            "valid": valid,
+            "total": total_matched,
+            "pct": round(valid / total_matched * 100, 1) if total_matched > 0 else 0.0,
         }
 
     # 分歧场景
@@ -230,6 +261,7 @@ def phase1_fusion() -> Dict[str, Any]:
         "total_unmatched": total_unmatched,
         "backtest_days": days,
         "subsystem_accuracy": accuracies,
+        "subsystem_coverage": coverage,
         "disagreement": {
             "matched": disagreement_matched,
             "correct": disagreement_correct,
@@ -547,6 +579,11 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
                 "total": s.get("total", 0),
             }
 
+        # P2: 子系统覆盖率
+        coverage = fusion.get("subsystem_coverage", {})
+        if coverage:
+            report["subsystem_coverage"] = coverage
+
     # LY 独立回测
     ly = phases.get("ly", {})
     if ly.get("status") == "ok" and ly.get("overall"):
@@ -652,6 +689,14 @@ def detect_changes(report: Dict[str, Any]) -> Dict[str, Any]:
         if total == 0:
             changes["alerts"].append(f"🔴 {sn} 无有效数据")
 
+    # 警示: 子系统覆盖率过低
+    coverage = report.get("subsystem_coverage", {})
+    for sk, sn in name_map.items():
+        c = coverage.get(sk, {})
+        pct = c.get("pct", 100)
+        if 0 < pct < 50:
+            changes["alerts"].append(f"🟡 {sn} 数据覆盖率仅 {pct}% ({c.get('valid',0)}/{c.get('total',0)})")
+
     changes["alert_count"] = len([a for a in changes["alerts"] if a.startswith("🔴")])
     changes["warning_count"] = len([a for a in changes["alerts"] if a.startswith("🟡")])
     changes["pass_count"] = len([a for a in changes["alerts"] if a.startswith("🟢")])
@@ -710,6 +755,23 @@ def render_markdown(report: Dict[str, Any]) -> str:
     lines.append(f"| **融合** | **{fvb.get('fusion_accuracy', 'N/A')}%** | **vs 最优({fvb.get('best_system', 'N/A')}) {fvb.get('best_accuracy', 'N/A')}%** |")
     lines.append(f"| **差距** | | **{fvb.get('gap', 'N/A')}%** |")
     lines.append(f"")
+
+    # 子系统覆盖率
+    coverage = report.get("subsystem_coverage", {})
+    if coverage:
+        lines.append(f"### 子系统数据覆盖率")
+        lines.append(f"")
+        lines.append(f"| 系统 | 有效信号 | 覆盖率 |")
+        lines.append(f"|------|:--------:|:------:|")
+        name_map_coverage = {"ly": "LY", "ml": "ML", "at": "AT"}
+        for sk, sn in name_map_coverage.items():
+            c = coverage.get(sk, {})
+            valid = c.get("valid", 0)
+            total = c.get("total", 0)
+            pct = c.get("pct", 0)
+            bar = _bar(pct, 10)
+            lines.append(f"| {sn} | {valid}/{total} | {pct}% {bar} |")
+        lines.append(f"")
 
     # ── LY 独立 ──
     ly = report.get("ly_independent", {})
@@ -864,6 +926,8 @@ def main():
         if ly_status == "ok":
             ov = phases["ly"].get("overall", {})
             print(f"   ✅ LY 总体: {ov.get('accuracy', 'N/A')}% ({ov.get('correct',0)}/{ov.get('total',0)})")
+            # P1: 持久化 LY walkforward 到 bt_meta
+            _save_meta(f"ly_walkforward_{_today_str()}", json.dumps(ov))
         elif ly_status == "timeout":
             print(f"   ⏰ LY 超时，跳过")
         else:

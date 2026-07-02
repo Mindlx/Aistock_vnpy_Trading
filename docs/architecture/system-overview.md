@@ -1,6 +1,6 @@
 # 系统架构全景
 
-> 生成日期: 2026-06-30
+> 生成日期: 2026-07-02 (同步至最新代码状态)
 > 信息来源: `docs/architecture/current-state.md`, `config/settings.yaml`, `src/fusion_engine.py`,
 > `src/data_loader.py`, `src/wecom_notifier.py`, `scripts/c1test.py`, `docs/push/format.md`,
 > 运行时 `systemctl` 状态
@@ -61,15 +61,17 @@
 - 因子: 15技术指标 (RSI/MACD/ATR/K线形态等) + Alpha158 (58因子)
 - ML输出: 上涨概率 (0~100%) + L7 7级信号
 - 增强: Alpha158 LGB 信号以 10% blend 增强 ly (run_daily.data_loader)
-- 回测: Walk-Forward (train=20, test=10, step=5), OOS=49.0% (当前数据管道待修复)
+- 双模型IC加权: LGB 0.91/RF 0.09 (IC比例), 方向准确率 53.5%→**65.3%**, Pearson IC 0.144→**0.218** (1dc785f)
+- 回测: Walk-Forward (train=20, test=10, step=5), 旧等权 OOS=49.0%, IC加权后待重新评估
+- 回测数据: 3层fallback链 data_warehouse→unified_cache→analysis_db (baf4921)
 - 验证: `src/data_loader.py` 通过 Python import 直接调用，零侵入
 
 ### 3.2 ml — AI分析子系统
 
 - 因子引擎: 12因子 (illiquidity/max_effect/volume_trend 等), 纯数学计算 (`ml_factor_service.py`)
 - LLM分析: 6个策略 Agent (50+提示词版本历史) + MarketAnalyzer
-- 双路径输出: sentiment_score (评分 0-100) + operation_advice (操作建议文本)
-- 融合路径: sentiment_score 占 80%, operation_advice 占 20% (`fusion_engine.py:533`)
+- 双路径输出: sentiment_score (评分 0-100) + operation_advice (纯文本解释, 不参与融合)
+- 融合路径: sentiment_score 占 100% (op_advice 于 2026-06-30 完全退出 L7 裁决) (`fusion_engine.py:555-556`)
 - 数据源: `stock_analysis.db` (1201条历史, 2026-05-18 起)
 
 ### 3.3 at — 多智能体辩论子系统
@@ -97,7 +99,7 @@ run_daily.py → data_loader (零侵入读取三系统) → fusion_engine.py →
 - 零侵入原则：不修改子系统任何代码，通过文件/import 接口读取
 - 融合模式: `fusion_mode: "dual"` — 同时输出 linear + bayesian 两种结果
 - 分歧检测: 三系统方向不一致时标记 (`has_disagreement`)，分歧时 ML 准确率从 37.9%→51.0%
-- 分歧惩罚: 已移除分数扣减，改为置信度标记 (Oracle 2026-06-18 验证)
+- 分歧增强: ML为少数方时自适应提升融合得分 (+0~0.3), 非一刀切惩罚 (ccc8ed0)
 
 ### 4.2 准实时融合 (09:33+ 每5min daemon)
 
@@ -317,15 +319,15 @@ c1test.py (编排器)
 
 ## 十、当前薄弱环节
 
-| 问题 | 状态 | 影响 |
-|------|:----:|------|
-| LY OOS 49.0% | 数据管道待修复 (非架构问题) | ly权重价值待验证 |
-| ML op_advice 27.5% vs sentiment 67.7% | 40pp语义差距, 已优化prompt | 不影响融合 (80/20偏向) |
-| 资金流数据偶有缺失 | A'+B'修复已上线, 待验证 | 整点分析中量比/成交额字段 |
-| 融合 57.7% | 基线值 | 需三个子系统均>60%才能突破65% |
-| AT权重归零 | 等待系统性改造 | 不参与当前融合决策 |
+| 问题 | 修复状态 | 影响 |
+|------|:--------:|------|
+| LY OOS 49.0% | ⚠️ IC加权后方向准确率65.3%, 需重新OOS验证 | ly权重价值待确认 |
+| ML op_advice 27.5% | ✅ **已关闭** — op_advice 完全退出 L7 裁决 (42c01fd) | 不再影响融合 |
+| 资金流数据偶有缺失 | ✅ **已修复** — 3轮补丁 (tushare优先+多API fallback+数据湖) | 数据完整度恢复 |
+| 融合 57.7% | ⏳ 基线值, 所有修复后需重新跑 c1test | 理论上应改善 |
+| AT权重归零 | ✅ 提示词已重写(A股适配), 权重0.00积累数据 | 不参与当前融合 |
 
-### 10.1 关键发现：ML"半客观割裂"（40pp 语义差距的根本原因）
+### 10.1 关键发现：ML"半客观割裂"（40pp 语义差距的根本原因）— ✅ 已解决
 
 **问题**: LLM 收到了充足的外部数据（东方财富评级、新闻情报、大盘统计），
 但自己系统的**12因子细化分析和策略层结论**只被压缩为 2-3 行的 `factor_profile`。
@@ -337,12 +339,17 @@ operation_advice（需要推理的文字）→ 27.5% ❌
 同一LLM、同一prompt → 一个系统两个准确率，差距 40 个百分点
 ```
 
-**优化方向（2026-06-29 已开始）**:
+**修复方案 (2026-06-30)**:
+- `42c01fd`: **op_advice 完全退出 L7 裁决** → 纯文本解释器，不参与融合
+  - 之前的"80/20偏向"是中间态（方向相反时才退出）
+  - 现在是确定性退出 → 融合 100% 依赖 sentiment_score，op_advice 仅保留文字展示价值
+- `6deb8a2`: Action 1~3 → 因子剖面从2行扩展为12因子逐项展开、prompt重排、op_advice方向守卫
 - `a2f7be1`: 修复 LLM 注入数据缺失单位，增强因子背景数据质量
-- 核心思路：LLM 应"用人类语言翻译客观+半客观分析的结论"，而非"基于外部数据独立判断"
-- 后续方向：将 12 因子的因子级分解、策略层 Agent 的半客观结论更完整地注入 LLM 上下文
 
-### 10.2 ML 架构定位修正
+**最终判定**: 40pp 语义差距不再影响融合决策。sentiment_score 路径独立承担 ML 的 L7 贡献，
+op_advice 作为文本层服务人工阅读，两条线从"互相打架"变为"数字决策 + 文字解释"的协作关系。
+
+### 10.2 ML 架构定位修正 — ✅ 已落地
 
 原始架构设想是 ML 系统内部两条独立线——客观/半客观一条、LLM 一条——期待独立验证、互相补充、1+1>2。
 但实际运行时，LLM 线收到的**自身客观/半客观分析信息不足**（仅 2-3 行 factor_profile），
@@ -351,17 +358,18 @@ operation_advice（需要推理的文字）→ 27.5% ❌
 **不是能力问题，而是定位问题**。sentiment_score 67.7% 证明 LLM "有判断力"；
 operation_advice 27.5% 证明它"说不清楚为什么"。
 
-修正后的定位：
+修正后的定位已通过 `42c01fd` + `6deb8a2` 落地：
 
 ```
-修正前:  LLM = 独立判断者（基于注入数据自己做分析）
-修正后:  LLM = 翻译官+扩展者（翻译系统分析+补充外部注释）
+落地前:  LLM 文本层参与 L7 融合裁决（两条线投票）
+落地后:  sentiment_score = 唯一 L7 输入
+         operation_advice = 纯文本解释器（翻译系统分析+补充外部注释）
          1. 翻译: 用人类语言表述因子层和策略层的结论
          2. 扩展: 用外部情报作为注释补充，而非论据主体
          3. 输出: "12因子综合偏多(+0.45)，但波动率异常(+1.8σ)需警惕"
 ```
 
-这样两条线从"互相替代"变为"分析层与表达层"的协作关系。
+两条线从"互相替代"变为"分析层与表达层"的协作关系。
 sentiment_score 继续保持快速评分路径，operation_advice 通过获得完整上下文大幅提升。
 
 ---
