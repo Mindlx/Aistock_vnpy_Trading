@@ -430,8 +430,72 @@ def phase3_ml() -> Dict[str, Any]:
                 "accuracy": round(row[1] / row[0] * 100, 1),
                 "source": "analysis_history + stock_daily T+1",
             }
+
     except sqlite3.OperationalError as e:
         result["sentiment_score"] = {"status": "error", "message": str(e)}
+
+    # ── 3. 融合等效准确率: 用融合引擎的归一化管线处理 analysis_history ──
+    # 复现 fusion_engine.py 的 pipeline:
+    #   normalize_mindlynx_score(sentiment, 52, 49) → × 0.8 → _sign(threshold=0.1) → vs T+1
+    # 目的: 使用与融合回测一致的统计口径, 覆盖所有 ML 分析记录而非仅 19:00
+    try:
+        cursor.execute("""
+            SELECT ah.sentiment_score, sp.pct_chg
+            FROM analysis_history ah
+            JOIN stock_daily sp ON sp.code = ah.code
+                AND sp.date = date(ah.created_at, '+1 day')
+            WHERE ah.sentiment_score IS NOT NULL
+              AND sp.pct_chg IS NOT NULL
+              AND ah.created_at >= date('now', '-90 days')
+        """)
+        rows = cursor.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+
+    if rows:
+        def _ml_sign(normalized: float, threshold: float = 0.1) -> int:
+            if normalized > threshold:
+                return 1
+            if normalized < -threshold:
+                return -1
+            return 0
+
+        def _normalize_v4(score: int) -> float:
+            if score <= 19:
+                return -3.0
+            if score <= 30:
+                return -2.5
+            if score <= 40:
+                return -2.0
+            if score <= 48:
+                return -1.5
+            if score <= 51:
+                return 0.0
+            if score <= 59:
+                return 0.8
+            if score <= 79:
+                return 1.0
+            return 1.5
+
+        correct, total, neutral = 0, 0, 0
+        for score, pct_chg in rows:
+            l7 = _normalize_v4(score) * 0.8          # fusion 管线
+            ml_dir = _ml_sign(l7)                     # 与 backtest._sign 一致
+            if ml_dir == 0:
+                neutral += 1
+                continue
+            actual_dir = 1 if pct_chg > 0 else (-1 if pct_chg < 0 else 0)
+            total += 1
+            if ml_dir == actual_dir:
+                correct += 1
+
+        result["fusion_equivalent"] = {
+            "correct": correct,
+            "total": total,
+            "neutral": neutral,
+            "accuracy": round(correct / total * 100, 1) if total > 0 else 0.0,
+            "source": "analysis_history → v4.0 L7 ×0.8 → _sign(0.1) → T+1",
+        }
 
     # ── 3. 最近回测报告文件路径 (如果有) ──
     report_dir = PROJECT_ROOT / "systems" / "MindLynx-Aistock" / "reports" / "backtest"
@@ -595,6 +659,7 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
         report["ml"] = {
             "operation_advice": ml.get("operation_advice", {}),
             "sentiment_score": ml.get("sentiment_score", {}),
+            "fusion_equivalent": ml.get("fusion_equivalent", {}),
         }
 
     # AT (独立)
@@ -677,11 +742,11 @@ def detect_changes(report: Dict[str, Any]) -> Dict[str, Any]:
     # 警示: ML 语意差距
     ml = report.get("ml", {})
     op_acc = ml.get("operation_advice", {}).get("direction_accuracy", 0)
-    sent_acc = ml.get("sentiment_score", {}).get("accuracy", 0)
-    if op_acc > 0 and sent_acc > 0:
-        gap = abs(sent_acc - op_acc)
+    fe_acc = ml.get("fusion_equivalent", {}).get("accuracy", 0)
+    if op_acc > 0 and fe_acc > 0:
+        gap = abs(fe_acc - op_acc)
         if gap > 30:
-            changes["alerts"].append(f"🟡 ML 语义差距 {gap:.0f}% (sentiment {sent_acc}% vs operation {op_acc}%)")
+            changes["alerts"].append(f"🟡 ML 语义差距 {gap:.0f}% (fusion等效 {fe_acc}% vs operation {op_acc}%)")
 
     # 警示: 系统可用性
     for sk, sn in name_map.items():
@@ -809,8 +874,19 @@ def render_markdown(report: Dict[str, Any]) -> str:
             lines.append(f"|------|------|")
             lines.append(f"| 方向准确率 | **{ss.get('accuracy', 'N/A')}%** |")
             lines.append(f"| 样本量 | {ss.get('total', 0)} |")
-            if op.get("direction_accuracy") and ss.get("accuracy"):
-                gap = abs(ss["accuracy"] - op["direction_accuracy"])
+            lines.append(f"")
+
+        fe = ml.get("fusion_equivalent", {})
+        if fe:
+            lines.append(f"### 融合等效 (fusion_equivalent, 全量管线回放)")
+            lines.append(f"")
+            lines.append(f"| 指标 | 数值 |")
+            lines.append(f"|------|------|")
+            lines.append(f"| 方向准确率 | **{fe.get('accuracy', 'N/A')}%** |")
+            lines.append(f"| 样本量 | {fe.get('total', 0)} |")
+            lines.append(f"| 中性跳过 | {fe.get('neutral', 0)} |")
+            if op.get("direction_accuracy") and fe.get("accuracy"):
+                gap = abs(fe["accuracy"] - op["direction_accuracy"])
                 lines.append(f"| 语义差距 | **{gap:.1f}%** |")
             lines.append(f"")
 
@@ -942,8 +1018,10 @@ def main():
         if ml_status == "ok":
             op = phases["ml"].get("operation_advice", {})
             ss = phases["ml"].get("sentiment_score", {})
+            fe = phases["ml"].get("fusion_equivalent", {})
             print(f"   ✅ ML operation: {op.get('direction_accuracy', 'N/A')}% | "
-                  f"sentiment: {ss.get('accuracy', 'N/A')}%")
+                  f"sentiment: {ss.get('accuracy', 'N/A')}% | "
+                  f"fusion等效: {fe.get('accuracy', 'N/A')}% ({fe.get('total', 0)}样本)")
         else:
             print(f"   ⚠️ {phases['ml'].get('message', '跳过')}")
         print()

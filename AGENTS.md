@@ -1,7 +1,58 @@
+# Aistock_vnpy_Trading — 三系统信号融合平台
+
+## 项目概述
+
+三系统融合决策平台：lynx_vnpy (RF 量化) + MindLynx-Aistock (因子/策略/LLM) + mind_TradingAgent (多智能体辩论)，通过加权投票输出投资建议。
+
+## 目录结构
+
+- `src/` — 核心代码：融合引擎、数据加载、特征桥接、信号融合
+- `services/` — 数据服务：东方财富数据、alpha158、ML因子
+- `systems/` — 三个子系统各自的目录
+- `config/` — settings.yaml, systems.yaml, stock_pool.csv
+- `scripts/` — 回测、校准、诊断、部署脚本
+- `tests/` — 测试
+- `docs/` — 架构决策、子系（子系统说明、数据链文档）
+
+## 常用命令
+
+```bash
+# 测试
+pytest tests/
+
+# 回测
+python scripts/backtest.py
+
+# 校准
+python scripts/calibrate_alphas.py
+
+# 每日运行
+python scripts/run_daily.py
+
+# 融合引擎诊断
+python scripts/diagnose_agreement.py
+```
+
+## 模型选择
+
+| 任务 | 推荐模型 |
+|------|---------|
+| 日常编码、bug修复 | DeepSeek V4 Flash |
+| 架构决策、复杂调试 | Ornith 1.0 35B (本地, GPU1) |
+| 代码审查、信号分析 | Ornith 1.0 35B (本地) |
+| 多模态/可视化 | Qwen 3.6 35B (本地, GPU0) |
+
+## 文档参考
+
+- `docs/opencode-config.md` — OpenCode 配置说明
+- `docs/decisions/` — 架构决策记录 (ADR)
+- `docs/subsystems/` — 子系统详细说明
+- `docs/data-chain/` — 数据链路文档
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Aistock_vnpy_Trading** (13044 symbols, 24169 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Aistock_vnpy_Trading** (13563 symbols, 24970 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -42,43 +93,3 @@ This project is indexed by GitNexus as **Aistock_vnpy_Trading** (13044 symbols, 
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
-
-## Default Workflow
-
-Every non-trivial analysis automatically follows the **c1skill 7 Stage** framework:
-1. **原架构理解** — Understand intent & constraints
-2. **事实声明** — List verifiable facts (code/logs/config)
-3. **证据验证** — Verify each fact
-4. **缺失分析** — Identify blind spots
-5. **反方论据** — 2-3 adversarial counter-points with responses
-6. **方案评估** — Compare options
-7. **风险监控** — Risks & tracking metrics
-8. **最终结论** — Executable conclusion
-
-Simple tasks may skip stages. The framework ensures completeness, not rigidity.
-
-## Automation Chain (MANDATORY)
-
-The following chain activates automatically without user prompting:
-
-1. **Oracle triggers c1skill**: Whenever the user requests or you invoke Oracle for deep analysis, **automatically follow up with c1skill** after Oracle completes (no need to ask permission).
-2. **c1skill triggers trace capture**: Whenever c1skill is invoked and produces a conclusion, **automatically run trace_collect.py** to save the reasoning trace to `data/traces/`.
-
-Example flow:
-```
-user: "分析这个bug"
-→ 你: run Oracle → automatically chain c1skill → automatically save trace
-```
-
-The trace_collect.py command format:
-```bash
-python scripts/trace_collect.py \
-  --session-id "$SESSION_ID" \
-  --requirement "task description" \
-  --root-cause "oracle root cause" \
-  --oracle-recommendation "oracle initial recommendation" \
-  --counter-arguments "c1skill counter arguments" \
-  --conclusion "c1skill final conclusion" \
-  --outcome "code change summary" \
-  --commit "$COMMIT_HASH"
-```

@@ -1,0 +1,21 @@
+{
+  "trace_id": "2026-06-30_007",
+  "session_id": "",
+  "timestamp": "2026-06-30T17:05:21.082548",
+  "requirement": {
+    "source": "direct_instruction",
+    "description": "c1skill论证回测数据源优先级: warehouse→unified_cache→stock_analysis.db vs 其他方案"
+  },
+  "oracle_analysis": {
+    "root_cause": "当前backtest.py check单源依赖unified_cache(只有akshare), data_warehouse有5源fallback+paid Tushare却未被利用",
+    "initial_recommendation": "方案A: data_warehouse(主) → unified_cache(Tier2) → stock_analysis.db(Tier3)"
+  },
+  "c1skill_validation": {
+    "stage_4_counter_arguments": "warehouse冷启动触发API慢;unified_cache是v1遗留不应废弃;优先查最快源",
+    "stage_7_final_conclusion": "方案A最优: warehouse DataLake.query_ohlcv()是本地SQLite,速度等同unified_cache;仅在缓存全空才触发API;unified_cache作为快速回退保障daemon故障"
+  },
+  "final_outcome": {
+    "patch_summary": "market_data_fallback.py创建(3层fallback+数据质量守卫+统计追踪), backtest.py cmd_check改为warehouse-first",
+    "commit_hash": "58456610e37bd5b3da3f7f9f89c093615805eb18"
+  }
+}
