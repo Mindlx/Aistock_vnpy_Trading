@@ -44,7 +44,7 @@ UNIFIED_REPORT_MD = C1TEST_DIR / "unified_report.md"
 FUSION_OUTPUT_DIR = PROJECT_ROOT / "data" / "fusion_output"
 ML_DB = PROJECT_ROOT / "systems" / "MindLynx-Aistock" / "data" / "stock_analysis.db"
 
-DIRECTION_THRESHOLD = 0.5  # L7 score 绝对值 >= 此值视为有方向
+# (DIRECTION_THRESHOLD 已移除 — AT 相位改用 0.1 与融合回测对齐)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -152,6 +152,14 @@ def phase1_fusion() -> Dict[str, Any]:
             "total": total,
             "accuracy": pct,
         }
+
+    # LY flat zone 统计: 被 L7 映射标记为中性而排除的信号数
+    cursor.execute("""
+        SELECT COUNT(*) FROM bt_predictions
+        WHERE fusion_correct IS NOT NULL AND ly_valid = 1
+          AND (ly_correct IS NULL OR ly_dir = 0)
+    """)
+    ly_flat_zone_neutral = cursor.fetchone()[0]
 
     # 子系统数据覆盖率 (指标信号有效的比例)
     coverage = {}
@@ -262,6 +270,7 @@ def phase1_fusion() -> Dict[str, Any]:
         "backtest_days": days,
         "subsystem_accuracy": accuracies,
         "subsystem_coverage": coverage,
+        "ly_flat_zone_neutral": ly_flat_zone_neutral,
         "disagreement": {
             "matched": disagreement_matched,
             "correct": disagreement_correct,
@@ -569,8 +578,9 @@ def phase4_at() -> Dict[str, Any]:
         per_stock: Dict[str, dict] = {}
         for code, at_score, date_str in at_records:
             # AT 方向: tradingagent_score > 0 = 看多, < 0 = 看空, ==0 = 中性
-            if abs(at_score) < DIRECTION_THRESHOLD:
-                continue  # 跳过中性, 与融合回测一致
+            # 使用与融合回测相同的阈值 _sign(threshold=0.1), 确保口径一致
+            if abs(at_score) < 0.1:
+                continue  # 中性跳过, 与 backtest._sign 一致
             at_bullish = at_score > 0
 
             # 查 T+1 涨跌
@@ -647,6 +657,9 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
         coverage = fusion.get("subsystem_coverage", {})
         if coverage:
             report["subsystem_coverage"] = coverage
+
+        # LY flat zone 中性排除数
+        report["ly_flat_zone_neutral"] = fusion.get("ly_flat_zone_neutral", 0)
 
     # LY 独立回测
     ly = phases.get("ly", {})
@@ -847,11 +860,14 @@ def render_markdown(report: Dict[str, Any]) -> str:
         lines.append(f"|------|------|")
         lines.append(f"| 总体准确率 | **{ly.get('accuracy', 'N/A')}%** |")
         lines.append(f"| 样本量 | {ly.get('total', 0)} |")
+        lz = report.get("ly_flat_zone_neutral", 0)
+        if lz:
+            lines.append(f"| L7 flat zone 中性排除 | {lz} 条（不计入融合层面 LY 准确率） |")
         lines.append(f"")
 
     # ── ML 详情 ──
     ml = report.get("ml", {})
-    if ml.get("operation_advice") or ml.get("sentiment_score"):
+    if ml.get("operation_advice") or ml.get("sentiment_score") or ml.get("fusion_equivalent"):
         lines.append(f"## 🤖 ML 独立回测")
         lines.append(f"")
         op = ml.get("operation_advice", {})
@@ -899,7 +915,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         lines.append(f"|------|------|")
         lines.append(f"| 方向准确率 | **{at.get('accuracy', 'N/A')}%** |")
         lines.append(f"| 样本量 | {at.get('total', 0)} |")
-        lines.append(f"| 说明 | {at.get('note', '')} |")
+        lines.append(f"| 说明 | 阈值已统一为 0.1 与融合回测口径一致 |")
         lines.append(f"")
 
     # ── 变化 ──
