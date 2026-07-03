@@ -102,7 +102,7 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 | TA | oneshot | - | inactive(等待09:31) | TradingAgent辩论 |
 | calibrate-alphas | oneshot | - | ✅ timer 12:30 | Alpha权重自动校准 |
 | diagnose-agreement | oneshot | - | ✅ timer 20:30 | LY+ML同向诊断数据积累 |
-| eastmoney-rating | oneshot | - | ✅ timer 09:53/13:53 | 东方财富数据获取+存档 |
+| eastmoney-rating | oneshot | - | ✅ timer 09:53 | 东方财富数据获取+简讯推送（09:53仅一次, 13:53已取消） |
 | retrain-lgb | oneshot | - | ✅ timer 15:20 | LGB+RF模型自动重训(≥7天触发) |
 | c1test-daily | oneshot | - | ✅ timer 20:00 | 🆕 统一回测快速模式 |
 | c1test-weekly | oneshot | - | ✅ timer 周日10:30 | 🆕 统一回测全面模式 |

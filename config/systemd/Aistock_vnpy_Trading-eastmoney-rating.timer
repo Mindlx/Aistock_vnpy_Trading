@@ -1,10 +1,9 @@
 [Unit]
-Description=Aistock_vnpy_Trading — 东方财富评级定时器（工作日 09:53/13:53）
+Description=Aistock_vnpy_Trading — 东方财富评级定时器（工作日 09:53）
 Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
 
 [Timer]
 OnCalendar=Mon..Fri 09:53:00
-OnCalendar=Mon..Fri 13:53:00
 Persistent=false
 
 [Install]
