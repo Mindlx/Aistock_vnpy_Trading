@@ -693,6 +693,14 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
         if p > best_pct:
             best_pct = p
             best_name = name_map.get(sk, sk)
+    # ML 用 fusion_equivalent 替代融合层面的子集数据
+    fe = report.get("ml", {}).get("fusion_equivalent", {})
+    if fe.get("accuracy"):
+        report.setdefault("subsystems", {}).setdefault("ml", {})["accuracy_pct"] = fe["accuracy"]
+        report.setdefault("subsystems", {}).setdefault("ml", {})["total"] = fe["total"]
+        if fe["accuracy"] > best_pct:
+            best_pct = fe["accuracy"]
+            best_name = "MindLynx"
     fusion_pct = report.get("fusion", {}).get("accuracy_pct", 0)
     report["fusion_vs_best"] = {
         "fusion_accuracy": fusion_pct,
@@ -1002,9 +1010,12 @@ def main():
     f_status = phases["fusion"].get("status", "error")
     if f_status == "ok":
         sa = phases["fusion"].get("subsystem_accuracy", {})
+        # ML 用 fusion_equivalent 替代融合层面子集
+        fe = phases.get("ml", {}).get("fusion_equivalent", {}).get("accuracy", None)
+        ml_acc = fe if fe else sa.get("ml", {}).get("accuracy", 0)
         print(f"   ✅ 融合 {sa.get('fusion', {}).get('accuracy', 0)}% | "
               f"LY {sa.get('ly', {}).get('accuracy', 0)}% | "
-              f"ML {sa.get('ml', {}).get('accuracy', 0)}% | "
+              f"ML {ml_acc}% | "
               f"AT {sa.get('at', {}).get('accuracy', 0)}%")
     else:
         print(f"   ❌ {phases['fusion'].get('message', '未知错误')}")
