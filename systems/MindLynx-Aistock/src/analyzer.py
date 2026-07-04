@@ -3303,13 +3303,45 @@ class GeminiAnalyzer:
                     op = data.get("operation_advice", "Hold" if report_language == "en" else "持有")
                     decision_type = infer_decision_type_from_advice(op, default="hold")
 
+                # ── operation_advice 方向强制与 sentiment_score 一致 ──
+                # 2026-07-04: op_advice 已退出 L7 裁决, 作为纯文本解释器,
+                # 其方向应跟随 sentiment_score 的 L7 映射, 确保用户看到的
+                # 文字建议与系统的数值评分方向一致。
+                # LLM 的自主权保留在"解释"(为什么是这个方向、给什么点位),
+                # 而非"判断方向"(那是 sentiment_score + L7 的职责)。
+                _raw_op = data.get("operation_advice", "Hold" if report_language == "en" else "持有")
+                _sent = int(float(data.get("sentiment_score", 50)))
+                if _sent >= 52:
+                    # L7 看多: op 应表述看多意图
+                    if report_language == "en":
+                        # force bullish: replace hold/watch/sell with buy
+                        _aligned_op = _raw_op
+                        if any(k in _raw_op.lower() for k in ("sell", "reduce", "wait", "hold", "watch")):
+                            _aligned_op = "Buy"
+                    else:
+                        _aligned_op = _raw_op
+                        if any(k in _raw_op for k in ("卖出", "减仓", "观望", "等待", "查看复盘")):
+                            _aligned_op = "买入"
+                elif _sent <= 48:
+                    # L7 看空: op 应表述看空意图
+                    if report_language == "en":
+                        _aligned_op = _raw_op
+                        if any(k in _raw_op.lower() for k in ("buy", "add", "hold")):
+                            _aligned_op = "Sell"
+                    else:
+                        _aligned_op = _raw_op
+                        if any(k in _raw_op for k in ("买入", "加仓", "建仓", "增持", "持有", "查看复盘")):
+                            _aligned_op = "卖出"
+                else:
+                    _aligned_op = _raw_op  # 中性: 保留 LLM 原文
+
                 return AnalysisResult(
                     code=code,
                     name=name,
                     # 核心指标
-                    sentiment_score=int(float(data.get("sentiment_score", 50))),
+                    sentiment_score=_sent,
                     trend_prediction=data.get("trend_prediction", "Sideways" if report_language == "en" else "震荡"),
-                    operation_advice=data.get("operation_advice", "Hold" if report_language == "en" else "持有"),
+                    operation_advice=_aligned_op,
                     decision_type=decision_type,
                     confidence_level=localize_confidence_level(
                         data.get("confidence_level", "Medium" if report_language == "en" else "中"),
