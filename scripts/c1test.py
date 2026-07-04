@@ -506,7 +506,32 @@ def phase3_ml() -> Dict[str, Any]:
             "source": "analysis_history → v4.0 L7 ×0.8 → _sign(0.1) → T+1",
         }
 
-    # ── 3. 最近回测报告文件路径 (如果有) ──
+    # ── 3. 策略级准确率 (从 backtest_results.skill_id) ──
+    try:
+        cursor.execute('''
+            SELECT COALESCE(br.skill_id, 'consensus') as sid,
+                   SUM(CASE WHEN br.direction_correct = 1 THEN 1 ELSE 0 END) as correct,
+                   COUNT(*) as total
+            FROM backtest_results br
+            WHERE br.eval_status = 'completed' AND br.direction_correct IS NOT NULL
+            GROUP BY sid
+            HAVING total >= 5
+            ORDER BY correct * 1.0 / total DESC
+        ''')
+        strategies = []
+        for row in cursor.fetchall():
+            strategies.append({
+                "skill_id": row["sid"],
+                "correct": row["correct"],
+                "total": row["total"],
+                "accuracy": round(row["correct"] / row["total"] * 100, 1),
+            })
+        if strategies:
+            result["strategy_breakdown"] = strategies
+    except sqlite3.OperationalError:
+        pass  # skill_id 列可能尚不存在
+
+    # ── 4. 最近回测报告文件路径 (如果有) ──
     report_dir = PROJECT_ROOT / "systems" / "MindLynx-Aistock" / "reports" / "backtest"
     latest_reports = sorted(report_dir.glob("backtest_report_overall_*.md"))
     if latest_reports:
@@ -673,6 +698,7 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
             "operation_advice": ml.get("operation_advice", {}),
             "sentiment_score": ml.get("sentiment_score", {}),
             "fusion_equivalent": ml.get("fusion_equivalent", {}),
+            "strategy_breakdown": ml.get("strategy_breakdown", []),
         }
 
     # AT (独立)
@@ -912,6 +938,21 @@ def render_markdown(report: Dict[str, Any]) -> str:
             if op.get("direction_accuracy") and fe.get("accuracy"):
                 gap = abs(fe["accuracy"] - op["direction_accuracy"])
                 lines.append(f"| 语义差距 | **{gap:.1f}%** |")
+            lines.append(f"")
+
+        # 策略级准确率
+        strategies = ml.get("strategy_breakdown", [])
+        if strategies:
+            lines.append(f"### 🧩 策略级准确率 (backtest_results.skill_id)")
+            lines.append(f"")
+            lines.append(f"| 策略 | 准确率 | 正确/总 |")
+            lines.append(f"|------|:------:|:-------:|")
+            for s in strategies:
+                bar = _bar(s.get("accuracy", 0), 10)
+                lines.append(f"| {s.get('skill_id', '?')} | {s.get('accuracy', 0):.1f}% {bar} | {s.get('correct',0)}/{s.get('total',0)} |")
+            lines.append(f"")
+        else:
+            lines.append(f"<!-- 策略级数据积累中（需至少 5 条/skill） -->")
             lines.append(f"")
 
     # ── AT ──
