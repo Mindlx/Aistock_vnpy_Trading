@@ -2883,6 +2883,29 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 self._factor_profiles[r.code] = engine.build_factor_profile(r)
                 self._factor_scores[r.code] = r.composite_score
                 self._factor_zscores[r.code] = r.z_scores
+
+            # Append cross-sectional rankings to factor profiles
+            if len(all_results) >= 3:
+                rank_data: dict[str, dict[str, tuple[float, int]]] = {}
+                for r in all_results:
+                    rank_data[r.code] = {}
+                    for fd in engine.factors:
+                        z = r.z_scores.get(fd.name, 0.0)
+                        rank_data[r.code][fd.name] = (z, 0)
+                for fd in engine.factors:
+                    fn = fd.name
+                    scores = [(code, rank_data[code][fn][0]) for code in rank_data]
+                    scores.sort(key=lambda x: x[1], reverse=True)
+                    for rank, (code, _) in enumerate(scores, 1):
+                        old = rank_data[code][fn]
+                        rank_data[code][fn] = (old[0], rank)
+                for r in all_results:
+                    lines_rank = ["", "### 横截面排名 (跨12只)"]
+                    for fd in engine.factors:
+                        z, rank = rank_data[r.code].get(fd.name, (0.0, 0))
+                        arrow = "↑" if z > 0.1 else ("↓" if z < -0.1 else "→")
+                        lines_rank.append(f"  {arrow} {fd.display_name}: {rank}/12")
+                    self._factor_profiles[r.code] += "\n" + "\n".join(lines_rank)
             # F6 fix: add computation timestamp to factor profiles
             from datetime import datetime as _dt
             _ts = _dt.now().strftime("%Y-%m-%d %H:%M")
