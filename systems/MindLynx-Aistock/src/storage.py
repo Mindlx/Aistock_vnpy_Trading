@@ -250,6 +250,9 @@ class AnalysisHistory(Base):
     stop_loss = Column(Float)
     take_profit = Column(Float)
 
+    # 策略追踪: 该分析使用的 Agent 策略/技能
+    skill_id = Column(String(64), index=True, nullable=True)
+
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (Index("ix_analysis_code_time", "code", "created_at"),)
@@ -891,7 +894,11 @@ class DatabaseManager:
             from sqlalchemy import inspect, text
 
             inspector = inspect(DatabaseManager._instance._engine)  # type: ignore[union-attr]
-            for table_name, column_name in [("backtest_results", "skill_id"), ("backtest_summaries", "skill_id")]:
+            for table_name, column_name in [
+                ("backtest_results", "skill_id"),
+                ("backtest_summaries", "skill_id"),
+                ("analysis_history", "skill_id"),
+            ]:
                 existing = {c["name"] for c in inspector.get_columns(table_name)}
                 if column_name not in existing:
                     with DatabaseManager._instance._engine.connect() as conn:  # type: ignore[union-attr]
@@ -1364,6 +1371,7 @@ class DatabaseManager:
         news_content: str | None,
         context_snapshot: dict[str, Any] | None = None,
         save_snapshot: bool = True,
+        skill_id: str | None = None,
     ) -> int:
         """
         保存分析结果历史记录
@@ -1397,6 +1405,7 @@ class DatabaseManager:
                         secondary_buy=sniper_points.get("secondary_buy"),
                         stop_loss=sniper_points.get("stop_loss"),
                         take_profit=sniper_points.get("take_profit"),
+                        skill_id=skill_id,
                         created_at=datetime.now(),
                     )
                 )

@@ -572,6 +572,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                         news_content=news_context,
                         context_snapshot=context_snapshot,
                         save_snapshot=self.save_context_snapshot,
+                        skill_id=",".join(self.analysis_skills) if self.analysis_skills else "consensus",
                     )
                 except Exception as e:
                     logger.warning(f"{stock_name}({code}) 保存分析历史失败: {e}")
@@ -1795,6 +1796,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                         news_content=None,
                         context_snapshot=initial_context,
                         save_snapshot=self.save_context_snapshot,
+                        skill_id=",".join(self.analysis_skills) if self.analysis_skills else "consensus",
                     )
                 except Exception as e:
                     logger.warning(f"[{code}] 保存 Agent 分析历史失败: {e}")
