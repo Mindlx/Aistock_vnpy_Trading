@@ -3061,10 +3061,12 @@ class GeminiAnalyzer:
         #     if factor_text:
         #         prompt += "\n\n---\n\n" + str(factor_text) + "\n"
 
-        # 注入 LY 量化信号（双模型预判）{@calibration LY量化信号注入}
-        ly_text = context.get("ly_signal", "")
-        if ly_text:
-            prompt += "\n\n---\n\n" + str(ly_text) + "\n"
+        # # 注入 LY 量化信号（双模型预判）{@calibration LY量化信号注入}
+        # # 2026-07-03 暂注释: LY OOS 50.1% 接近随机, 注入 ML 64% 系统理论上是噪音
+        # # 注释后跑几日 c1test 对比, 决定是否永久移除
+        # ly_text = context.get("ly_signal", "")
+        # if ly_text:
+        #     prompt += "\n\n---\n\n" + str(ly_text) + "\n"
 
         # 注入市场状态 (Phase 2)
         regime_text = context.get("regime_prompt", "")
