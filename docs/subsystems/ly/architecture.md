@@ -248,9 +248,22 @@ LY 的设计定位是"纯客观量化信号"——不依赖任何人为主观判
 
 **2026-07-03 关键结论**: LY 的 50.1% OOS 不是"有待修复"的问题，是这个子系统的**固有属性**。经典量价因子在 A 股个股时序预测上的信号天花板就在这个水平。LY 的价值不在准确率，在它代表了**第三个完全独立的方法论维度**——技术面 vs ML 的因子+LLM vs AT 的多智能体辩论。三种方法的预测误差不相关，这是三系统融合架构能通过多样性红利提升稳健性的核心前提。
 
+## 六、LY 信号在 ML 系统中的注入
+
+> **2026-07-03 状态**: LY 信号注入 ML prompt **已暂注释**。
+
+LY 的 `prob_up_ensemble`、`signal_rf`、`strength` 等信息通过 `pipeline.py:_load_ly_signals()` 加载，在 `analyzer.py:3064` 和 `executor.py:666` 两处注入 ML 的 LLM prompt。
+
+**注释原因**: LY 独立 OOS 50.1% 接近随机，注入到准确率 64% 的 ML 系统中理论上会引入噪音。暂注释后运行数日 c1test，对比 ML sentiment 准确率变化，决定是否永久移除。
+
+**相关代码位置**:
+- `systems/MindLynx-Aistock/src/analyzer.py:3064-3070` — 主 prompt 注入
+- `systems/MindLynx-Aistock/src/agent/executor.py:666-667` — Agent context 注入
+- `systems/MindLynx-Aistock/src/core/pipeline.py:991-1137` — LY 信号加载逻辑
+
 ---
 
-## 六、关键文件索引
+## 七、关键文件索引
 
 | 文件 | 职责 |
 |------|------|
