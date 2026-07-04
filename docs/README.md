@@ -25,7 +25,7 @@
 | **融合引擎** | `data-chain/data-warehouse.md`, `testing/backtest.md`, `decisions/weight-strategy.md`, `decisions/realtime-fusion.md`, `decisions/semantic-alignment.md`, `push/format.md` |
 | **ML (MindLynx)** | `subsystems/ml/backtest.md`, `llm/prompts.md`, `llm/roadmap.md`, `data-chain/data-sources.md` |
 | **AT (TradingAgent)** | `llm/injection.md`, `decisions/at-optimization.md`, `data-chain/data-sources.md` |
-| **LY (lynx_vnpy)** | `data-chain/data-sources.md`, `research/lynx-vnpy-subsystem-report.md` |
+| **LY (lynx_vnpy)** | `subsystems/ly/architecture.md`, `research/lynx-vnpy-subsystem-report.md` |
 | **EM (东方财富)** | `eastmoney/README.md`, `eastmoney/c1skill-analysis.md`, `eastmoney/data-ecosystem.md` |
 
 ---
@@ -59,6 +59,7 @@ docs/
 │
 ├── subsystems/                # 子系统独立文档
 │   └── ml/backtest.md         # ML 子系统回测
+│   └── ly/architecture.md     # LY 子系统因子工程与模型架构 (🆕)
 │
 ├── testing/                   # 回测验证（3篇）
 │   ├── backtest.md             # 融合系统回测 + 🆕 c1test 统一回测
