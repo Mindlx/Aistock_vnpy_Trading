@@ -389,24 +389,69 @@ def phase3_ml() -> Dict[str, Any]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # ── 1. backtest_summaries → 操作建议方向准确率 (5天窗口) ──
-    cursor.execute("""
-        SELECT direction_accuracy_pct, win_rate_pct, avg_stock_return_pct,
-               win_count, loss_count, total_evaluations, completed_count
-        FROM backtest_summaries
-        WHERE scope = 'overall' AND eval_window_days = 5
-        ORDER BY id DESC LIMIT 1
-    """)
-    row = cursor.fetchone()
-    if row:
+    # ── 1. operation_advice → 方向准确率 (T+1, 统一口径) ──
+    # 与 sentiment_score 使用完全相同的 T+1 窗口 + 中性视为正确
+    _BULLISH_KW = ("买入", "加仓", "强烈买入", "增持", "建仓", "strong buy", "buy", "add")
+    _BEARISH_KW = ("卖出", "减仓", "强烈卖出", "清仓", "strong sell", "sell", "reduce")
+    _HOLD_KW = ("持有", "持有观察", "hold", "range-bound watch", "shakeout watch", "hold and watch")
+    _WAIT_KW = ("观望", "等待", "wait")
+
+    def _op_dir(advice: str) -> int:
+        t = advice.strip().lower()
+        if any(k in t for k in _BEARISH_KW):
+            return -1
+        if any(k in t for k in _WAIT_KW):
+            # 如果同时有看多关键词, 看位置
+            has_bull = any(k in t for k in _BULLISH_KW)
+            has_hold = any(k in t for k in _HOLD_KW)
+            if not has_bull and not has_hold:
+                return 0  # 纯观望→中性
+        if any(k in t for k in _BULLISH_KW):
+            return 1
+        if any(k in t for k in _HOLD_KW):
+            return 1  # 持有→偏多(与 _classify_outcome 的 not_down 对应)
+        return 0  # 无法识别→中性
+
+    try:
+        cursor.execute("""
+            SELECT ah.operation_advice, sp.pct_chg
+            FROM analysis_history ah
+            JOIN stock_daily sp ON sp.code = ah.code
+                AND sp.date = date(ah.created_at, '+1 day')
+            WHERE ah.operation_advice IS NOT NULL
+              AND ah.operation_advice != ''
+              AND sp.pct_chg IS NOT NULL
+              AND ah.created_at >= date('now', '-90 days')
+        """)
+        rows = cursor.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+
+    if rows:
+        correct, total, neutral = 0, 0, 0
+        correct_dir, total_dir = 0, 0  # 排除中性后的方向准确率
+        for advice, pct_chg in rows:
+            pred = _op_dir(advice)
+            if pred == 0:
+                neutral += 1
+                correct += 1  # 中性视为正确，与 sentiment 一致
+                total += 1
+                continue
+            actual = 1 if pct_chg > 0 else (-1 if pct_chg < 0 else 0)
+            total += 1
+            total_dir += 1
+            if pred == actual:
+                correct += 1
+                correct_dir += 1
+
         result["operation_advice"] = {
-            "direction_accuracy": round(row["direction_accuracy_pct"], 1) if row["direction_accuracy_pct"] else 0.0,
-            "win_rate": round(row["win_rate_pct"], 1) if row["win_rate_pct"] else 0.0,
-            "avg_return": round(row["avg_stock_return_pct"], 2) if row["avg_stock_return_pct"] else 0.0,
-            "win_count": row["win_count"] or 0,
-            "loss_count": row["loss_count"] or 0,
-            "total_evaluated": row["total_evaluations"] or 0,
-            "completed": row["completed_count"] or 0,
+            "direction_accuracy": round(correct / total * 100, 1) if total > 0 else 0.0,
+            "direction_accuracy_excl_neutral": round(correct_dir / total_dir * 100, 1) if total_dir > 0 else 0.0,
+            "correct": correct,
+            "total": total,
+            "neutral": neutral,
+            "non_neutral_accuracy": round(correct_dir / total_dir * 100, 1) if total_dir > 0 else 0.0,
+            "source": "analysis_history T+1 (统一口径, 中性视为正确)",
         }
 
     # ── 2. analysis_history → sentiment_score 方向准确率 (直查 stock_daily T+1) ──
@@ -788,12 +833,12 @@ def detect_changes(report: Dict[str, Any]) -> Dict[str, Any]:
 
     # 警示: ML 语意差距
     ml = report.get("ml", {})
-    op_acc = ml.get("operation_advice", {}).get("direction_accuracy", 0)
+    op_acc = ml.get("operation_advice", {}).get("non_neutral_accuracy", 0)
     fe_acc = ml.get("fusion_equivalent", {}).get("accuracy", 0)
     if op_acc > 0 and fe_acc > 0:
         gap = abs(fe_acc - op_acc)
         if gap > 30:
-            changes["alerts"].append(f"🟡 ML 语义差距 {gap:.0f}% (fusion等效 {fe_acc}% vs operation {op_acc}%)")
+            changes["alerts"].append(f"🟡 ML 语义差距 {gap:.0f}% (fusion等效 {fe_acc}% vs operation方向 {op_acc}%)")
 
     # 警示: 系统可用性
     for sk, sn in name_map.items():
@@ -906,14 +951,15 @@ def render_markdown(report: Dict[str, Any]) -> str:
         lines.append(f"")
         op = ml.get("operation_advice", {})
         if op:
-            lines.append(f"### 操作建议路径 (operation_advice)")
+            lines.append(f"### 操作建议路径 (operation_advice, T+1 统一口径)")
             lines.append(f"")
             lines.append(f"| 指标 | 数值 |")
             lines.append(f"|------|------|")
-            lines.append(f"| 方向准确率 | {op.get('direction_accuracy', 'N/A')}% |")
-            lines.append(f"| 胜率 | {op.get('win_rate', 'N/A')}% |")
-            lines.append(f"| 平均收益 | {op.get('avg_return', 'N/A')}% |")
-            lines.append(f"| 评估量 | {op.get('total_evaluated', 0)} |")
+            lines.append(f"| 方向准确率(含中性) | **{op.get('direction_accuracy', 'N/A')}%** |")
+            lines.append(f"| 方向准确率(排除中性) | **{op.get('non_neutral_accuracy', 'N/A')}%** |")
+            lines.append(f"| 样本量 | {op.get('total', 0)} |")
+            lines.append(f"| 其中中性 | {op.get('neutral', 0)} 条 |")
+            lines.append(f"| 数据源 | {op.get('source', '')} |")
             lines.append(f"")
 
         ss = ml.get("sentiment_score", {})
@@ -935,9 +981,9 @@ def render_markdown(report: Dict[str, Any]) -> str:
             lines.append(f"| 方向准确率 | **{fe.get('accuracy', 'N/A')}%** |")
             lines.append(f"| 样本量 | {fe.get('total', 0)} |")
             lines.append(f"| 中性跳过 | {fe.get('neutral', 0)} |")
-            if op.get("direction_accuracy") and fe.get("accuracy"):
-                gap = abs(fe["accuracy"] - op["direction_accuracy"])
-                lines.append(f"| 语义差距 | **{gap:.1f}%** |")
+            if op.get("non_neutral_accuracy") and fe.get("accuracy"):
+                gap = abs(fe["accuracy"] - op["non_neutral_accuracy"])
+                lines.append(f"| 语义差距(方向) | **{gap:.1f}%** |")
             lines.append(f"")
 
         # 策略级准确率
@@ -1087,7 +1133,8 @@ def main():
             op = phases["ml"].get("operation_advice", {})
             ss = phases["ml"].get("sentiment_score", {})
             fe = phases["ml"].get("fusion_equivalent", {})
-            print(f"   ✅ ML operation: {op.get('direction_accuracy', 'N/A')}% | "
+            print(f"   ✅ ML operation: {op.get('direction_accuracy', 'N/A')}% "
+                  f"(方向 {op.get('non_neutral_accuracy', 'N/A')}% / 中性{op.get('neutral',0)}条) | "
                   f"sentiment: {ss.get('accuracy', 'N/A')}% | "
                   f"fusion等效: {fe.get('accuracy', 'N/A')}% ({fe.get('total', 0)}样本)")
         else:
