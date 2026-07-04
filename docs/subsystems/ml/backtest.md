@@ -1,6 +1,6 @@
 # ML 系统回测文档
 
-> 最后更新: 2026-07-04 (含 12因子IC验证 + 策略级追踪 + c1test集成)
+> 最后更新: 2026-07-04 (含 12因子IC验证 + 策略级追踪 + c1test集成 + op方向对齐sentiment)
 > 子文档，与 `docs/backtest.md` 配套阅读
 
 ---
@@ -407,3 +407,76 @@ ML 在融合系统中的当前权重为 `alpha=0.55`（`reliability.py:31`），
 | 数据积累期 | 正常运行，系统自动记录 `skill_id` |
 | 10-15 个交易日后 | 运行 `analyze_strategy_accuracy.py` 查看首份报告 |
 | 发现问题策略 | 裁剪或替换低准确率策略 YAML |
+
+---
+
+## 十、operation_advice 方向对齐 sentiment（2026-07-04）
+
+### 10.1 背景
+
+op_advice（操作建议文本）已退出 L7 裁决（`42c01fd`），定位为"纯文本解释器"。
+但 LLM 仍保留了方向自主权——可以在 sentiment_score=65（看多）时写"观望"或"卖出"。
+这导致 c1test 评测中 op_advice 方向准确率仅 72.9%，且仅覆盖 23% 的样本（77% 是"观望"等模糊表达）。
+
+### 10.2 改造内容
+
+在 `analyzer.py` LLM 输出解析处新增对齐逻辑（`analyzer.py:3306-3344`）：
+
+```python
+# ── op_advice 方向强制与 sentiment_score 一致 ──
+# 旧逻辑（保留注释作为历史备份）:
+# operation_advice = data.get("operation_advice", "持有")
+
+# 新逻辑:
+_sent = int(float(data.get("sentiment_score", 50)))
+if _sent >= 52:
+    # L7 看多 → op 目必须看多
+    if any(k in _raw_op for k in ("卖出", "减仓", "观望", "等待", "查看复盘")):
+        _aligned_op = "买入"
+    else:
+        _aligned_op = _raw_op  # 保留 LLM 原文（已经是看多表达）
+elif _sent <= 48:
+    # L7 看空 → op 必须看空
+    if any(k in _raw_op for k in ("买入", "加仓", "建仓", "增持", "持有", "查看复盘")):
+        _aligned_op = "卖出"
+    else:
+        _aligned_op = _raw_op  # 保留 LLM 原文（已经是看空表达）
+else:
+    _aligned_op = _raw_op  # 49-51 flat zone → 保留 LLM 原文
+```
+
+旧代码保留在文件注释中（搜索 `# ── operation_advice 方向强制` 即见），
+如需回退只需删除新逻辑块并取消注释原有的 `operation_advice = data.get(...)` 行。
+
+### 10.3 LLM 自主权变化
+
+| 维度 | 改造前 | 改造后 |
+|------|--------|--------|
+| 判断方向 | ✅ LLM 决定 | ❌ 由 sentiment+L7 决定 |
+| 用文字解释方向 | ✅ | ✅ **保留**（为什么看多/看空） |
+| 给具体价格点位 | ✅ | ✅ **保留**（买入价、止损价、目标价） |
+| 给风险评估 | ✅ | ✅ **保留**（风险警报、催化因素） |
+
+LLM 从"判断方向+翻译"变为"翻译+解释+给点位"——方向判断不再由 LLM 文本独立决定。
+
+### 10.4 评测统一口径
+
+op_advice 与 sentiment_score 使用完全相同的评估标准（`c1test.py` Phase 3）：
+
+| 口径 | sentiment_score | operation_advice |
+|:----:|:--------------:|:----------------:|
+| 数据源 | `analysis_history` | **与 sentiment 同一批记录** |
+| 时间窗口 | T+1 | **T+1** |
+| flat zone | 49-51 → 中性视为正确 | **49-51 → 中性视为正确** |
+| 方向评估 | 全量非中性样本 | **op 表达明确方向时评估** |
+| 一致预期 | — | 改造后应与 sentiment 一致 |
+
+### 10.5 演进历史
+
+| 步骤 | 变更 | op_advice 准确率 | 状态 |
+|:----:|------|:---------------:|:----:|
+| 原始 | LLM 自由输出文本, T+5 窗口评估 | 27.5% | ❌ 旧 |
+| `6deb8a2` | 因子剖面 2→12 行, prompt 重排 | 27.5%（未改善） | ❌ 旧 |
+| `42c01fd` | op_advice 退出 L7, 纯文本解释器 | — | ✅ 已部署 |
+| c1test 统一 | T+5→T+1, 中性排除→中性正确 | 72.9%（仅 23% 表态） | ✅ 已部署 |
+| **2026-07-04** | **方向强制跟随 sentiment** | **应与 sentiment 65%一致** | ✅ **最新** |
