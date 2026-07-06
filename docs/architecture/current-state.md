@@ -575,7 +575,7 @@ realtime-fusion和ml-factor服务已加入 `_is_trading_day()` 检测，非工�
 当前实时行情/估值数据的获取模式是"LLM 分析时实时调用 API"。
 当 efinance 被封锁或响应慢时，LLM 分析的数据完整性下降。
 
-### 11.2 估值数据缺失根因（2026-07-06 已定位）
+### 11.2 估值数据缺失根因（2026-07-06 已定位+修复）
 
 ```
 两条调用路径, 不同超时:
@@ -583,7 +583,11 @@ realtime-fusion和ml-factor服务已加入 `_is_trading_day()` 检测，非工�
   估值入库: get_realtime_quote() → 超时 3s → Tushare 刚返回就超时 ❌
 ```
 
-**已修复**: `FUNDAMENTAL_FETCH_TIMEOUT_SECONDS=10`（3→10s）
+**修复**: 
+- `FUNDAMENTAL_FETCH_TIMEOUT_SECONDS=20`（3→20s）
+- **数据湖兜底**: `get_fundamental_context()` 优先检查 `WarehouseReader`，
+  API 成功时回写 `DataLake`，API 失败时使用湖中旧数据（哪怕过期）。
+  确保整点分析始终能拿到估值数据，而非 None。
 
 ### 11.3 方案 B：数据湖定时拉取
 
