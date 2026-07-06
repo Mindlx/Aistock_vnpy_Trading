@@ -344,11 +344,18 @@ class RefreshScheduler:
                     self.refresh_news()
                     last_news = now
 
-                # 周一 09:00: 刷新基本面
+                # 周一 09:00: 刷新基本面 (周度)
                 if weekday == 1 and hour == 9 and 0 <= minute < 5 and now - last_fundamentals > 600000:
-                    logger.info("[Scheduler] 触发: 基本面刷新")
+                    logger.info("[Scheduler] 触发: 基本面刷新(周度)")
                     self.refresh_fundamentals()
                     last_fundamentals = now
+
+                # 每日 10:50 / 13:50: 盘前刷新基本面 (配合 11:00/14:00 整点分析)
+                if weekday <= 5 and hour in (10, 13) and 48 <= minute <= 52:
+                    if now - last_fundamentals > 1800:  # 至少间隔 30 分钟
+                        logger.info("[Scheduler] 触发: 基本面刷新(盘前 %02d:%02d)", hour, minute)
+                        self.refresh_fundamentals()
+                        last_fundamentals = now
 
                 # 每日 03:00: 清理过期数据
                 if hour == 3 and 0 <= minute < 5 and now - last_purge > 82000:
