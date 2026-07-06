@@ -557,15 +557,48 @@ realtime-fusion和ml-factor服务已加入 `_is_trading_day()` 检测，非工�
 
 | 源 | 优先级 | 用途 | 稳定性 |
 |----|--------|------|--------|
-| Sina API (hq.sinajs.cn) | 最高 | 实时行情 | 稳定 |
-| Tushare Pro | 高 | OHLCV/资金流 | 稳定(有token) |
-| EastMoney | 中 | 龙虎榜/基本面/评级 | 不稳定，常触发重试 |
-| akshare | 后备 | 补充数据 | 版本依赖敏感 |
+| Tushare Pro | 最高 | 实时行情/OHLCV/资金流/估值 | 稳定(已付费) |
+| Sina API (hq.sinajs.cn) | 高 | 实时行情后备 | 稳定 |
+| Tencent (akshare) | 中 | PE/PB/量比/换手率补充 | 稳定 |
+| EastMoney/efinance | 中 | 龙虎榜/基本面/板块排行 | 不稳定，常被封 |
+| akshare (EM/Sina) | 后备 | 补充数据 | 版本依赖敏感 |
 | pytdx (TCP) | 后备 | 日K线降级 | 稳定 |
-| stock_daily DB (sqlite) | 日终 | 因子引擎计算 | 由ML scheduler写入 |
-| unified_cache (sqlite) | 缓存 | 共享OHLCV | TTL 24h |
 
 **回测数据fallback链** (baf4921, 2026-06-30): `data_warehouse(5源) → unified_cache → stock_analysis.db` — 3层降级保障回测行情匹配不停摆。详见 `src/market_data_fallback.py`。
+
+---
+
+## 十一、数据湖改造计划（方案 B，待执行）
+
+### 11.1 背景
+
+当前实时行情/估值数据的获取模式是"LLM 分析时实时调用 API"。
+当 efinance 被封锁或响应慢时，LLM 分析的数据完整性下降。
+
+### 11.2 方案 B：数据湖定时拉取
+
+利用已有的 `data_warehouse` 服务，定时后台拉取不敏感数据：
+
+| 数据 | 更新频率 | 时效性 | 当前问题 |
+|------|:--------:|:------:|---------|
+| 估值(PE/PB) | 日频 | 次日有效 | efinance 被封时丢失 |
+| 筹码分布 | 日频 | 次日有效 | 依赖 Tushare 实时调用 |
+| 资金流 | 15分钟 | 盘中有效 | 实时调用可能失败 |
+| 板块排行 | 15分钟 | 盘中有效 | efinance 被封时丢失 |
+
+### 11.3 预期收益
+
+- 整点分析读取缓存而非实时 API，速度更快
+- API 故障不影响已有数据分析
+- 多个子系统共享缓存，减少 API 调用量
+
+### 11.4 执行前提
+
+- 需确定哪些数据适合缓存（日频数据优先）
+- 需实现 data_warehouse 的定时更新 scheduler
+- 需修改 pipeline.py 的数据读取路径（优先读湖，API 兜底）
+
+> 待深入论证后执行。参见 `docs/data-chain/data-warehouse.md`。
 
 ---
 
