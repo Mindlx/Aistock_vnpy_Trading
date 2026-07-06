@@ -330,15 +330,12 @@ def _l7_score(prob_up: float) -> float:
       > 65%          → 63-66%上涨,强烈看多
     """
     pct = prob_up * 100.0
-    # (prob_up%, L7_score) 锚点表
+    # (prob_up%, L7_score) 锚点表 (2026-07-06: 移除 flat zone, 单点中性 @45)
     anchors = [
         (0, -3.00),     # 钳位下限
         (25, -2.00),    # 看空(低置信)
         (35, -1.00),    # 谨慎看空
-        (42, -0.50),    # 偏空(原被flat zone吞没)
-        (45, 0.00),     # 中性下界
-        (50, 0.00),     # 中性上界
-        (52, 0.25),     # 谨慎看多(平滑过渡)
+        (45, 0.00),     # 单点中性 (原 flat zone 45-50 已移除)
         (59, 1.00),     # 看多
         (65, 2.00),     # 看多(较强)
         (75, 3.00),     # 强烈看多
@@ -679,7 +676,7 @@ def _bt_predict_at(df: pd.DataFrame, model, scaler, idx: int) -> float | None:
         return None
 
 
-def cmd_backtest() -> int:
+def cmd_backtest(save_predictions: str | None = None) -> int:
     """回测模式：Walk-forward 验证模型预测准确率。
 
     Walk-forward: 每 RETRAIN_INTERVAL 天用截至当天的数据训练模型，
@@ -695,6 +692,7 @@ def cmd_backtest() -> int:
     MIN_TRAIN = 60         # 最少 60 个交易日作为初始训练集
 
     all_results: list[dict] = []
+    all_predictions: list[dict] = []  # 逐笔预测 (用于离线分析)
     for code in STOCK_CODES:
         print(f"\n📡  {code} ({STOCK_NAMES.get(code, code)})...")
 
@@ -752,6 +750,7 @@ def cmd_backtest() -> int:
                     "actual_dir": actual_dir, "correct": correct,
                     "l7_dir": l7_dir, "l7_correct": l7_correct,
                 })
+                all_predictions.append(results[-1])
 
         if results:
             total = len(results)
@@ -760,7 +759,7 @@ def cmd_backtest() -> int:
             eval_count = correct_count + wrong_count
             accuracy = correct_count / eval_count * 100 if eval_count > 0 else 0
 
-            # L7 映射后准确率
+            # L7 映射后准确率 (使用当前 _l7_score 锚点)
             l7_correct_count = sum(1 for r in results if r["l7_correct"] == 1)
             l7_wrong_count = sum(1 for r in results if r["l7_correct"] == 0)
             l7_eval_count = l7_correct_count + l7_wrong_count
@@ -819,6 +818,16 @@ def cmd_backtest() -> int:
     print(f"\n{'='*55}")
     print(f"  回测完成")
     print(f"{'='*55}")
+
+    # 保存逐笔预测
+    if save_predictions:
+        import json
+        save_path = Path(_PROJECT_ROOT) / save_predictions
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.write_text(
+            json.dumps(all_predictions, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"  💾 逐笔预测已保存: {save_path} ({len(all_predictions)} 条)")
     return 0
 
 
@@ -833,6 +842,8 @@ def _parse_args() -> argparse.Namespace:
                         help="回测模式：用历史数据验证模型预测准确率")
     parser.add_argument("--alpha", action="store_true",
                         help="使用Alpha158+LGB模型（替代RF+15TA）")
+    parser.add_argument("--save-predictions", type=str, default=None,
+                        help="保存逐笔预测到 JSON 文件, 用于离线分析 flat zone 等参数")
     return parser.parse_args()
 
 
@@ -870,5 +881,5 @@ if __name__ == "__main__":
     if args.schedule:
         exit(_schedule_loop(args.time, use_alpha=args.alpha))
     if args.backtest:
-        exit(cmd_backtest())
+        exit(cmd_backtest(save_predictions=args.save_predictions))
     exit(run(use_alpha=args.alpha))

@@ -191,13 +191,12 @@ class SignalNormalizer:
         if p < 0 or p > 100:
             return 0.0, False
 
-        # prob_up → L7 锚点表
+        # prob_up → L7 锚点表 (2026-07-06: 移除 flat zone, 单点中性 @45)
         anchors = [
             (0, -3.00),    # 钳位下限
             (25, -2.06),   # S6
             (35, -1.13),   # S5
-            (42, 0.00),    # S4 中性边界 (flat zone 下界)
-            (52, 0.00),    # S4 中性边界 (flat zone 上界)
+            (45, 0.00),    # 单点中性 (原 flat zone 42-52 已移除)
             (65, 2.06),    # S2
             (75, 3.00),    # S1
             (100, 3.00),   # 钳位上限
