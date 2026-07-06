@@ -740,11 +740,17 @@ def cmd_backtest() -> int:
                 actual_dir = 1 if actual_ret > 0 else (-1 if actual_ret < 0 else 0)
                 correct = 1 if pred_dir == actual_dir else (0 if actual_dir != 0 else None)
 
+                # L7 映射后方向（融合等效）
+                l7_score = _l7_score(prob_up)
+                l7_dir = 1 if l7_score > 0 else (-1 if l7_score < 0 else 0)
+                l7_correct = 1 if l7_dir == actual_dir else (0 if actual_dir != 0 else None)
+
                 results.append({
                     "code": code, "date": str(df.iloc[i].get("日期", "")),
                     "prob_up": round(prob_up * 100, 1),
                     "pred_dir": pred_dir, "actual_ret": round(actual_ret, 2),
                     "actual_dir": actual_dir, "correct": correct,
+                    "l7_dir": l7_dir, "l7_correct": l7_correct,
                 })
 
         if results:
@@ -754,20 +760,29 @@ def cmd_backtest() -> int:
             eval_count = correct_count + wrong_count
             accuracy = correct_count / eval_count * 100 if eval_count > 0 else 0
 
+            # L7 映射后准确率
+            l7_correct_count = sum(1 for r in results if r["l7_correct"] == 1)
+            l7_wrong_count = sum(1 for r in results if r["l7_correct"] == 0)
+            l7_eval_count = l7_correct_count + l7_wrong_count
+            l7_accuracy = l7_correct_count / l7_eval_count * 100 if l7_eval_count > 0 else 0
+
             high_conf = [r for r in results if r["prob_up"] >= 65 or r["prob_up"] <= 35]
             high_correct = sum(1 for r in high_conf if r["correct"] == 1)
             high_total = len(high_conf)
 
             print(f"  准确率 {accuracy:.1f}% ({correct_count}/{eval_count})"
+                  f" | L7映射 {l7_accuracy:.1f}% ({l7_correct_count}/{l7_eval_count})"
                   f" | 训练窗口 {train_windows} 次"
                   f" | 高置信 {high_correct}/{high_total} ({high_correct/high_total*100:.1f}%"
                   f" )" if high_total > 0 else
                   f"  准确率 {accuracy:.1f}% ({correct_count}/{eval_count})"
+                  f" | L7映射 {l7_accuracy:.1f}% ({l7_correct_count}/{l7_eval_count})"
                   f" | 训练窗口 {train_windows} 次")
 
             all_results.append({
                 "code": code, "name": STOCK_NAMES.get(code, code),
                 "accuracy": accuracy, "total": eval_count, "correct": correct_count,
+                "l7_accuracy": l7_accuracy, "l7_correct": l7_correct_count, "l7_total": l7_eval_count,
                 "high_conf_correct": high_correct, "high_conf_total": high_total,
                 "train_windows": train_windows,
             })
@@ -785,17 +800,21 @@ def cmd_backtest() -> int:
     correct_total = sum(r["correct"] for r in all_results)
     total_total = sum(r["total"] for r in all_results)
     overall_acc = correct_total / total_total * 100 if total_total > 0 else 0
-    print(f"\n  总体 OOS 准确率: {correct_total}/{total_total} ({overall_acc:.1f}%)")
+    l7_correct_total = sum(r["l7_correct"] for r in all_results)
+    l7_total_total = sum(r["l7_total"] for r in all_results)
+    l7_overall_acc = l7_correct_total / l7_total_total * 100 if l7_total_total > 0 else 0
+    print(f"\n  总体 OOS 准确率 (raw prob_up): {correct_total}/{total_total} ({overall_acc:.1f}%)")
+    print(f"  总体 OOS 准确率 (L7 映射后):   {l7_correct_total}/{l7_total_total} ({l7_overall_acc:.1f}%)")
     print(f"  ({sum(r['train_windows'] for r in all_results)} 次模型训练 / 10 只股票)\n")
 
-    print(f"  个股 OOS 准确率:")
+    print(f"  个股 OOS 准确率 (raw / L7):")
     all_results.sort(key=lambda r: -r["accuracy"])
     for r in all_results:
-        bar = "█" * int(r["accuracy"] / 5) + "░" * (20 - int(r["accuracy"] / 5))
-        hc_str = f" 高置信: {r['high_conf_correct']}/{r['high_conf_total']} ({r['high_conf_correct']/r['high_conf_total']*100:.1f}%)" if r['high_conf_total'] > 0 else ""
-        print(f"    {r['code']} {r['name']:8s}: {r['accuracy']:.1f}% ({r['correct']}/{r['total']}) {bar}")
-        if hc_str:
-            print(f"      {hc_str}")
+        print(f"    {r['code']} {r['name']:8s}: {r['accuracy']:.1f}%({r['correct']}/{r['total']}) "
+              f"→ L7 {r['l7_accuracy']:.1f}%({r['l7_correct']}/{r['l7_total']})")
+        if r['high_conf_total'] > 0:
+            print(f"      高置信: {r['high_conf_correct']}/{r['high_conf_total']} "
+                  f"({r['high_conf_correct']/r['high_conf_total']*100:.1f}%)")
 
     print(f"\n{'='*55}")
     print(f"  回测完成")

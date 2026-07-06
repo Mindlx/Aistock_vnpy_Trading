@@ -332,6 +332,14 @@ def phase2_ly(timeout: int = 180) -> Dict[str, Any]:
         total = int(overall_match.group(2))
         pct = float(overall_match.group(3))
         result["overall"] = {"correct": correct, "total": total, "accuracy": pct}
+    # L7 映射后准确率
+    l7_match = re.search(r"L7 映射后\):\s*(\d+)/(\d+)\s*\(([\d.]+)%\)", stdout)
+    if l7_match:
+        result["overall_l7"] = {
+            "correct": int(l7_match.group(1)),
+            "total": int(l7_match.group(2)),
+            "accuracy": float(l7_match.group(3)),
+        }
     else:
         # fallback: 找最后一行结论
         found = False
@@ -350,15 +358,25 @@ def phase2_ly(timeout: int = 180) -> Dict[str, Any]:
             result["stdout_preview"] = preview
             print(f"  ⚠️ [c1test] LY 回测输出解析失败，原始输出前 600 字符:\n{preview}")
 
-    # 解析个股准确率
+    # 解析个股准确率 (含 L7 映射后)
     per_stock = []
     for line in stdout.splitlines():
+        m = re.match(r"\s+(\d{6})\s+(.*?):\s+([\d.]+)%\((\d+)/(\d+)\)\s*→\s*L7\s+([\d.]+)%\((\d+)/(\d+)\)", line)
+        if m:
+            per_stock.append({
+                "code": m.group(1), "name": m.group(2).strip(),
+                "raw_accuracy": float(m.group(3)),
+                "raw_correct": int(m.group(4)), "raw_total": int(m.group(5)),
+                "l7_accuracy": float(m.group(6)),
+                "l7_correct": int(m.group(7)), "l7_total": int(m.group(8)),
+            })
+            continue
         m = re.match(r"\s+(\d{6})\s+(.*?):\s+([\d.]+)%\s+\((\d+)/(\d+)\)", line)
         if m:
             per_stock.append({
                 "code": m.group(1), "name": m.group(2).strip(),
-                "accuracy": float(m.group(3)),
-                "correct": int(m.group(4)), "total": int(m.group(5)),
+                "raw_accuracy": float(m.group(3)),
+                "raw_correct": int(m.group(4)), "raw_total": int(m.group(5)),
             })
     result["per_stock"] = per_stock
     result["returncode"] = returncode
@@ -803,6 +821,9 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
     ly = phases.get("ly", {})
     if ly.get("status") == "ok" and ly.get("overall"):
         report["ly_independent"] = ly["overall"]
+        l7 = ly.get("overall_l7")
+        if l7:
+            report["ly_independent_l7"] = l7
 
     # ML 独立回测
     ml = phases.get("ml", {})
@@ -1001,13 +1022,16 @@ def render_markdown(report: Dict[str, Any]) -> str:
 
     # ── LY 独立 ──
     ly = report.get("ly_independent", {})
+    l7 = report.get("ly_independent_l7", {})
     if ly:
         lines.append(f"## 🔬 LY 独立回测 (Walk-Forward OOS)")
         lines.append(f"")
         lines.append(f"| 指标 | 数值 |")
         lines.append(f"|------|------|")
-        lines.append(f"| 总体准确率 | **{ly.get('accuracy', 'N/A')}%** |")
+        lines.append(f"| raw prob_up 准确率 | **{ly.get('accuracy', 'N/A')}%** |")
         lines.append(f"| 样本量 | {ly.get('total', 0)} |")
+        if l7:
+            lines.append(f"| L7 映射后准确率 | **{l7.get('accuracy', 'N/A')}%** |")
         lz = report.get("ly_flat_zone_neutral", 0)
         if lz:
             lines.append(f"| L7 flat zone 中性排除 | {lz} 条（不计入融合层面 LY 准确率） |")
