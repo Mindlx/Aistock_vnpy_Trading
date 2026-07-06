@@ -257,13 +257,14 @@ class FusionEngine:
         mindlynx_normalized = self.normalizer.normalize_mindlynx(
             mindlynx_advice, mindlynx_score, mindlynx_trend
         )
-        # HP3: sentiment_score 独立信号路径（不依赖 op_advice）
+        # HP3: sentiment_score 独立信号路径
         mindlynx_score_normalized = self.normalizer.normalize_mindlynx_score(
             mindlynx_score,
             threshold_bull=self.sentiment_threshold_bull,
             threshold_bear=self.sentiment_threshold_bear,
         )
-        mindlynx_normalized = (mindlynx_normalized + mindlynx_score_normalized) / 2.0
+        # v3.0: op_advice 恢复 0.2 权重参与 L7
+        mindlynx_normalized = mindlynx_score_normalized * 0.8 + mindlynx_normalized * 0.2
         tradingagent_normalized = self.normalizer.normalize_tradingagent(
             tradingagent_rating, debate_state=ta_debate_state
         )
@@ -551,9 +552,9 @@ class FusionEngine:
                 threshold_bear=self.sentiment_threshold_bear,
             )
             # 权重分配: sentiment_score 80% + operation_advice 20%
-        # Oracle验证:sentiment_score方向准确率74%>操作建议24%
-            # v2.0 (2026-06-30): op_advice 仅保留文本解释价值，不参与 L7 裁决
-            mindlynx_normalized = mindlynx_score_normalized * 0.8
+        # v3.0 (2026-07-06): op_advice 恢复独立方向 + 表态率提升至 ~50%,
+        # 恢复 0.2 权重参与 L7 裁决, 观察融合效果变化
+            mindlynx_normalized = mindlynx_score_normalized * 0.8 + mindlynx_normalized * 0.2
 
         if not tradingagent_valid:
             tradingagent_normalized = 0.0
