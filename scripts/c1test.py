@@ -579,7 +579,72 @@ def phase3_ml() -> Dict[str, Any]:
     except sqlite3.OperationalError:
         pass  # skill_id 列可能尚不存在
 
-    # ── 4. 最近回测报告文件路径 (如果有) ──
+    # ── 4. ML 内部分歧分析: op_advice 与 sentiment_score 方向不一致时, 谁更准 ──
+    try:
+        cursor.execute("""
+            SELECT ah.sentiment_score, ah.operation_advice, sp.pct_chg
+            FROM analysis_history ah
+            JOIN stock_daily sp ON sp.code = ah.code
+                AND sp.date = date(ah.created_at, '+1 day')
+            WHERE ah.sentiment_score IS NOT NULL
+              AND ah.operation_advice IS NOT NULL AND ah.operation_advice != ''
+              AND sp.pct_chg IS NOT NULL
+              AND ah.created_at >= date('now', '-90 days')
+        """)
+        div_rows = cursor.fetchall()
+    except sqlite3.OperationalError:
+        div_rows = []
+
+    if div_rows:
+        def _op_dir(advice: str) -> int:
+            t = advice.strip().lower()
+            if any(k in t for k in ("卖出", "减仓", "强烈卖出", "清仓", "sell", "reduce")):
+                return -1
+            if any(k in t for k in ("买入", "加仓", "强烈买入", "增持", "建仓", "buy", "add")):
+                return 1
+            return 0
+
+        agree_correct, agree_total = 0, 0
+        diverge_correct_sent, diverge_correct_op, diverge_total = 0, 0, 0
+        sent_diverge_op_neutral = 0
+        flat_skipped = 0
+        total_processed = 0
+
+        for score, advice, pct_chg in div_rows:
+            if 49 <= score <= 51:
+                flat_skipped += 1
+                continue
+            total_processed += 1
+            sent_dir = 1 if score >= 52 else -1
+            op_dir = _op_dir(advice)
+            if op_dir == 0:
+                sent_diverge_op_neutral += 1
+                continue
+            actual = 1 if pct_chg > 0 else (-1 if pct_chg < 0 else 0)
+            if sent_dir == op_dir:
+                agree_total += 1
+                if sent_dir == actual:
+                    agree_correct += 1
+            else:
+                diverge_total += 1
+                if sent_dir == actual:
+                    diverge_correct_sent += 1
+                if op_dir == actual:
+                    diverge_correct_op += 1
+
+        if agree_total + diverge_total > 0:
+            diverge_rate = round(diverge_total / (agree_total + diverge_total) * 100, 1)
+            result["internal_divergence"] = {
+                "agree_accuracy": round(agree_correct / agree_total * 100, 1) if agree_total > 0 else 0,
+                "agree_total": agree_total,
+                "diverge_rate": diverge_rate,
+                "diverge_total": diverge_total,
+                "diverge_sentiment_accuracy": round(diverge_correct_sent / diverge_total * 100, 1) if diverge_total > 0 else 0,
+                "diverge_op_accuracy": round(diverge_correct_op / diverge_total * 100, 1) if diverge_total > 0 else 0,
+                "sent_diverge_op_neutral": sent_diverge_op_neutral,
+            }
+
+    # ── 5. 最近回测报告文件路径 (如果有) ──
     report_dir = PROJECT_ROOT / "systems" / "MindLynx-Aistock" / "reports" / "backtest"
     latest_reports = sorted(report_dir.glob("backtest_report_overall_*.md"))
     if latest_reports:
@@ -747,6 +812,7 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
             "sentiment_score": ml.get("sentiment_score", {}),
             "fusion_equivalent": ml.get("fusion_equivalent", {}),
             "strategy_breakdown": ml.get("strategy_breakdown", []),
+            "internal_divergence": ml.get("internal_divergence", {}),
         }
 
     # AT (独立)
@@ -1001,6 +1067,20 @@ def render_markdown(report: Dict[str, Any]) -> str:
             lines.append(f"")
         else:
             lines.append(f"<!-- 策略级数据积累中（需至少 5 条/skill） -->")
+            lines.append(f"")
+
+        # ML 内部分歧分析
+        div = ml.get("internal_divergence", {})
+        if div.get("diverge_total", 0) > 0:
+            lines.append(f"### 🔀 ML 内部分歧: op vs sentiment")
+            lines.append(f"")
+            lines.append(f"| 指标 | 数值 |")
+            lines.append(f"|------|------|")
+            lines.append(f"| 一致时准确率 | {div.get('agree_accuracy', 'N/A')}% ({div.get('agree_total', 0)}样本) |")
+            lines.append(f"| 分歧率 | {div.get('diverge_rate', 'N/A')}% |")
+            lines.append(f"| 分歧时 sentiment 准确率 | {div.get('diverge_sentiment_accuracy', 'N/A')}% |")
+            lines.append(f"| 分歧时 op_advice 准确率 | {div.get('diverge_op_accuracy', 'N/A')}% |")
+            lines.append(f"| op 无方向(sent 有方向) | {div.get('sent_diverge_op_neutral', 'N/A')} 条 |")
             lines.append(f"")
 
     # ── AT ──
