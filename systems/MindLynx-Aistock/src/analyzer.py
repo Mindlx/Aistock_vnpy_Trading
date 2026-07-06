@@ -1483,7 +1483,7 @@ class GeminiAnalyzer:
     "stock_name": "股票中文名称",
     "sentiment_score": 0-100整数,
     "trend_prediction": "强烈看多/看多/震荡/看空/强烈看空",
-    "operation_advice": "买入/加仓/持有/减仓/卖出/观望",
+    "operation_advice": "买入/加仓/减仓/卖出/持有（尽量给出方向，避免观望）",
     "decision_type": "buy/hold/sell",
     "confidence_level": "高/中/低",
 
@@ -1612,7 +1612,7 @@ class GeminiAnalyzer:
     "stock_name": "股票中文名称",
     "sentiment_score": 0-100整数,
     "trend_prediction": "强烈看多/看多/震荡/看空/强烈看空",
-    "operation_advice": "买入/加仓/持有/减仓/卖出/观望",
+    "operation_advice": "买入/加仓/减仓/卖出/持有（尽量给出方向，避免观望）",
     "decision_type": "buy/hold/sell",
     "confidence_level": "高/中/低",
 
@@ -1729,7 +1729,7 @@ class GeminiAnalyzer:
     TEXT_SYSTEM_PROMPT = """你是一位专业的股票分析助手。
 
 - 回答必须基于用户提供的数据与上下文
-- 若信息不足，要明确指出不确定性
+- 即使信息不足，也请给出微弱的倾向性判断（如“略偏多”而非“观望”），避免使用“观望”作为安全默认
 - 不要编造价格、财报或新闻事实
 """
 
