@@ -1,6 +1,6 @@
 # 数据仓库服务层 — 实现文档
 
-> 最后更新: 2026-06-16
+> 最后更新: 2026-07-06 (含盘前基本面刷新 10:50/13:50 + 数据湖兜底)
 > 涉及提交: aa80fe2, f3542a6
 
 ---
@@ -135,7 +135,7 @@ class DataWarehouseConfig:
 | financial_indicators | 24h | 16:00 工作日 |
 | capital_flows | 24h | 16:30 工作日 |
 | news_events | 1h | 每小时 |
-| fundamentals | 7d | 周一09:00 |
+| fundamentals | 7d | 周一09:00 + **每日10:50/13:50**（盘前预热） |
 
 ### 3.3 limiter.py — 跨进程令牌桶
 
