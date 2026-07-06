@@ -2471,6 +2471,18 @@ class DataFetcherManager:
         market = _market_tag(stock_code)
         is_etf = _is_etf_code(stock_code)
 
+        # ── 数据湖兜底: 优先读取, API 失败时用旧数据 ──
+        _lake_context: dict | None = None
+        try:
+            from services.data_warehouse.warehouse import WarehouseReader
+            _lake = WarehouseReader()
+            if _lake.is_fresh(stock_code, "fundamentals"):
+                _lake_data = _lake.get_fundamentals(stock_code)
+                if _lake_data:
+                    _lake_context = _lake_data
+        except Exception:
+            pass  # 数据湖不可用 → 走原始路径
+
         stage_timeout = float(
             budget_seconds if budget_seconds is not None else config.fundamental_stage_timeout_seconds
         )
@@ -2747,6 +2759,28 @@ class DataFetcherManager:
             result_ctx["status"] = "ok"
 
         result_ctx["elapsed_ms"] = int((time.time() - start_ts) * 1000)
+
+        # 数据湖兜底: API 全部失败时, 用湖中旧数据(哪怕过期)替代 None
+        if _lake_context is not None and result_ctx.get("errors"):
+            for block in ("valuation", "growth", "earnings", "institution", "capital_flow"):
+                if result_ctx.get(block, {}).get("status") in ("not_supported", "failed"):
+                    cached = _lake_context.get(block, {})
+                    if cached.get("data"):
+                        result_ctx[block] = cached
+                        result_ctx.setdefault("source_chain", []).append(
+                            {"provider": "data_warehouse_fallback", "result": "stale",
+                             "note": "API failed, used cached"}
+                        )
+
+        # 成功时回写数据湖
+        if not result_ctx.get("errors") and _lake_context is None:
+            try:
+                from services.data_warehouse.storage import DataLake
+                _lake_w = DataLake()
+                _lake_w.upsert_fundamentals(stock_code, result_ctx)
+            except Exception:
+                pass  # 数据湖不可用不阻塞主流程
+
         if cache_ttl > 0 and self._should_cache_fundamental_context(result_ctx):
             with self._fundamental_cache_lock:
                 self._fundamental_cache[cache_key] = {
