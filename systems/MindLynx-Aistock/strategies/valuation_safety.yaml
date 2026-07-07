@@ -1,0 +1,70 @@
+# Valuation Safety Strategy / 估值安全边际
+# Based on Graham's margin of safety and mean reversion.
+# Uses PB historical percentile as the primary valuation anchor (PE is distorted
+# by profit cycles at market tops and gives false "cheap" signals).
+
+name: valuation_safety
+display_name: 估值安全边际
+description: 基于格雷厄姆安全边际（Benjamin Graham Margin of Safety）与均值回归的估值风控策略，检测 PB 历史分位极端状态，防止高位接盘。
+category: risk_control
+core_rules: [5, 6]
+required_tools:
+  - get_stock_info
+aliases: [估值保护, 安全边际, 高估预警, valuation protection]
+default_active: true
+default_router: false
+default_priority: 90
+market_regimes: [trending_up, ranging, trending_down]
+
+instructions: |
+  **估值安全边际 — 基于格雷厄姆安全边际（Margin of Safety）**
+
+  适用场景：
+  - 作为风控过滤器，在所有进攻型策略（多头/放量/金叉等）之后执行。
+  - 当估值处于极端高位时，即使其他策略发出买入信号，也应以下修评分或标记风险为主。
+  - 不预测见顶时机，只管理尾部风险——高估值介入后一旦反转，回撤通常翻倍。
+
+  ## 估值判断
+
+  ### 1. 核心指标：PB 历史分位（优先于 PE）
+  使用 `get_stock_info` 获取 PB 及历史 PB 数据：
+
+  - **PB < 30% 分位**：估值偏低（安全区）
+  - **PB 30-70% 分位**：估值合理（正常区）
+  - **PB 70-90% 分位**：估值偏高（警示区）
+  - **PB ≥ 90% 分位**：估值极端（危险区）
+  - **PB ≥ 95% 分位**：估值极度泡沫（强制风控区）
+
+  ### 2. 辅助指标：PE 检视
+  当 PB 处于警示区以上时，同时检查 PE 状态：
+
+  - PE 也为正且处于高位 → 估值泡沫确认，评分下调
+  - PE 为负（亏损）→ PB 不可信，转为检查 PS 分位
+  - PE 偏低但 PB 极高 → 利润周期顶部假象（警惕！）
+
+  ### 3. 交易过热辅助确认
+  结合以下信号确认估值泡沫是否伴随交易过热：
+
+  - 换手率异常（近 3 月 90% 分位以上）
+  - 量比持续 > 2 且价格滞涨
+  - 连续涨停或大幅跳空高开
+
+  ## 风控措施（按触发级别）
+
+  - **PB ≥ 90% 分位**：sentiment_score -8，信号标记"估值偏高"
+  - **PB ≥ 95% 分位**：sentiment_score -15，强制降为"持有/观望"级
+  - **交易过热 + PB ≥ 90%**：sentiment_score -20，禁止做多
+
+  ## 数据不可用时的处理
+
+  - 估值数据获取失败（PE/PB/分位任一不可用）：
+    - 首次缺失：跳过估值检查，不调整评分，记录缺失
+    - 连续 3 次以上缺失：跳出此策略，不影响正常评分
+
+  ## 评分调整参考
+
+  - PB < 30% 分位 + 正常换手：sentiment_score +5（安全边际加分）
+  - PB 70-90% 分位 + 合理量价：sentiment_score -5
+  - PB ≥ 90% 分位 + 换手正常：sentiment_score -10
+  - PB ≥ 95% 分位 / 或结合交易过热：sentiment_score -20
+  - 估值数据不可用：sentiment_score +0（跳过）
