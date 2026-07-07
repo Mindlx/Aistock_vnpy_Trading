@@ -41,7 +41,8 @@
 ## Agent 模型分配
 
 | Agent | 模型 | 定位 |
-|:------|:-----|:-----|
-| **build** (默认) | `deepseek-flash/deepseek-v4-flash` | 主会话，快速响应、工具协调 |
-| **plan** | `deepseek-pro/deepseek-v4-pro` | 规划模式，高难度推理、架构决策 |
+|:------|:-----|:------|
+| **build** (默认) | `deepseek-flash` | 主会话，快速响应、工具协调 |
+| **plan** | `deepseek-pro` | 规划模式，高难度推理、架构决策 |
 | **explore** | `gpu1-ornith` | 探索模式，代码审查、技术调研 |
+| **general** (subagent) | `gpu0-qwen` | 通用子任务，文档分析、并行研究 |
