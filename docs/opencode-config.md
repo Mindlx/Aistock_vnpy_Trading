@@ -38,9 +38,6 @@
 | `@morphllm/opencode-morph-plugin` | Morph 编辑工具 | ✅ 启用 |
 | `opencode-pty` | PTY 终端支持 | ✅ 启用 |
 | `oh-my-openagent@latest` | 代理模型分配 | ✅ 启用 |
-| `opencode-token-monitor` | Token 用量监控 | ✅ 启用 |
-| `opencode-supermemory` | 持久记忆 | ✅ 启用 |
-| `opencode-acp` | 自动上下文处理 | ✅ 启用 |
 | `opencode-dynamic-context-pruning` | 动态上下文裁剪 | ✅ 启用 (2026-07-07) |
 | `opencode-shell-strategy` | Shell 执行策略优化 | ✅ 启用 (2026-07-07) |
 
