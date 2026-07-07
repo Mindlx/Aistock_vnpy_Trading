@@ -27,9 +27,13 @@
 | `gpu0-qwen` | Qwen3.6-35B (GPU0) | llama.cpp, port 11434 | **~143 tok/s** | 🟢 文档分析、策略讨论、通用任务 |
 | `deepseek-pro` | v4-pro | API (api.deepseek.com) | ~50-100 tok/s | 🔴 高难度推理、长上下文 |
 
+## 系统指令
+
+`~/.config/opencode/instructions.md` — 工作铁律，应用于所有项目。包含数据准确、质疑响应、沟通纪律三项要求。
+
 ## 配置文件位置
 
 | 文件 | 用途 |
 |:-----|:------|
-| `~/.config/opencode/opencode.jsonc` | 主配置：插件列表 |
-| 项目根 `.opencode/` | 本地命令和技能定义 |
+| `~/.config/opencode/opencode.jsonc` | 主配置：插件 + Provider + 系统指令 |
+| `~/.config/opencode/instructions.md` | 系统级工作铁律 |
