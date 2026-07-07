@@ -587,9 +587,17 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         """
         搜索市场新闻
 
+        优先从 news_intel 缓存读取，缓存空时降级到在线搜索。
+
         Returns:
             新闻列表
         """
+        # ── 优先从 news_intel 缓存读取 ──
+        cached = self._load_news_from_intel()
+        if cached:
+            logger.info(f"[大盘] 从 news_intel 读取 {len(cached)} 条新闻缓存")
+            return cached
+
         if not self.search_service:
             logger.warning("[大盘] 搜索服务未配置，跳过新闻搜索")
             return []
@@ -1735,6 +1743,60 @@ Market conditions can change quickly. The data above is for reference only and d
         logger.info("========== 大盘复盘分析完成 ==========")
 
         return report
+
+    def _load_news_from_intel(self) -> list[dict]:
+        """从 news_intel 缓存读取当日新闻，按重要性降序。
+
+        涵盖市场级(__market__) + 自选股相关新闻。
+        避免大盘复盘在 efinance 被封时零新闻运行。
+        """
+        try:
+            from pathlib import Path
+            import sqlite3
+            db_path = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            from datetime import datetime
+            today = datetime.now().strftime("%Y-%m-%d")
+            cur.execute(
+                "SELECT title, snippet, source, url FROM news_intel "
+                "WHERE date(fetched_at) = ? AND code IN ('__market__') "
+                "ORDER BY id DESC LIMIT 20",
+                (today,),
+            )
+            rows = cur.fetchall()
+            if rows:
+                conn.close()
+                return [
+                    {"title": r["title"], "snippet": r["snippet"] or "",
+                     "source": r["source"] or "news_intel",
+                     "url": r["url"] or ""}
+                    for r in rows
+                ]
+            # 无市场级新闻时, 降级到自选股新闻
+            codes = getattr(self.config, "stock_list", [])
+            if codes:
+                placeholders = ",".join("?" for _ in codes)
+                cur.execute(
+                    f"SELECT title, snippet, source, url FROM news_intel "
+                    f"WHERE date(fetched_at) = ? AND code IN ({placeholders}) "
+                    f"ORDER BY id DESC LIMIT 15",
+                    (today, *codes),
+                )
+                rows = cur.fetchall()
+                if rows:
+                    conn.close()
+                    return [
+                        {"title": r["title"], "snippet": r["snippet"] or "",
+                         "source": r["source"] or "news_intel",
+                         "url": r["url"] or ""}
+                        for r in rows
+                    ]
+            conn.close()
+        except Exception as e:
+            logger.debug("[大盘] news_intel 读取失败: %s", e)
+        return []
 
     def _load_hourly_analysis(self, session_label: str = "全天") -> str | None:
         """读取当日整点分析报告，作为第三方观点参考注入复盘 prompt。
