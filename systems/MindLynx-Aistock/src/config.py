@@ -1527,7 +1527,7 @@ class Config(LLMConfig, NotificationConfig, DataConfig, AnalysisConfig):
             ),
             fundamental_fetch_timeout_seconds=parse_env_float(
                 os.getenv("FUNDAMENTAL_FETCH_TIMEOUT_SECONDS"),
-                20.0,  # 2026-07-06: Tushare+Tencent 补充链需 ~5s, 留余量
+                60.0,  # 2026-07-07: Tushare+Tencent+efinance 降级链, 给足余量
                 field_name="FUNDAMENTAL_FETCH_TIMEOUT_SECONDS",
                 minimum=0.0,
             ),
