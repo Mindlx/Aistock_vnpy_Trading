@@ -46,3 +46,15 @@
 | **plan** | `deepseek-pro` | 规划模式，高难度推理、架构决策 |
 | **explore** | `gpu1-ornith` | 探索模式，代码审查、技术调研 |
 | **general** (subagent) | `gpu0-qwen` | 通用子任务，文档分析、并行研究 |
+
+## 其他重要配置
+
+| 配置 | 值 | 说明 |
+|:-----|:---|:------|
+| `default_agent` | `build` | 默认进入 build 模式 |
+| `small_model` | `gpu0-qwen` | 标题生成等轻量任务用本地模型 |
+| `autoupdate` | `notify` | 有新版本时通知，不自动升级 |
+| `shell` | `bash` | 默认 shell |
+| `compaction.auto` | `true` | 上下文满时自动压缩 |
+| `compaction.prune` | `true` | 裁剪旧工具输出释放上下文 |
+| `disabled_providers` | `github-copilot, github-models` | 禁用不用的默认 provider |
