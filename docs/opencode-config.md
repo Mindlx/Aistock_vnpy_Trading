@@ -20,11 +20,11 @@
 
 ## Provider
 
-| Provider | 模型 | 接入方式 | 适合任务 |
-|:---------|:-----|:---------|:---------|
-| `gpu0-local` | Qwen3.6-35B (GPU0, port 11434) | OpenAI-compatible, llama.cpp | 日常编码、简单分析 |
-| `gpu1-local` | Ornith 1.0 35B (GPU1, port 15433) | OpenAI-compatible, llama.cpp | 复杂调试、架构决策 |
-| `deepseek` | v4-flash / v4-pro | API (api.deepseek.com) | 云端推理、高难度任务 |
+| Provider | 模型 | 接入方式 | 优势 | 适合任务 |
+|:---------|:-----|:---------|:----|:---------|
+| `gpu1-ornith` | Ornith 1.0 35B (GPU1, port 15433) | OpenAI-compatible, llama.cpp | **Agentic coding SOTA**，SWE-Bench 75.6，Terminal-Bench 64.2 | 代码审查、架构决策、复杂调试、代码生成 |
+| `gpu0-qwen` | Qwen3.6-35B (GPU0, port 11434) | OpenAI-compatible, llama.cpp | 通义千问系列，通用能力强，多语言支持好 | 文档分析、策略讨论、日常编码 |
+| `deepseek` | v4-flash / v4-pro | API (api.deepseek.com) | 云端高速推理，无本地资源限制 | 高难度推理、长上下文分析 |
 
 ## 配置文件位置
 
