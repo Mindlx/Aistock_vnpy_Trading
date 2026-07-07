@@ -9,7 +9,6 @@
 | 文件 | 用途 |
 |:-----|:------|
 | `~/.config/opencode/opencode.json` | 主配置：provider、MCP、插件 |
-| `~/.config/opencode/oh-my-openagent.json` | 代理级模型分配（覆盖 opencode.json 的 model 字段） |
 | `~/.config/opencode/acp.jsonc` | ACP (Auto Context Processing) 插件配置 |
 | `~/.config/opencode/supermemory.jsonc` | Supermemory 持久记忆配置 |
 
@@ -25,11 +24,8 @@
 
 | 模型 | 分配代理 / 分类 |
 |:-----|:----------------|
-| **Qwen3.6-35B（本地）** | hephaestus, librarian, explore, sisyphus-junior, visual-engineering, artistry, quick, unspecified-low, writing |
 | **DeepSeek v4-flash** | sisyphus, multimodal-looker, prometheus, metis, momus, atlas, unspecified-high |
 | **DeepSeek v4-pro** | oracle, ultrabrain, deep |
-
-约 **85%** 日常流量走本地 Qwen，**10%** 最难任务走 Pro，**5%** 中端走 Flash。
 
 ## 已安装插件
 
@@ -37,7 +33,6 @@
 |:-----|:-----|:----:|
 | `@morphllm/opencode-morph-plugin` | Morph 编辑工具 | ✅ 启用 |
 | `opencode-pty` | PTY 终端支持 | ✅ 启用 |
-| `oh-my-openagent@latest` | 代理模型分配 | ✅ 启用 |
 | `opencode-dynamic-context-pruning` | 动态上下文裁剪 | ✅ 启用 (2026-07-07) |
 | `opencode-shell-strategy` | Shell 执行策略优化 | ✅ 启用 (2026-07-07) |
 
