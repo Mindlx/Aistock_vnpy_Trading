@@ -413,13 +413,42 @@ ML 在融合系统中的当前权重为 `alpha=0.55`（`reliability.py:31`），
 | `scripts/research_ml12_factor_ic.py` | 12 因子 IC 分析（动态加载 `factor_engine.py`） |
 | `scripts/research_alpha158_cross_section.py` | LY Alpha158 横截面 vs 时序 IC 对比 |
 
-## 九、策略级数据追踪（2026-07-03）
-
-### 9.1 背景
+## 九、15 策略清单
 
 15 个 YAML 策略文件定义在 `systems/MindLynx-Aistock/strategies/` 下，
 作为 LLM Agent 的"技能"加载，在不同市场状态下被选择激活。
-但 `analysis_history` 缺少 `skill_id` 列，无法回溯每条分析使用了哪些策略。
+
+| # | 名称 | 显示名 | 类别 | 理论基础 | 触发条件 |
+|:-:|:----|:------|:----:|:--------|:---------|
+| 1 | `bull_trend` | 默认多头趋势 | trend | 道氏理论 | 多头排列、回踩低吸 |
+| 2 | `volume_breakout` | 放量突破 | trend | 威科夫量价分析 | 放量>2倍均量突破阻力 |
+| 3 | `shrink_pullback` | 缩量回踩 | trend | 道氏理论 | 缩量回踩MA5/MA10后反弹 |
+| 4 | `ma_golden_cross` | 均线金叉 | trend | 葛兰碧法则 | MA5上穿MA10，量能确认 |
+| 5 | `bottom_volume` | 底部放量 | reversal | 威科夫吸筹 | 长期下跌后缩量→放量 |
+| 6 | `dragon_head` | 龙头策略 | trend | 欧奈尔CANSLIM | 板块轮动中选强 |
+| 7 | `emotion_cycle` | 情绪周期 | framework | 勒庞+索罗斯反身性 | 逆情绪布局 |
+| 8 | `hot_theme` | 热点题材 | framework | 索罗斯反身性 | 题材追踪+资金流向 |
+| 9 | `event_driven` | 事件驱动 | framework | 马克斯第二层思维 | 催化事件评估 |
+| 10 | `expectation_repricing` | 预期重估 | framework | 马克斯×周期理论 | 预期差+均值回归 |
+| 11 | `growth_quality` | 成长质量 | framework | 彼得·林奇 | ROE/收入/利润/现金流 |
+| 12 | `box_oscillation` | 箱体震荡 | framework | 达瓦斯箱体理论 | 箱底买入、箱顶减仓 |
+| 13 | `chan_theory` | 缠论 | framework | 缠中说禅 | 笔/线段/中枢/背驰 |
+| 14 | `wave_theory` | 波浪理论 | framework | 艾略特 | 推动5浪+调整3浪 |
+| 15 | `one_yang_three_yin` | 一阳夹三阴 | pattern | 史蒂夫·尼森蜡烛图 | K线整理形态→趋势延续 |
+
+**按类别分布**：trend 5个 / reversal 1个 / framework 8个 / pattern 1个
+**理论来源**：道氏、威科夫、葛兰碧、欧奈尔、勒庞、索罗斯、马克斯、林奇、达瓦斯、缠中说禅、艾略特、尼森 — 12个理论。
+
+### 9.1 策略层定位
+
+**层2: 15 策略 (YAML Skill 定义)**
+- ❗ 不是公式计算，是 LLM 驱动的自然语言 YAML
+- 15 个策略全由 LLM 判断"是否满足条件"
+- 无法离开 LLM 独立运行
+- 每个策略触发时记录 `skill_id` 到 `analysis_history`
+- 策略级准确率依托 `backtest_service.py:457-475` 的 skill-level 回测摘要
+
+### 9.2 策略级数据追踪（2026-07-03）
 
 ### 9.2 修复内容
 
