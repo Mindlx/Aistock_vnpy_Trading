@@ -20,9 +20,11 @@
 
 ## Provider
 
-| Provider | 模型 | 接入方式 |
-|:---------|:-----|:---------|
-| DeepSeek | v4-flash / v4-pro | API (api.deepseek.com) |
+| Provider | 模型 | 接入方式 | 适合任务 |
+|:---------|:-----|:---------|:---------|
+| `gpu0-local` | Qwen3.6-35B (GPU0, port 11434) | OpenAI-compatible, llama.cpp | 日常编码、简单分析 |
+| `gpu1-local` | Ornith 1.0 35B (GPU1, port 15433) | OpenAI-compatible, llama.cpp | 复杂调试、架构决策 |
+| `deepseek` | v4-flash / v4-pro | API (api.deepseek.com) | 云端推理、高难度任务 |
 
 ## 配置文件位置
 
