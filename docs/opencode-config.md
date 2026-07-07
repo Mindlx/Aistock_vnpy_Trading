@@ -35,5 +35,10 @@
 
 | 文件 | 用途 |
 |:-----|:------|
-| `~/.config/opencode/opencode.jsonc` | 主配置：插件 + Provider + 系统指令 |
+| `~/.config/opencode/opencode.jsonc` | 主配置：默认模型、插件、Provider、系统指令 |
 | `~/.config/opencode/instructions.md` | 系统级工作铁律 |
+
+## 默认模型
+
+`deepseek-flash/deepseek-v4-flash` — 主会话使用 v4-flash 做总调度，快速响应。<br>
+子任务可切换至 `gpu1-ornith`（编程）、`gpu0-qwen`（通用）或 `deepseek-pro`（高难度）。
