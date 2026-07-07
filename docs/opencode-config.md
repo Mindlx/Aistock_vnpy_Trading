@@ -22,9 +22,10 @@
 
 | Provider | 模型 | 接入方式 | 优势 | 适合任务 |
 |:---------|:-----|:---------|:----|:---------|
-| `gpu1-ornith` | Ornith 1.0 35B (GPU1, port 15433) | OpenAI-compatible, llama.cpp | **Agentic coding SOTA**，SWE-Bench 75.6，Terminal-Bench 64.2 | 代码审查、架构决策、复杂调试、代码生成 |
-| `gpu0-qwen` | Qwen3.6-35B (GPU0, port 11434) | OpenAI-compatible, llama.cpp | 通义千问系列，通用能力强，多语言支持好 | 文档分析、策略讨论、日常编码 |
-| `deepseek` | v4-flash / v4-pro | API (api.deepseek.com) | 云端高速推理，无本地资源限制 | 高难度推理、长上下文分析 |
+| `deepseek-flash` | v4-flash | API (api.deepseek.com) | **低延迟、高吞吐**，云端高速推理 | 🔵 **主会话调度**、日常编码、快速响应 |
+| `gpu1-ornith` | Ornith 1.0 35B (GPU1) | llama.cpp, port 15433 | **Agentic coding SOTA**，代码类基准领先 | 🟢 代码审查、架构决策、复杂调试 |
+| `gpu0-qwen` | Qwen3.6-35B (GPU0) | llama.cpp, port 11434 | 通义千问系列，通用能力强 | 🟢 文档分析、策略讨论 |
+| `deepseek-pro` | v4-pro | API (api.deepseek.com) | 最强推理能力 | 🔴 高难度推理、长上下文分析 |
 
 ## 配置文件位置
 
