@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-FUNDAMENTAL_STAGE_TIMEOUT_SECONDS_DEFAULT = 8.0
+FUNDAMENTAL_STAGE_TIMEOUT_SECONDS_DEFAULT = 30
 
 
 @dataclass
