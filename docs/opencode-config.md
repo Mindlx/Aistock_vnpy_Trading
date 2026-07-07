@@ -20,12 +20,12 @@
 
 ## Provider
 
-| Provider | 模型 | 接入方式 | 优势 | 适合任务 |
-|:---------|:-----|:---------|:----|:---------|
-| `deepseek-flash` | v4-flash | API (api.deepseek.com) | **低延迟、高吞吐**，云端高速推理 | 🔵 **主会话调度**、日常编码、快速响应 |
-| `gpu1-ornith` | Ornith 1.0 35B (GPU1) | llama.cpp, port 15433 | **Agentic coding SOTA**，代码类基准领先 | 🟢 代码审查、架构决策、复杂调试 |
-| `gpu0-qwen` | Qwen3.6-35B (GPU0) | llama.cpp, port 11434 | 通义千问系列，通用能力强 | 🟢 文档分析、策略讨论 |
-| `deepseek-pro` | v4-pro | API (api.deepseek.com) | 最强推理能力 | 🔴 高难度推理、长上下文分析 |
+| Provider | 模型 | 接入方式 | 速度 | 适合任务 |
+|:---------|:-----|:---------|:----:|:---------|
+| `deepseek-flash` | v4-flash | API (api.deepseek.com) | ~100-200 tok/s | 🔵 **主会话调度**、快速响应 |
+| `gpu1-ornith` | Ornith 1.0 35B (GPU1) | llama.cpp, port 15433 | **~147 tok/s** | 🟢 代码审查、架构决策、复杂调试 |
+| `gpu0-qwen` | Qwen3.6-35B (GPU0) | llama.cpp, port 11434 | **~143 tok/s** | 🟢 文档分析、策略讨论、通用任务 |
+| `deepseek-pro` | v4-pro | API (api.deepseek.com) | ~50-100 tok/s | 🔴 高难度推理、长上下文 |
 
 ## 配置文件位置
 
