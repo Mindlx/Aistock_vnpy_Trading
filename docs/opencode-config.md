@@ -38,7 +38,10 @@
 | `~/.config/opencode/opencode.jsonc` | 主配置：默认模型、插件、Provider、系统指令 |
 | `~/.config/opencode/instructions.md` | 系统级工作铁律 |
 
-## 默认模型
+## Agent 模型分配
 
-`deepseek-flash/deepseek-v4-flash` — 主会话使用 v4-flash 做总调度，快速响应。<br>
-子任务可切换至 `gpu1-ornith`（编程）、`gpu0-qwen`（通用）或 `deepseek-pro`（高难度）。
+| Agent | 模型 | 定位 |
+|:------|:-----|:-----|
+| **build** (默认) | `deepseek-flash/deepseek-v4-flash` | 主会话，快速响应、工具协调 |
+| **plan** | `deepseek-pro/deepseek-v4-pro` | 规划模式，高难度推理、架构决策 |
+| **explore** | `gpu1-ornith` | 探索模式，代码审查、技术调研 |
