@@ -1,0 +1,27 @@
+{
+  "date": "20260707",
+  "total_stocks": 5183,
+  "our_stocks": 12,
+  "fields": [
+    "序号",
+    "代码",
+    "名称",
+    "最新价",
+    "涨跌幅",
+    "换手率",
+    "市盈率",
+    "主力成本",
+    "机构参与度",
+    "综合得分",
+    "上升",
+    "目前排名",
+    "关注指数",
+    "交易日",
+    "cost_deviation_pct",
+    "score_x_focus",
+    "is_our_stock"
+  ],
+  "focus_avg": 72.1,
+  "score_avg": 59.9,
+  "cost_deviation_avg": -1.71
+}
