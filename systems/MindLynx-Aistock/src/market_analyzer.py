@@ -185,34 +185,54 @@ class MarketAnalyzer:
         return normalize_report_language(getattr(getattr(self, "config", None), "report_language", "zh"))
 
     def _get_sector_capital_flow_text(self) -> str:
-        """获取板块资金流向文本块，供prompt注入。"""
+        """获取板块资金流向文本块，供prompt注入。
+
+        降级链: 板块资金流(akshare/EM) → 全市场资金流(akshare/新浪)。
+        """
+        lines = ["## 资金流向"]
+        # 尝试1: 板块资金流排行
         try:
             rankings = self.data_manager.get_sector_capital_flow_rankings(n=5)
             top = rankings.get("top", [])
             bottom = rankings.get("bottom", [])
-            if not top and not bottom:
-                return ""
-            lines = ["## 板块资金流向"]
-            if top:
-                top_text = ", ".join([
-                    f"{s.get('name', '?')}({s.get('net_flow', 0):+.0f}万)"
-                    if isinstance(s.get('net_flow'), (int, float))
-                    else f"{s.get('name', '?')}"
-                    for s in top
-                ])
-                lines.append(f"- 主力净流入前5: {top_text}")
-            if bottom:
-                bottom_text = ", ".join([
-                    f"{s.get('name', '?')}({s.get('net_flow', 0):+.0f}万)"
-                    if isinstance(s.get('net_flow'), (int, float))
-                    else f"{s.get('name', '?')}"
-                    for s in bottom
-                ])
-                lines.append(f"- 主力净流出前5: {bottom_text}")
-            return "\n".join(lines)
+            if top or bottom:
+                if top:
+                    top_text = ", ".join([
+                        f"{s.get('name', '?')}({s.get('net_flow', 0):+.0f}万)"
+                        if isinstance(s.get('net_flow'), (int, float))
+                        else f"{s.get('name', '?')}"
+                        for s in top
+                    ])
+                    lines.append(f"- 主力净流入前5: {top_text}")
+                if bottom:
+                    bottom_text = ", ".join([
+                        f"{s.get('name', '?')}({s.get('net_flow', 0):+.0f}万)"
+                        if isinstance(s.get('net_flow'), (int, float))
+                        else f"{s.get('name', '?')}"
+                        for s in bottom
+                    ])
+                    lines.append(f"- 主力净流出前5: {bottom_text}")
+                return "\n".join(lines)
+        except Exception:
+            logger.debug("[大盘] 板块资金流排行获取失败", exc_info=True)
+
+        # 尝试2: 全市场资金流 (akshare 新浪源, EM被封时备选)
+        try:
+            import akshare as ak
+            df = ak.stock_market_fund_flow()
+            if df is not None and not df.empty:
+                latest = df.iloc[-1]
+                main_net = float(latest.get("主力净流入-净额", 0))
+                lines.append(f"- 主力净流入: {main_net:+.0f} 元")
+                for col, label in [("超大单净流入-净额", "超大单"), ("大单净流入-净额", "大单"),
+                                   ("中单净流入-净额", "中单"), ("小单净流入-净额", "小单")]:
+                    val = float(latest.get(col, 0))
+                    lines.append(f"  {label}: {val:+.0f} 元")
+                return "\n".join(lines)
         except Exception as e:
-            logger.debug(f"[大盘] 板块资金流向获取失败: {e}")
-            return ""
+            logger.debug("[大盘] 全市场资金流获取失败: %s", e)
+
+        return ""
 
     def _get_eastmoney_rating_text(self) -> str:
         """读取东方财富评级缓存，返回全市场情绪统计（供大盘复盘"四"注入）。"""
