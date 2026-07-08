@@ -1111,40 +1111,19 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
     changes = detect_changes(report)
     report["changes"] = changes
 
-    # ── 融合 vs 最优 ──
-    sub_accs = report.get("subsystems", {})
-    best_name, best_pct = "", 0.0
-    name_map = {"ly": "Lynx", "ml": "MindLynx", "at": "TradingAgent"}
-    for sk, sv in sub_accs.items():
-        p = sv.get("accuracy_pct", 0)
-        if p > best_pct:
-            best_pct = p
-            best_name = name_map.get(sk, sk)
+    # ── 子系统准确率覆写（独立回测口径） ──
     # LY 用独立回测 L7 口径替代融合层面的子集数据
     l7 = report.get("ly_independent_l7", {})
     if l7.get("accuracy"):
         report.setdefault("subsystems", {}).setdefault("ly", {})["accuracy_pct"] = l7["accuracy"]
         report.setdefault("subsystems", {}).setdefault("ly", {})["correct"] = l7["correct"]
         report.setdefault("subsystems", {}).setdefault("ly", {})["total"] = l7["total"]
-        if l7["accuracy"] > best_pct:
-            best_pct = l7["accuracy"]
-            best_name = "Lynx(L7)"
     # ML 用 fusion_equivalent 替代融合层面的子集数据
     fe = report.get("ml", {}).get("fusion_equivalent", {})
     if fe.get("accuracy"):
         report.setdefault("subsystems", {}).setdefault("ml", {})["accuracy_pct"] = fe["accuracy"]
         report.setdefault("subsystems", {}).setdefault("ml", {})["correct"] = fe["correct"]
         report.setdefault("subsystems", {}).setdefault("ml", {})["total"] = fe["total"]
-        if fe["accuracy"] > best_pct:
-            best_pct = fe["accuracy"]
-            best_name = "MindLynx"
-    fusion_pct = report.get("fusion", {}).get("accuracy_pct", 0)
-    report["fusion_vs_best"] = {
-        "fusion_accuracy": fusion_pct,
-        "best_system": best_name,
-        "best_accuracy": best_pct,
-        "gap": round(fusion_pct - best_pct, 1),
-    }
 
     return report
 
@@ -1254,12 +1233,11 @@ def render_markdown(report: Dict[str, Any]) -> str:
     lines.append(f"| 回测天数 | {fusion.get('backtest_days', 0)} |")
     lines.append(f"| 分歧时准确率 | {fusion.get('disagreement_pct', 'N/A')}% |")
     lines.append(f"| 无分歧准确率 | {fusion.get('no_disagreement_pct', 'N/A')}% |")
-    lines.append(f"| 最优单系统 | {fusion.get('best_single_system', 'N/A')} |")
     lines.append(f"")
 
-    # ── 子系统对比 ──
+    # ── 子系统对比（独立回测口径） ──
     subs = report.get("subsystems", {})
-    lines.append(f"## 📈 子系统方向准确率 (T+1)")
+    lines.append(f"## 📈 子系统方向准确率 (独立回测)")
     lines.append(f"")
     lines.append(f"| 系统 | 准确率 | 正确/总 |")
     lines.append(f"|------|:------:|:-------:|")
@@ -1271,12 +1249,6 @@ def render_markdown(report: Dict[str, Any]) -> str:
         total = s.get("total", 0)
         bar = _bar(acc, 12)
         lines.append(f"| {sn} | {acc}% {bar} | {corr}/{total} |")
-    lines.append(f"")
-
-    # 融合 vs 最优
-    fvb = report.get("fusion_vs_best", {})
-    lines.append(f"| **融合** | **{fvb.get('fusion_accuracy', 'N/A')}%** | **vs 最优({fvb.get('best_system', 'N/A')}) {fvb.get('best_accuracy', 'N/A')}%** |")
-    lines.append(f"| **差距** | | **{fvb.get('gap', 'N/A')}%** |")
     lines.append(f"")
 
     # 子系统覆盖率
