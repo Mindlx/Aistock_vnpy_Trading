@@ -235,7 +235,31 @@ class MarketAnalyzer:
         return ""
 
     def _get_northbound_flow_text(self) -> str:
-        """获取北向资金流向（Tushare Pro moneyflow_hsgt）。"""
+        """获取北向资金流向（优先数据湖缓存 → Tushare Pro moneyflow_hsgt）。"""
+        lines = ["## 北向资金"]
+        today = datetime.now().strftime("%Y-%m-%d")
+        _lake_path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "data_warehouse.db"
+
+        # 尝试1: 数据湖缓存
+        try:
+            if _lake_path.exists():
+                conn = sqlite3.connect(str(_lake_path))
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT north_flow, north_hold_pct FROM capital_flows "
+                    "WHERE stock_code = '__market__' AND date = ? LIMIT 1",
+                    (today,),
+                )
+                row = cur.fetchone()
+                conn.close()
+                if row and row[0] is not None:
+                    north = float(row[0]) / 10000
+                    lines.append(f"- 沪深港通北向净流入: {north:+.2f} 亿元 (数据湖缓存)")
+                    return "\n".join(lines)
+        except Exception:
+            pass
+
+        # 尝试2: Tushare Pro
         try:
             from src.config import get_config
             cfg = get_config()
@@ -243,22 +267,39 @@ class MarketAnalyzer:
                 return ""
             from data_provider.tushare_fetcher import _TushareHttpClient
             client = _TushareHttpClient(cfg.tushare_token, timeout=10)
-            from datetime import datetime, timedelta
-            today = datetime.now().strftime("%Y%m%d")
             yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-            df = client.query("moneyflow_hsgt", start_date=yesterday, end_date=today, limit=2)
-            if df is None or df.empty:
-                return ""
-            if "trade_date" in df.columns:
-                df = df.sort_values("trade_date", ascending=False)
-            row = df.iloc[0]
-            north = float(row.get("north_money", 0)) / 10000
-            south = float(row.get("south_money", 0)) / 10000
-            parts = ["## 北向资金"]
-            parts.append(f"- 沪深港通北向净流入: {north:+.2f} 亿元")
-            parts.append(f"  (沪股通 {float(row.get('ggt_ss',0))/10000:+.2f}亿 / 深股通 {float(row.get('ggt_sz',0))/10000:+.2f}亿)")
-            parts.append(f"- 南向净流入: {south:+.2f} 亿元")
-            return "\n".join(parts)
+            today_8 = datetime.now().strftime("%Y%m%d")
+            df = client.query("moneyflow_hsgt", start_date=yesterday, end_date=today_8, limit=2)
+            if df is not None and not df.empty:
+                if "trade_date" in df.columns:
+                    df = df.sort_values("trade_date", ascending=False)
+                row = df.iloc[0]
+                north = float(row.get("north_money", 0)) / 10000
+                south = float(row.get("south_money", 0)) / 10000
+                ggt_ss = float(row.get("ggt_ss", 0)) / 10000
+                ggt_sz = float(row.get("ggt_sz", 0)) / 10000
+                lines.append(f"- 沪深港通北向净流入: {north:+.2f} 亿元")
+                lines.append(f"  (沪股通 {ggt_ss:+.2f}亿 / 深股通 {ggt_sz:+.2f}亿)")
+                lines.append(f"- 南向净流入: {south:+.2f} 亿元")
+
+                # 写入数据湖缓存
+                try:
+                    if _lake_path.exists():
+                        conn = sqlite3.connect(str(_lake_path))
+                        cur = conn.cursor()
+                        try:
+                            cur.execute("""
+                                INSERT OR REPLACE INTO capital_flows
+                                (stock_code, date, north_flow, source, fetched_at)
+                                VALUES (?, ?, ?, 'tushare_hsgt', datetime('now'))
+                            """, ("__market__", today, float(row.get("north_money", 0))))
+                            conn.commit()
+                        finally:
+                            conn.close()
+                except Exception:
+                    pass
+
+                return "\n".join(lines)
         except Exception as e:
             logger.debug("[大盘] 北向资金获取失败: %s", e)
         return ""
