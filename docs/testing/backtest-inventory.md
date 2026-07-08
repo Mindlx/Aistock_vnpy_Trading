@@ -25,7 +25,7 @@
 - **命令**: `.venv/bin/python scripts/backtest.py {init\|record\|check\|update\|report\|backfill\|simulate\|walkforward\|weight_sweep}`
 - **数据流**: `fusion_engine.py → fusion_{date}.csv → backtest.py record → bt_predictions DB → check (unified_cache) → report`
 - **DB路径**: `data/backtest/bt_results.db`
-- **指标**: 方向准确率(融合/ly/ml/at)、分歧场景分析、信号分布、逐日趋势、个股统计、融合vs最优单系统
+- **指标**: 方向准确率(融合/ly/ml/at)、分歧场景分析、信号分布、逐日趋势、个股统计
 - **最新结果(2026-06-29)**: 融合57.7%, ML 62.3%, LY 53.0%, AT 53.9%
 
 ### 1.2 LY独立回测详情
