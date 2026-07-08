@@ -285,10 +285,6 @@ def phase1_fusion() -> Dict[str, Any]:
         "signal_breakdown": signal_breakdown,
         "per_stock": per_stock,
         "daily_trend": daily,
-        # 最佳单系统 (用于融合 vs 最优对比)
-        "best_single_system": max(
-            accuracies.items(), key=lambda x: x[1]["accuracy"]
-        )[0],
     })
 
     return result
@@ -1058,7 +1054,6 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
             "backtest_days": fusion.get("backtest_days", 0),
             "disagreement_pct": fusion.get("disagreement", {}).get("accuracy", 0),
             "no_disagreement_pct": fusion.get("disagreement", {}).get("no_disagreement_accuracy", 0),
-            "best_single_system": fusion.get("best_single_system", ""),
         }
         report["subsystems"] = {}
         for sys_key in ["ly", "ml", "at"]:
@@ -1516,15 +1511,9 @@ def main():
     f_status = phases["fusion"].get("status", "error")
     if f_status == "ok":
         sa = phases["fusion"].get("subsystem_accuracy", {})
-        # ML 用 fusion_equivalent 替代融合层面子集
-        fe = phases.get("ml", {}).get("fusion_equivalent", {}).get("accuracy", None)
-        ml_acc = fe if fe else sa.get("ml", {}).get("accuracy", 0)
-        # LY 用独立回测L7口径替代融合层面子集
-        ly_l7 = phases.get("ly", {}).get("overall_l7", {}).get("accuracy", None)
-        ly_acc = ly_l7 if ly_l7 else sa.get("ly", {}).get("accuracy", 0)
         print(f"   ✅ 融合 {sa.get('fusion', {}).get('accuracy', 0)}% | "
-              f"LY {ly_acc}% | "
-              f"ML {ml_acc}% | "
+              f"LY {sa.get('ly', {}).get('accuracy', 0)}% | "
+              f"ML {sa.get('ml', {}).get('accuracy', 0)}% | "
               f"AT {sa.get('at', {}).get('accuracy', 0)}%")
     else:
         print(f"   ❌ {phases['fusion'].get('message', '未知错误')}")

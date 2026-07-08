@@ -733,27 +733,6 @@ def cmd_report(detail: bool = False) -> None:
             pct = f"{c/t*100:.1f}%" if t > 0 else "—"
             print(f"     {code} {name:8s}: {c:2d}/{t:<2d} ({pct}) [{tot}次预测]")
 
-    # 融合 vs 最优单系统
-    print(f"\n  🏆 融合 vs 最优单系统")
-    sys_acc = [
-        ("Lynx", stats["ly_pct"]),
-        ("MindLynx", stats["ml_pct"]),
-        ("TradingAgent", stats["at_pct"]),
-    ]
-    sys_acc.sort(key=lambda x: x[1], reverse=True)
-    best_name, best_pct = sys_acc[0]
-    fusion_pct = stats["fusion_pct"]
-    diff = fusion_pct - best_pct
-    if diff > 0:
-        verdict = f"融合领先 {best_name} {diff:.1f}%"
-    elif diff < 0:
-        verdict = f"融合落后 {best_name} {abs(diff):.1f}%"
-    else:
-        verdict = "融合与最优单系统持平"
-    print(f"     最优单系统: {best_name} ({best_pct:.1f}%)")
-    print(f"     融合系统:   {fusion_pct:.1f}%")
-    print(f"     结论: {verdict}")
-
     # 优势摘要
     print(f"\n  💡 关键指标")
     has_enough_data = stats["total_matched"] >= 30
