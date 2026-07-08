@@ -3,7 +3,7 @@
 
 name: bull_trend
 display_name: 默认多头趋势
-description:  {@calibration 道氏理论(Dow Theory)引用} 基于道氏理论趋势定义的默认分析策略，识别多头排列、趋势延续与回踩低吸机会。
+description: "{@calibration 道氏理论(Dow Theory)引用} 基于道氏理论趋势定义的默认分析策略，识别多头排列、趋势延续与回踩低吸机会。"
 category: trend
 core_rules: [1, 2, 3]
 required_tools:

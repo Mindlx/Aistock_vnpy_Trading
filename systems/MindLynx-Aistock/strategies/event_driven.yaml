@@ -2,7 +2,7 @@
 
 name: event_driven
 display_name: 事件驱动
-description:  {@calibration 霍华德·马克斯第二层思维引用} 基于霍华德·马克斯（Howard Marks）第二层思维的事件驱动策略，评估催化与风险。
+description: "{@calibration 霍华德·马克斯第二层思维引用} 基于霍华德·马克斯（Howard Marks）第二层思维的事件驱动策略，评估催化与风险。"
 category: framework
 core_rules: [3, 5]
 required_tools:
