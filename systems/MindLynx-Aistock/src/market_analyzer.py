@@ -304,6 +304,35 @@ class MarketAnalyzer:
             logger.debug("[大盘] 北向资金获取失败: %s", e)
         return ""
 
+    def _get_global_market_text(self) -> str:
+        """获取外围市场数据（美/港/日指数，仅全天复盘使用）。"""
+        try:
+            from src.config import get_config
+            cfg = get_config()
+            if not cfg.tushare_token:
+                return ""
+            from data_provider.tushare_fetcher import _TushareHttpClient
+            client = _TushareHttpClient(cfg.tushare_token, timeout=10)
+            indices = [("DJI", "道指"), ("SPX", "标普500"), ("IXIC", "纳指"),
+                       ("HSI", "恒指"), ("N225", "日经225")]
+            parts = ["## 外围市场"]
+            for code, label in indices:
+                try:
+                    df = client.query("index_global", ts_code=code, limit=2)
+                    if df is not None and not df.empty:
+                        row = df.iloc[-1]
+                        pct = float(row.get("pct_chg", 0))
+                        close = row.get("close", "")
+                        arrow = "🔴" if pct > 0 else ("🟢" if pct < 0 else "➡️")
+                        parts.append(f"- {label} {arrow} {close} ({pct:+.2f}%)")
+                except Exception:
+                    pass
+            if len(parts) > 1:
+                return "\n".join(parts)
+        except Exception as e:
+            logger.debug("[大盘] 外围市场获取失败: %s", e)
+        return ""
+
     def _get_eastmoney_rating_text(self) -> str:
         """读取东方财富评级缓存，返回全市场情绪统计（供大盘复盘"四"注入）。"""
         try:
@@ -1823,7 +1852,14 @@ Market conditions can change quickly. The data above is for reference only and d
         if eastmoney_text:
             logger.info("[大盘] 东方财富评级: 已加载")
 
-        # 3e. 读取当日整点分析作为第三方观点参考
+        # 3e. 全天复盘增加外围市场数据（美/港/日指数）
+        if session_label.endswith("全天"):
+            global_text = self._get_global_market_text()
+            if global_text:
+                logger.info("[大盘] 外围市场数据: 已加载")
+                capital_flow_text = (capital_flow_text or "") + "\n\n" + global_text
+
+        # 3f. 读取当日整点分析作为第三方观点参考
         hourly_analysis_text = self._load_hourly_analysis(session_label)
         if hourly_analysis_text:
             logger.info("[大盘] 整点分析观点: 已加载")
