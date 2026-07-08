@@ -58,9 +58,11 @@ class ReliabilityConfig:
 
     @classmethod
     def _alpha_from_db(cls, stock_code: str) -> float | None:
-        """Query backtest_summaries for per-stock sentiment accuracy, return alpha.
+        """Query bt_predictions for per-stock fusion-level accuracy, return alpha.
 
-        Uses DB from ML subsystem (stock_analysis.db). Falls back silently.
+        Uses bt_results.db (fusion backtest) instead of backtest_summaries (ML).
+        Fusion-level ml_correct reflects the actual in-system performance after
+        normalization and op_advice blending.
         Cache TTL=3600s to avoid repeated queries during fusion loops.
         """
         # Check cache
@@ -73,36 +75,41 @@ class ReliabilityConfig:
             import sqlite3
             from pathlib import Path
 
-            db_path = Path(__file__).resolve().parent.parent / "systems" / "MindLynx-Aistock" / "data" / "stock_analysis.db"
+            db_path = Path(__file__).resolve().parent.parent / "data" / "backtest" / "bt_results.db"
             if not db_path.exists():
                 return None
 
             conn = sqlite3.connect(str(db_path))
             cur = conn.cursor()
             cur.execute("""
-                SELECT sentiment_direction_accuracy_pct
-                FROM backtest_summaries
-                WHERE scope = 'stock' AND code = ? AND eval_window_days = 5
-                  AND sentiment_direction_accuracy_pct IS NOT NULL
-                ORDER BY computed_at DESC
-                LIMIT 1
+                SELECT SUM(CASE WHEN ml_correct = 1 THEN 1 ELSE 0 END) as correct,
+                       COUNT(*) as total
+                FROM bt_predictions
+                WHERE stock_code = ? AND ml_correct IS NOT NULL
+                  AND fusion_correct IS NOT NULL
             """, (stock_code,))
             row = cur.fetchone()
             conn.close()
 
-            if row and row[0] is not None:
-                acc = float(row[0])
-                # Map accuracy to alpha (same logic as calibrate_alphas.py)
-                if acc >= 65.0:
-                    alpha = 0.80
-                elif acc >= 50.0:
-                    alpha = 0.65
-                elif acc >= 25.0:
-                    alpha = 0.40
-                else:
-                    alpha = 0.30
-                cls._alpha_cache[stock_code] = (alpha, now)
-                return alpha
+            if row and row[0] is not None and row[1] >= 10:
+                acc = row[0] / row[1] * 100.0
+            elif row and row[1] > 0 and row[1] < 10:
+                logger.debug(f"[Reliability] {stock_code}: 不足样本({row[1]}/10), 跳过DB alpha")
+                return None
+            else:
+                return None
+
+            # Map accuracy to alpha (same logic as calibrate_alphas.py)
+            if acc >= 65.0:
+                alpha = 0.80
+            elif acc >= 50.0:
+                alpha = 0.65
+            elif acc >= 25.0:
+                alpha = 0.40
+            else:
+                alpha = 0.30
+            cls._alpha_cache[stock_code] = (alpha, now)
+            return alpha
         except Exception as exc:
             logger.debug(f"[Reliability] DB alpha query failed for {stock_code}: {exc}")
 
