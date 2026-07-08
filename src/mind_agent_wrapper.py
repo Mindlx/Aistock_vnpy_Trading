@@ -178,8 +178,8 @@ class MindTradingAgentWrapper:
                 ml_factor_md = preloaded.get("ml_factor_context", "")
                 orig_create = self._ta.propagator.create_initial_state
 
-                def _injected_create(company_name, trade_date, asset_type="stock", past_context=""):
-                    state = orig_create(company_name, trade_date, asset_type, past_context)
+                def _injected_create(company_name, trade_date, asset_type="stock", past_context="", instrument_context=""):
+                    state = orig_create(company_name, trade_date, asset_type, past_context, instrument_context)
                     from langchain_core.messages import AIMessage, SystemMessage
                     # Option A+: 注入到 system prompt 头部（最高权威层级）
                     sys_inject = (

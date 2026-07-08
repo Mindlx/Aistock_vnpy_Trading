@@ -26,6 +26,7 @@ from mind_tradingagent.dataflows.config import set_config
 from mind_tradingagent.agents.utils.agent_utils import (
     build_instrument_context,
     get_balance_sheet,
+    get_capital_flows,
     get_cashflow,
     get_fundamentals,
     get_global_news,
@@ -203,6 +204,20 @@ class TradingAgentsGraph:
                     get_balance_sheet,
                     get_cashflow,
                     get_income_statement,
+                ]
+            ),
+            "policy": ToolNode(
+                [
+                    # Policy analysis: news + fundamentals
+                    get_news,
+                    get_global_news,
+                    get_fundamentals,
+                ]
+            ),
+            "capital_flow": ToolNode(
+                [
+                    # Capital flow tracking
+                    get_capital_flows,
                 ]
             ),
         }
