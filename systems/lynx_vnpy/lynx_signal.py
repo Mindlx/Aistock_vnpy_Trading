@@ -606,6 +606,11 @@ def run(use_alpha: bool = False):
         else:
             # 双模型并行 + 集成
             df_feat = compute_features(df)
+            # WalkForward风格: 每次预测前用最新数据重训模型
+            trained = train_model(df, code)
+            if trained is None:
+                print(f"❌ 重训失败")
+                continue
             sig_rf = predict_signal(df_feat, code, name)
             sig_lgb = _predict_alpha(df, code, name)
 

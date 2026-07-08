@@ -35,7 +35,7 @@
 | # | Timer 文件 | 触发时间 | Service → Entry Script | 推送内容 |
 |---|-----------|---------|----------------------|---------|
 | 1 | `Aistock_vnpy_Trading-fusion.timer` | Mon-Fri 19:00 | `run_daily.py` | 融合决策 + 龙虎榜 + 东方财富评级 PDF |
-| 2 | `Aistock_vnpy_Trading-lynx-signal.timer` | Mon-Fri 15:15 | `lynx_signal.py` | ML 量化信号 |
+| 2 | ~~`Aistock_vnpy_Trading-lynx-signal.timer`~~ | ~~Mon-Fri 15:15~~ | ~~`lynx_signal.py`~~ | ~~LY 量化信号~~ **(2026-07-08 已禁用，准确率提升后恢复)** |
 | 3 | `Aistock_vnpy_Trading-realtime-fusion.timer` | Mon-Fri 09:33 | `realtime_fusion.py --daemon` | 准实时融合(5分钟扫描) |
 
 ### 2.2 MindLynx 引擎 systemd 常驻服务（内部调度）
@@ -135,6 +135,7 @@
 - **底层**: 调用 `WeComNotifier.send_markdown()`（2026-06-06 统一，之前为独立 `requests.post`）
 - **msgtype**: `markdown`
 - **Webhook**: 环境变量 `WECOM_WEBHOOK_URL`（与 Fusion 共用）
+- **状态**: ⛔ 2026-07-08 禁用 timer，保留代码
 
 ---
 
@@ -187,7 +188,9 @@
 1. 先发文字: `💰东方财富自选股评级报告已生成 📎 完整报告见附件PDF`
 2. 后发文件: `{date}东方财富评级报告.pdf`（PDF 文件，文件名含日期）
 
-### 4.4 ML 量化信号（lynx_signal 15:15 推送）
+### 4.4 LY 量化信号（lynx_signal 15:15 推送 — ⛔ 已禁用）
+
+> 2026-07-08 因LY方向准确率偏低暂时禁用 `Aistock_vnpy_Trading-lynx-signal.timer`，保留代码。恢复命令：`systemctl --user enable --now Aistock_vnpy_Trading-lynx-signal.timer`
 
 ```
 🧬 15:15 ly量化信号

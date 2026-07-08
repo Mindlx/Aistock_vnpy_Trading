@@ -16,7 +16,7 @@
 
 | 系统 | 入口 | 数据库 | 数据量 | 评估对象 | 自动执行 |
 |------|------|--------|--------|---------|---------|
-| **融合回测** | `scripts/backtest.py` (1127行) | `data/backtest/bt_results.db` (92KB) | 309预测/284匹配 | L7方向判定 | `run_daily.py:484-499` 每日19:00 |
+| **融合回测** | `scripts/backtest.py` (1394行) | `data/backtest/bt_results.db` (92KB) | 309预测/284匹配 | L7方向判定 | `scripts/c1test.py` Phase 1 (每日20:00) |
 | **LY独立回测** | `lynx_signal.py --backtest` | Sina API + parquet缓存 | 682 OOS样本 | RF上涨概率方向 | `lynx-backtest.timer` 每周日10:00 |
 | **ML独立回测** | `main.py --backtest` (8模块) | `stock_analysis.db` (32MB) | 1004评估 | operation_advice方向+盈亏 | pipeline 每日 |
 

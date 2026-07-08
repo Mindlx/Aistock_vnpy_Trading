@@ -443,7 +443,7 @@ class RealtimeMonitorService:
         self,
         config: Config | None = None,
         *,
-        briefing_interval: int = 900,
+        briefing_interval: int = 1380,
         atr_multipliers: list[float] = None,
         volume_ratio_threshold: float = 3.0,
         price_change_threshold: float = 2.0,

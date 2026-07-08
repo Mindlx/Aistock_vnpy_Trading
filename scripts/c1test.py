@@ -777,6 +777,266 @@ def phase4_at() -> Dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════════
+# Phase 5: 因子独立回测
+# ══════════════════════════════════════════════════════════════
+
+def phase5_factor_backtest(timeout: int = 300) -> Dict[str, Any]:
+    """运行因子独立回测 (factor_backtest.py).
+
+    子进程调用 scripts/factor_backtest.py，解析 stdout 获取因子方向准确率。
+    """
+    result: Dict[str, Any] = {"status": "ok", "timestamp": _now()}
+
+    factor_script = PROJECT_ROOT / "scripts" / "factor_backtest.py"
+    if not factor_script.exists():
+        result["status"] = "skipped"
+        result["message"] = f"因子回测脚本不存在: {factor_script}"
+        return result
+
+    print(f"  [c1test] 运行因子独立回测 ...")
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(factor_script)],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        result["status"] = "timeout"
+        result["message"] = f"因子回测超时 ({timeout}s)"
+        return result
+
+    stdout = proc.stdout
+
+    # 解析整体准确率
+    acc_match = re.search(r"整体准确率[：:]\s*([\d.]+)%", stdout)
+    if acc_match:
+        result["accuracy"] = float(acc_match.group(1))
+    # 总评估次数
+    eval_match = re.search(r"总评估次数[：:]\s*(\d+)", stdout)
+    if eval_match:
+        result["total_evaluations"] = int(eval_match.group(1))
+    # 评估股票数
+    stock_match = re.search(r"评估股票数[：:]\s*(\d+)", stdout)
+    if stock_match:
+        result["stocks_evaluated"] = int(stock_match.group(1))
+    # 结论
+    conclusion_match = re.search(r"结论[：:]\s*(.+)", stdout)
+    if conclusion_match:
+        result["conclusion"] = conclusion_match.group(1).strip()
+    # 解析个股准确率
+    per_stock = []
+    for line in stdout.splitlines():
+        m = re.match(r"\s+(\d{6})\s+(\d+)\s+(\d+)\s+([\d.]+)%", line)
+        if m:
+            per_stock.append({
+                "code": m.group(1),
+                "evaluations": int(m.group(2)),
+                "correct": int(m.group(3)),
+                "accuracy": float(m.group(4)),
+            })
+    if per_stock:
+        result["per_stock"] = per_stock
+
+    result["returncode"] = proc.returncode
+    result["stdout_preview"] = stdout[:500] if len(stdout) > 500 else stdout
+    result["stderr_preview"] = proc.stderr[:500] if proc.stderr else ""
+
+    return result
+
+
+# ══════════════════════════════════════════════════════════════
+# Phase 6: WalkForward 滑动窗口验证
+# ══════════════════════════════════════════════════════════════
+
+def phase6_walkforward(timeout: int = 120) -> Dict[str, Any]:
+    """运行 WalkForward 滑动窗口验证 (backtest.py walkforward).
+
+    子进程调用 backtest.py walkforward，解析 stdout 获取 IS/OOS 准确率。
+    """
+    result: Dict[str, Any] = {"status": "ok", "timestamp": _now()}
+
+    bt_script = PROJECT_ROOT / "scripts" / "backtest.py"
+    if not bt_script.exists():
+        result["status"] = "skipped"
+        result["message"] = f"回测脚本不存在: {bt_script}"
+        return result
+
+    print(f"  [c1test] 运行 WalkForward 验证 ...")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "scripts/backtest.py", "walkforward"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        result["status"] = "timeout"
+        result["message"] = f"WalkForward 超时 ({timeout}s)"
+        return result
+
+    stdout = proc.stdout
+    if not stdout.strip() or "数据不足" in stdout:
+        result["status"] = "skipped"
+        result["message"] = "数据不足，跳过 WalkForward"
+        result["stdout_preview"] = stdout[:500]
+        return result
+
+    # 解析回测区间和窗口
+    range_match = re.search(r"回测区间[：:]\s*(.+?)\s*\((\d+)\s*交易日\)", stdout)
+    if range_match:
+        result["date_range"] = range_match.group(1).strip()
+        result["trading_days"] = int(range_match.group(2))
+
+    win_match = re.search(r"训练窗口[：:]\s*(\d+)天.*验证窗口[：:]\s*(\d+)天.*步长[：:]\s*(\d+)天", stdout)
+    if win_match:
+        result["train_window"] = int(win_match.group(1))
+        result["test_window"] = int(win_match.group(2))
+        result["step"] = int(win_match.group(3))
+
+    # 解析各窗口
+    windows = []
+    for line in stdout.splitlines():
+        m = re.match(r".*IS[：:]\s*([\d.]+)%\s*\((\d+)/(\d+)\)\s*[|]\s*OOS[：:]\s*([\d.]+)%\s*\((\d+)/(\d+)\)", line)
+        if m:
+            windows.append({
+                "is_accuracy": float(m.group(1)),
+                "is_correct": int(m.group(2)),
+                "is_total": int(m.group(3)),
+                "oos_accuracy": float(m.group(4)),
+                "oos_correct": int(m.group(5)),
+                "oos_total": int(m.group(6)),
+            })
+    if windows:
+        result["windows"] = windows
+        # 汇总 OOS
+        avg_oos = sum(w["oos_accuracy"] for w in windows) / len(windows)
+        avg_is = sum(w["is_accuracy"] for w in windows) / len(windows)
+        result["avg_oos_accuracy"] = round(avg_oos, 1)
+        result["avg_is_accuracy"] = round(avg_is, 1)
+        result["decay_ratio"] = round(avg_oos / avg_is * 100, 1) if avg_is > 0 else 0
+
+    result["returncode"] = proc.returncode
+    return result
+
+
+# ══════════════════════════════════════════════════════════════
+# Phase 7: 权重网格扫描
+# ══════════════════════════════════════════════════════════════
+
+def phase7_weight_sweep(timeout: int = 120) -> Dict[str, Any]:
+    """运行权重网格扫描 (backtest.py weight-sweep).
+
+    枚举 settings.yaml 中定义的权重组合，输出最优权重。
+    """
+    result: Dict[str, Any] = {"status": "ok", "timestamp": _now()}
+
+    bt_script = PROJECT_ROOT / "scripts" / "backtest.py"
+    if not bt_script.exists():
+        result["status"] = "skipped"
+        result["message"] = f"回测脚本不存在: {bt_script}"
+        return result
+
+    print(f"  [c1test] 运行权重网格扫描 ...")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "scripts/backtest.py", "weight-sweep"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        result["status"] = "timeout"
+        result["message"] = f"权重扫描超时 ({timeout}s)"
+        return result
+
+    stdout = proc.stdout
+    if not stdout.strip() or "没有足够的" in stdout:
+        result["status"] = "skipped"
+        result["message"] = "数据不足，跳过权重扫描"
+        result["stdout_preview"] = stdout[:500]
+        return result
+
+    # 解析搜索范围
+    range_match = re.search(r"ly[：:]\s*(\[.*?\]).*ml[：:]\s*(\[.*?\]).*at[：:]\s*(\[.*?\])", stdout, re.DOTALL)
+    if range_match:
+        try:
+            result["ly_range"] = json.loads(range_match.group(1).replace("'", '"'))
+            result["ml_range"] = json.loads(range_match.group(2).replace("'", '"'))
+            result["at_range"] = json.loads(range_match.group(3).replace("'", '"'))
+        except json.JSONDecodeError:
+            pass
+    combo_match = re.search(r"共\s*(\d+)\s*种组合", stdout)
+    if combo_match:
+        result["combo_count"] = int(combo_match.group(1))
+
+    # 解析结果表: 找最优组合
+    best_match = re.search(r"最优[：:].*?ly=([\d.]+).*?ml=([\d.]+).*?at=([\d.]+).*?(\d+)/(\d+)\s*\(([\d.]+)%\)", stdout)
+    if best_match:
+        result["best_weights"] = {
+            "ly": float(best_match.group(1)),
+            "ml": float(best_match.group(2)),
+            "at": float(best_match.group(3)),
+            "correct": int(best_match.group(4)),
+            "total": int(best_match.group(5)),
+            "accuracy": float(best_match.group(6)),
+        }
+
+    result["returncode"] = proc.returncode
+    result["stdout_preview"] = stdout[:800] if len(stdout) > 800 else stdout
+    return result
+
+
+# ══════════════════════════════════════════════════════════════
+# Phase 8: 模拟交易
+# ══════════════════════════════════════════════════════════════
+
+def phase8_simulate(timeout: int = 120) -> Dict[str, Any]:
+    """运行模拟交易回测 (backtest.py simulate).
+
+    解析 stdout 获取收益曲线和风险指标。
+    """
+    result: Dict[str, Any] = {"status": "ok", "timestamp": _now()}
+
+    bt_script = PROJECT_ROOT / "scripts" / "backtest.py"
+    if not bt_script.exists():
+        result["status"] = "skipped"
+        result["message"] = f"回测脚本不存在: {bt_script}"
+        return result
+
+    print(f"  [c1test] 运行模拟交易 ...")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "scripts/backtest.py", "simulate"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        result["status"] = "timeout"
+        result["message"] = f"模拟交易超时 ({timeout}s)"
+        return result
+
+    stdout = proc.stdout
+    if not stdout.strip() or "没有可用的" in stdout:
+        result["status"] = "skipped"
+        result["message"] = "数据不足，跳过模拟交易"
+        result["stdout_preview"] = stdout[:500]
+        return result
+
+    # 解析关键指标
+    for key, pattern in [
+        ("total_return", r"总收益率[：:]\s*([+-]?[\d.]+)%"),
+        ("annual_return", r"年化收益率[：:]\s*([+-]?[\d.]+)%"),
+        ("max_drawdown", r"最大回撤[：:]\s*([+-]?[\d.]+)%"),
+        ("win_rate", r"胜率[：:]\s*([\d.]+)%"),
+        ("trade_count", r"交易次数[：:]\s*(\d+)"),
+        ("sharpe", r"夏普比率[：:]\s*([\d.]+)"),
+        ("avg_win", r"平均盈利[：:]\s*([+-]?[\d.]+)%"),
+        ("avg_loss", r"平均亏损[：:]\s*([+-]?[\d.]+)%"),
+    ]:
+        m = re.search(pattern, stdout)
+        if m:
+            val = float(m.group(1)) if "." in m.group(1) or "%" not in pattern else int(m.group(1))
+            result[key] = val
+
+    result["returncode"] = proc.returncode
+    return result
+
+
+# ══════════════════════════════════════════════════════════════
 # 统一报告生成
 # ══════════════════════════════════════════════════════════════
 
@@ -841,6 +1101,12 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
     if at.get("status") == "ok":
         report["at_fusion_level"] = at
 
+    # 因子回测 / WalkForward / 权重扫描 / 模拟交易 (直接传递)
+    for key in ("factor", "walkforward", "weight_sweep", "simulate"):
+        p = phases.get(key, {})
+        if p.get("status") == "ok" or p.get("status") == "skipped":
+            report[key] = p
+
     # ── 变化检测 ──
     changes = detect_changes(report)
     report["changes"] = changes
@@ -854,10 +1120,20 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
         if p > best_pct:
             best_pct = p
             best_name = name_map.get(sk, sk)
+    # LY 用独立回测 L7 口径替代融合层面的子集数据
+    l7 = report.get("ly_independent_l7", {})
+    if l7.get("accuracy"):
+        report.setdefault("subsystems", {}).setdefault("ly", {})["accuracy_pct"] = l7["accuracy"]
+        report.setdefault("subsystems", {}).setdefault("ly", {})["correct"] = l7["correct"]
+        report.setdefault("subsystems", {}).setdefault("ly", {})["total"] = l7["total"]
+        if l7["accuracy"] > best_pct:
+            best_pct = l7["accuracy"]
+            best_name = "Lynx(L7)"
     # ML 用 fusion_equivalent 替代融合层面的子集数据
     fe = report.get("ml", {}).get("fusion_equivalent", {})
     if fe.get("accuracy"):
         report.setdefault("subsystems", {}).setdefault("ml", {})["accuracy_pct"] = fe["accuracy"]
+        report.setdefault("subsystems", {}).setdefault("ml", {})["correct"] = fe["correct"]
         report.setdefault("subsystems", {}).setdefault("ml", {})["total"] = fe["total"]
         if fe["accuracy"] > best_pct:
             best_pct = fe["accuracy"]
@@ -1119,6 +1395,71 @@ def render_markdown(report: Dict[str, Any]) -> str:
         lines.append(f"| 说明 | 阈值已统一为 0.1 与融合回测口径一致 |")
         lines.append(f"")
 
+    # ── Factor 因子回测 ──
+    factor = report.get("factor", {})
+    if factor and factor.get("status") == "ok":
+        lines.append(f"## 📐 因子独立回测 (Factor Backtest)")
+        lines.append(f"")
+        lines.append(f"| 指标 | 数值 |")
+        lines.append(f"|------|------|")
+        lines.append(f"| 方向准确率 | **{factor.get('accuracy', 'N/A')}%** |")
+        lines.append(f"| 评估次数 | {factor.get('total_evaluations', 0)} |")
+        lines.append(f"| 评估股票数 | {factor.get('stocks_evaluated', 0)} |")
+        lines.append(f"| 结论 | {factor.get('conclusion', 'N/A')} |")
+        lines.append(f"")
+
+    # ── WalkForward ──
+    wf = report.get("walkforward", {})
+    if wf and wf.get("status") == "ok":
+        lines.append(f"## 🔄 WalkForward 滑动窗口验证")
+        lines.append(f"")
+        lines.append(f"| 指标 | 数值 |")
+        lines.append(f"|------|------|")
+        lines.append(f"| 回测区间 | {wf.get('date_range', 'N/A')} |")
+        lines.append(f"| 交易日数 | {wf.get('trading_days', 'N/A')} |")
+        lines.append(f"| 训练窗口 | {wf.get('train_window', 'N/A')}天 |")
+        lines.append(f"| 验证窗口 | {wf.get('test_window', 'N/A')}天 |")
+        lines.append(f"| 平均 IS 准确率 | **{wf.get('avg_is_accuracy', 'N/A')}%** |")
+        lines.append(f"| 平均 OOS 准确率 | **{wf.get('avg_oos_accuracy', 'N/A')}%** |")
+        lines.append(f"| 衰减比 (OOS/IS) | {wf.get('decay_ratio', 'N/A')}% |")
+        if wf.get("windows"):
+            lines.append(f"")
+            lines.append(f"| 窗口 | IS | OOS |")
+            lines.append(f"|:----:|:--:|:---:|")
+            for i, w in enumerate(wf["windows"]):
+                lines.append(f"| {i+1} | {w.get('is_accuracy','?')}% ({w.get('is_correct',0)}/{w.get('is_total',0)})"
+                             f" | {w.get('oos_accuracy','?')}% ({w.get('oos_correct',0)}/{w.get('oos_total',0)}) |")
+        lines.append(f"")
+
+    # ── Weight Sweep ──
+    ws = report.get("weight_sweep", {})
+    if ws and ws.get("status") == "ok" and ws.get("best_weights"):
+        bw = ws["best_weights"]
+        lines.append(f"## ⚖️ 权重网格扫描")
+        lines.append(f"")
+        lines.append(f"| 指标 | 数值 |")
+        lines.append(f"|------|------|")
+        lines.append(f"| 搜索范围 | ly{ws.get('ly_range','')} ml{ws.get('ml_range','')} at{ws.get('at_range','')} |")
+        lines.append(f"| 组合数 | {ws.get('combo_count', 'N/A')} |")
+        lines.append(f"| **最优权重** | ly={bw.get('ly','?')}  ml={bw.get('ml','?')}  at={bw.get('at','?')} |")
+        lines.append(f"| 最优准确率 | **{bw.get('accuracy','?')}%** ({bw.get('correct',0)}/{bw.get('total',0)}) |")
+        lines.append(f"")
+
+    # ── Simulate ──
+    si = report.get("simulate", {})
+    if si and si.get("status") == "ok":
+        lines.append(f"## 💰 模拟交易")
+        lines.append(f"")
+        lines.append(f"| 指标 | 数值 |")
+        lines.append(f"|------|------|")
+        for label, key in [("总收益率", "total_return"), ("年化收益率", "annual_return"),
+                           ("最大回撤", "max_drawdown"), ("胜率", "win_rate"),
+                           ("交易次数", "trade_count"), ("夏普比率", "sharpe"),
+                           ("平均盈利", "avg_win"), ("平均亏损", "avg_loss")]:
+            val = si.get(key, "N/A")
+            lines.append(f"| {label} | {val}{'%' if key not in ('trade_count','sharpe') else ''} |")
+        lines.append(f"")
+
     # ── 变化 ──
     changes = report.get("changes", {})
     vsp = changes.get("vs_previous", {})
@@ -1167,8 +1508,8 @@ def render_markdown(report: Dict[str, Any]) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="c1test 统一回测编排器")
-    parser.add_argument("--quick", action="store_true", help="快速模式 (融合回测 + 缓存数据)")
-    parser.add_argument("--full", action="store_true", help="全面模式 (融合 + LY + ML + AT)")
+    parser.add_argument("--quick", action="store_true", help="快速模式 (仅融合回测+WalkForward+网格+模拟, 跳过独立回测)")
+    parser.add_argument("--full", action="store_true", help="(已废弃, 默认全量)")
     parser.add_argument("--report", action="store_true", help="只显示上次报告")
     parser.add_argument("--push", action="store_true", help="发送企业微信通知")
     args = parser.parse_args()
@@ -1187,18 +1528,18 @@ def main():
         return
 
     # ── 判断模式 ──
-    is_quick = args.quick or (not args.full)
+    is_quick = args.quick
 
     print(f"{'='*55}")
     print(f"  c1test 统一回测 — {_now()}")
-    print(f"  模式: {'快速(quick)' if is_quick else '全面(full)'}")
+    print(f"  模式: {'快速' if is_quick else '全量'}")
     print(f"{'='*55}")
     print()
 
     phases: Dict[str, Any] = {}
 
     # ── Phase 1: 融合回测 (always) ──
-    print(f"▶ Phase 1/4: 融合回测")
+    print(f"▶ Phase 1/8: 融合回测")
     phases["fusion"] = phase1_fusion()
     f_status = phases["fusion"].get("status", "error")
     if f_status == "ok":
@@ -1206,12 +1547,61 @@ def main():
         # ML 用 fusion_equivalent 替代融合层面子集
         fe = phases.get("ml", {}).get("fusion_equivalent", {}).get("accuracy", None)
         ml_acc = fe if fe else sa.get("ml", {}).get("accuracy", 0)
+        # LY 用独立回测L7口径替代融合层面子集
+        ly_l7 = phases.get("ly", {}).get("overall_l7", {}).get("accuracy", None)
+        ly_acc = ly_l7 if ly_l7 else sa.get("ly", {}).get("accuracy", 0)
         print(f"   ✅ 融合 {sa.get('fusion', {}).get('accuracy', 0)}% | "
-              f"LY {sa.get('ly', {}).get('accuracy', 0)}% | "
+              f"LY {ly_acc}% | "
               f"ML {ml_acc}% | "
               f"AT {sa.get('at', {}).get('accuracy', 0)}%")
     else:
         print(f"   ❌ {phases['fusion'].get('message', '未知错误')}")
+    print()
+
+    # ── Phase 6: WalkForward (always, 轻量DB查询) ──
+    print(f"▶ Phase 6/8: WalkForward 滑动窗口验证")
+    phases["walkforward"] = phase6_walkforward()
+    wf_status = phases["walkforward"].get("status", "error")
+    if wf_status == "ok":
+        wf = phases["walkforward"]
+        print(f"   ✅ IS {wf.get('avg_is_accuracy', 'N/A')}% → OOS {wf.get('avg_oos_accuracy', 'N/A')}% "
+              f"(衰减比 {wf.get('decay_ratio', 'N/A')}%)")
+    elif wf_status == "skipped":
+        print(f"   ⏭️ {phases['walkforward'].get('message', '跳过')}")
+    else:
+        print(f"   ⚠️  WalkForward 异常")
+    print()
+
+    # ── Phase 7: 权重网格扫描 (always, 轻量DB查询) ──
+    print(f"▶ Phase 7/8: 权重网格扫描")
+    phases["weight_sweep"] = phase7_weight_sweep()
+    ws_status = phases["weight_sweep"].get("status", "error")
+    if ws_status == "ok":
+        bw = phases["weight_sweep"].get("best_weights", {})
+        if bw:
+            print(f"   ✅ 最优 ly={bw.get('ly','?')} ml={bw.get('ml','?')} at={bw.get('at','?')} "
+                  f"→ {bw.get('accuracy','?')}% ({bw.get('correct',0)}/{bw.get('total',0)})")
+        else:
+            print(f"   ✅ 扫描完成 (未找到最优行)")
+    elif ws_status == "skipped":
+        print(f"   ⏭️ {phases['weight_sweep'].get('message', '跳过')}")
+    else:
+        print(f"   ⚠️  权重扫描异常")
+    print()
+
+    # ── Phase 8: 模拟交易 (always, 轻量DB查询) ──
+    print(f"▶ Phase 8/8: 模拟交易")
+    phases["simulate"] = phase8_simulate()
+    si_status = phases["simulate"].get("status", "error")
+    if si_status == "ok":
+        si = phases["simulate"]
+        print(f"   ✅ 总收益 {si.get('total_return', 'N/A')}% | "
+              f"年化 {si.get('annual_return', 'N/A')}% | "
+              f"最大回撤 {si.get('max_drawdown', 'N/A')}%")
+    elif si_status == "skipped":
+        print(f"   ⏭️ {phases['simulate'].get('message', '跳过')}")
+    else:
+        print(f"   ⚠️  模拟交易异常")
     print()
 
     # ── Phase 2: LY 独立回测 (only --full) ──
@@ -1230,9 +1620,26 @@ def main():
             print(f"   ⚠️ {phases['ly'].get('message', '跳过')}")
         print()
 
-    # ── Phase 3: ML 独立回测 (always --full 尝试) ──
+    # ── Phase 5: 因子独立回测 (only --full) ──
     if not is_quick:
-        print(f"▶ Phase 3/4: ML 独立回测")
+        print(f"▶ Phase 5/8: 因子独立回测")
+        phases["factor"] = phase5_factor_backtest()
+        fa_status = phases["factor"].get("status", "error")
+        if fa_status == "ok":
+            fa = phases["factor"]
+            print(f"   ✅ 因子准确率: {fa.get('accuracy', 'N/A')}% "
+                  f"({fa.get('total_evaluations', 0)}次评估, {fa.get('stocks_evaluated', 0)}只股票)")
+            if fa.get("conclusion"):
+                print(f"      {fa['conclusion']}")
+        elif fa_status == "skipped":
+            print(f"   ⏭️ {phases['factor'].get('message', '跳过')}")
+        else:
+            print(f"   ⚠️  因子回测异常")
+        print()
+
+    # ── Phase 3: ML 独立回测 (only --full) ──
+    if not is_quick:
+        print(f"▶ Phase 3/8: ML 独立回测")
         phases["ml"] = phase3_ml()
         ml_status = phases["ml"].get("status", "error")
         if ml_status == "ok":
@@ -1248,7 +1655,7 @@ def main():
 
     # ── Phase 4: AT 回测 (always) ──
     if not is_quick:
-        print(f"▶ Phase 4/4: AT 回测 (融合层面)")
+        print(f"▶ Phase 4/8: AT 回测 (融合层面)")
         phases["at"] = phase4_at()
         at_status = phases["at"].get("status", "ok")
         if at_status == "ok":

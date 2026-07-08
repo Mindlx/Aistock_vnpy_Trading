@@ -258,7 +258,7 @@ LY 的设计定位是"纯客观量化信号"——不依赖任何人为主观判
 
 LY 的 `prob_up_ensemble`、`signal_rf`、`strength` 等信息通过 `pipeline.py:_load_ly_signals()` 加载，在 `analyzer.py:3064` 和 `executor.py:666` 两处注入 ML 的 LLM prompt。
 
-**注释原因**: LY 独立 OOS 50.1% 接近随机，注入到准确率 64% 的 ML 系统中理论上会引入噪音。暂注释后运行数日 c1test，对比 ML sentiment 准确率变化，决定是否永久移除。
+**注释原因**: LY 独立 OOS 50.1% 接近随机，注入到准确率 65% 的 ML 系统中理论上会引入噪音。暂注释后运行数日 c1test，对比 ML sentiment 准确率变化，决定是否永久移除。
 
 **相关代码位置**:
 - `systems/MindLynx-Aistock/src/analyzer.py:3064-3070` — 主 prompt 注入

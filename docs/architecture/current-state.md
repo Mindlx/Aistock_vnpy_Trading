@@ -446,7 +446,7 @@ ly的58因子提供体系化覆盖(K线形态/多窗口统计/分位数等)。
 | LY 因子工程与模型架构文档 | 完整报告存至 `docs/subsystems/ly/architecture.md`，含 15TA+Alpha158+c1skill 分析 | 新增文档 |
 | Alpha158 横截面 IC 验证 | 脚本验证横截面 |IC|=0.0158 不优于时序 |IC|=0.0321，结论：信号天花板非方法论问题 | `scripts/research_alpha158_cross_section.py` |
 | 取消 LY _sign 阈值 0.1→0 | LY 样本 161→257，口径统一 | `scripts/backtest.py` |
-| **移除 ML prompt 中 LY 信号注入** | LY OOS 50.1% 注入 ML 64% 系统是噪音，暂注释等待 c1test 验证 | `analyzer.py`, `executor.py` |
+| **移除 ML prompt 中 LY 信号注入** | LY OOS 50.1% 注入 ML 65% 系统是噪音，暂注释等待 c1test 验证 | `analyzer.py`, `executor.py` |
 
 ### 7/6 — LY flat zone 移除 + op_advice 回归融合 + 评测终版
 
