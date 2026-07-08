@@ -11,6 +11,7 @@ ml 因子层实时服务 — 直接从 stock_daily DB 读取 OHLCV 数据，
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import os
@@ -39,19 +40,19 @@ class MLFactorService:
     """ml 因子层服务 — 纯数学计算，无 LLM"""
 
     @staticmethod
+    def _load_stock_codes() -> list[str]:
+        """从 config/stock_pool.csv 自动加载（单源配置）"""
+        _pool_path = Path(__file__).resolve().parent.parent / "config" / "stock_pool.csv"
+        if _pool_path.exists():
+            with open(_pool_path) as _f:
+                return [r["code"] for r in csv.DictReader(_f)]
+        return []
+
+    STOCK_CODES = _load_stock_codes()
+
+    @staticmethod
     def _to_l7_score(composite_score: float) -> float:
-        """将因子引擎 raw composite_score 映射到 L7 [-3, +3] 空间。
-
-        因子 composite_score 经 z-score 横截面归一化，范围约 ±2。
-        用 tanh 软饱和映射至 L7 空间，±2→±2.88（接近 ±3），±0.5→±1.17。
-        """
         return round(3.0 * math.tanh(composite_score * 1.5), 3)
-
-    STOCK_CODES = [
-        "001390", "300652", "600372", "605368",
-        "000592", "603189", "603557", "688202", "601801", "300676",
-        "603127", "000999", "301293",
-    ]
 
     def __init__(self):
         self._engine = None

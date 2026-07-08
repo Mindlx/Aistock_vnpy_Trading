@@ -10,6 +10,7 @@ Alpha158 因子层实时服务 — 使用58个Alpha158因子+LGB模型，
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -36,11 +37,13 @@ OUTPUT_PATH = Path("data/realtime/alpha158_signal.json")
 
 OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-STOCK_CODES = [
-    "001390", "300652", "600372", "605368",
-    "000592", "603189", "603557", "688202", "601801", "300676",
-    "603127", "000999", "301293",
-]
+# 从 config/stock_pool.csv 自动加载（单源配置）
+STOCK_CODES: list[str] = []
+_STOCK_POOL_PATH = PROJECT_ROOT / "config" / "stock_pool.csv"
+if _STOCK_POOL_PATH.exists():
+    with open(_STOCK_POOL_PATH) as _f:
+        for _row in csv.DictReader(_f):
+            STOCK_CODES.append(_row["code"])
 
 
 class Alpha158Service:

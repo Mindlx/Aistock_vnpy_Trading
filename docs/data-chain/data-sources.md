@@ -80,18 +80,18 @@
 
 ### 自选股池管理
 
-目前有 **12 只自选股**，集中配置在以下 6 处（增减时需全部更新）：
+目前有 **13 只自选股**，集中配置在 `config/stock_pool.csv`（单源配置），其余位置自动从 CSV 读取：
 
-| # | 文件 | 修改方式 | 作用域 |
-|---|------|---------|--------|
-| 1 | `config/stock_pool.csv` | 直接编辑 CSV（格式: `代码,名称,SH\|SZ`） | Fusion 引擎 |
-| 2 | `src/mind_stock_config.py` | `A_SHARE_MARKET_MAP` + `DEFAULT_STOCK_CODES` | TA 模块 + 部分服务 |
-| 3 | `systems/MindLynx-Aistock/.env` | `STOCK_LIST` 逗号分隔 | ML 子系统 + 数据仓库 |
-| 4 | `systems/lynx_vnpy/lynx_signal.py` | `STOCK_CODES` + `STOCK_NAMES` | 量化信号系统 |
-| 5 | `services/alpha158_service.py` | `STOCK_CODES` | Alpha158 因子服务 |
-| 6 | `services/ml_factor_service.py` | `STOCK_CODES` | ML 因子服务 |
+| # | 文件 | 读取方式 | 作用域 |
+|:---:|------|---------|--------|
+| 1 | **`config/stock_pool.csv`** | 编辑 CSV（格式: `代码,名称,SH\|SZ`） | **唯一手工维护点** |
+| 2 | `src/mind_stock_config.py` | 自动读 CSV → `A_SHARE_MARKET_MAP` | TA 模块 + 部分服务 |
+| 3 | `systems/MindLynx-Aistock/.env` | `STOCK_LIST`（需与 CSV 同步） | ML 子系统 |
+| 4 | `systems/lynx_vnpy/lynx_signal.py` | 自动读 CSV → `STOCK_CODES` | 量化信号系统 |
+| 5 | `services/alpha158_service.py` | 自动读 CSV → `STOCK_CODES` | Alpha158 因子服务 |
+| 6 | `services/ml_factor_service.py` | 自动读 CSV → `STOCK_CODES` | ML 因子服务 |
 
-2026-06-23 统一修复: 首次发现 4 处未随新增股票更新 (commit 6adfa80)。
+> ⚠️ `.env` 暂未自动读取 CSV（ML venv 启动时序依赖）。新增股票时请同步更新 `.env` 的 `STOCK_LIST`。
 
 ---
 
