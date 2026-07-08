@@ -234,6 +234,35 @@ class MarketAnalyzer:
 
         return ""
 
+    def _get_northbound_flow_text(self) -> str:
+        """获取北向资金流向（Tushare Pro moneyflow_hsgt）。"""
+        try:
+            from src.config import get_config
+            cfg = get_config()
+            if not cfg.tushare_token:
+                return ""
+            from data_provider.tushare_fetcher import _TushareHttpClient
+            client = _TushareHttpClient(cfg.tushare_token, timeout=10)
+            from datetime import datetime, timedelta
+            today = datetime.now().strftime("%Y%m%d")
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+            df = client.query("moneyflow_hsgt", start_date=yesterday, end_date=today, limit=2)
+            if df is None or df.empty:
+                return ""
+            if "trade_date" in df.columns:
+                df = df.sort_values("trade_date", ascending=False)
+            row = df.iloc[0]
+            north = float(row.get("north_money", 0)) / 10000
+            south = float(row.get("south_money", 0)) / 10000
+            parts = ["## 北向资金"]
+            parts.append(f"- 沪深港通北向净流入: {north:+.2f} 亿元")
+            parts.append(f"  (沪股通 {float(row.get('ggt_ss',0))/10000:+.2f}亿 / 深股通 {float(row.get('ggt_sz',0))/10000:+.2f}亿)")
+            parts.append(f"- 南向净流入: {south:+.2f} 亿元")
+            return "\n".join(parts)
+        except Exception as e:
+            logger.debug("[大盘] 北向资金获取失败: %s", e)
+        return ""
+
     def _get_eastmoney_rating_text(self) -> str:
         """读取东方财富评级缓存，返回全市场情绪统计（供大盘复盘"四"注入）。"""
         try:
@@ -1739,10 +1768,14 @@ Market conditions can change quickly. The data above is for reference only and d
         stock_data = self._load_stock_pool_data()
         logger.info(f"[大盘] 自选股数据: {'已加载' if stock_data else '无数据'}")
 
-        # 3c. 获取板块资金流向数据（板块级主力净流入排行）
+        # 3c. 获取板块资金流向数据（板块级主力净流入排行）+ 北向资金
         capital_flow_text = self._get_sector_capital_flow_text()
         if capital_flow_text:
             logger.info("[大盘] 板块资金流向: 已加载")
+        northbound_text = self._get_northbound_flow_text()
+        if northbound_text:
+            logger.info("[大盘] 北向资金: 已加载")
+            capital_flow_text = (capital_flow_text or "") + "\n\n" + northbound_text
 
         # 3d. 获取东方财富评级数据（市场情绪+个股映射）
         eastmoney_text = self._get_eastmoney_rating_text()
