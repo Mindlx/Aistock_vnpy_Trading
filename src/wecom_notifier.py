@@ -235,7 +235,7 @@ class WeComNotifier:
         ly_ok = sum(1 for r in valid if r.get("lynx_valid", False))
         ml_ok = sum(1 for r in valid if r.get("mindlynx_valid", False))
         at_ok = sum(1 for r in valid if r.get("tradingagent_valid", False))
-        lines.append(f"📡ly{ly_ok}/12｜ml{ml_ok}/12｜at{at_ok}/12")
+        lines.append(f"📡ly{ly_ok}/{len(valid)}｜ml{ml_ok}/{len(valid)}｜at{at_ok}/{len(valid)}")
         return "\n".join(lines)
 
     def push_daily_decision(self, results: List[Dict[str, Any]], date: Optional[str] = None,
