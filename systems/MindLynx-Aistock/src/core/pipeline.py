@@ -2902,11 +2902,12 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                         old = rank_data[code][fn]
                         rank_data[code][fn] = (old[0], rank)
                 for r in all_results:
-                    lines_rank = ["", "### 横截面排名 (跨12只)"]
+                    total_n = len(all_results)
+                    lines_rank = ["", f"### 横截面排名 (跨{total_n}只)"]
                     for fd in engine.factors:
                         z, rank = rank_data[r.code].get(fd.name, (0.0, 0))
                         arrow = "↑" if z > 0.1 else ("↓" if z < -0.1 else "→")
-                        lines_rank.append(f"  {arrow} {fd.display_name}: {rank}/12")
+                        lines_rank.append(f"  {arrow} {fd.display_name}: {rank}/{total_n}")
                     self._factor_profiles[r.code] += "\n" + "\n".join(lines_rank)
             # F6 fix: add computation timestamp to factor profiles
             from datetime import datetime as _dt
