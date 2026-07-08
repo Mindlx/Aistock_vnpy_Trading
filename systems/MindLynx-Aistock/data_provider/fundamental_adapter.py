@@ -446,6 +446,38 @@ class AkshareFundamentalAdapter:
             logger.debug("[AkshareFundamentalAdapter] tushare capital flow fallback failed: %s", exc)
             return None
 
+    def _try_tushare_financial(self, stock_code: str) -> dict | None:
+        """尝试 Tushare Pro fina_indicator 获取财务指标。"""
+        try:
+            from src.config import get_config
+            cfg = get_config()
+            if not cfg.tushare_token:
+                return None
+            from .tushare_fetcher import _TushareHttpClient
+            client = _TushareHttpClient(cfg.tushare_token, timeout=15)
+            market = "SH" if stock_code[:1] in ("6", "9") else "SZ"
+            ts_code = f"{stock_code}.{market}"
+            df = client.query("fina_indicator", ts_code=ts_code)
+            if df is None or df.empty:
+                return None
+            if "end_date" in df.columns:
+                df = df.sort_values("end_date", ascending=False)
+            row = df.iloc[0]
+            return {
+                "revenue_yoy": _safe_float(row.get("revenue_yoy")),
+                "net_profit_yoy": _safe_float(row.get("dt_netprofit_yoy")),
+                "roe": _safe_float(row.get("roe")),
+                "gross_margin": _safe_float(row.get("gross_profit_margin")),
+                "report_date": str(row.get("end_date", ""))[:10] if row.get("end_date") else None,
+                "revenue": _safe_float(row.get("revenue")),
+                "net_profit_parent": _safe_float(row.get("net_profit_is")),
+                "operating_cash_flow": _safe_float(row.get("free_cash_flow")),
+                "eps": _safe_float(row.get("basic_eps")),
+            }
+        except Exception as exc:
+            logger.debug("[AkshareFundamentalAdapter] tushare fina_indicator fallback failed: %s", exc)
+            return None
+
     def get_fundamental_bundle(self, stock_code: str) -> dict[str, Any]:
         """
         Return normalized fundamental blocks from AkShare with partial tolerance.
@@ -459,8 +491,30 @@ class AkshareFundamentalAdapter:
             "errors": [],
         }
 
-        # Financial indicators
-        fin_df, fin_source, fin_errors = self._call_df_candidates(
+        # ── Financial indicators (优先 Tushare fina_indicator) ──
+        tushare_fin = self._try_tushare_financial(stock_code)
+        if tushare_fin is not None:
+            result["growth"] = {
+                "revenue_yoy": tushare_fin.get("revenue_yoy"),
+                "net_profit_yoy": tushare_fin.get("net_profit_yoy"),
+                "roe": tushare_fin.get("roe"),
+                "gross_margin": tushare_fin.get("gross_margin"),
+            }
+            fin_report = {
+                "report_date": tushare_fin.get("report_date"),
+                "revenue": tushare_fin.get("revenue"),
+                "net_profit_parent": tushare_fin.get("net_profit_parent"),
+                "operating_cash_flow": tushare_fin.get("operating_cash_flow"),
+                "roe": tushare_fin.get("roe"),
+            }
+            if any(v is not None for v in fin_report.values()):
+                result["earnings"]["financial_report"] = fin_report
+            result["source_chain"].append("growth:tushare_fina_indicator")
+
+        # ── Tushare 失败 → akshare 降级（仅在 Tushare 未提供数据时）──
+        tushare_data = tushare_fin is not None and any(v is not None for v in tushare_fin.values())
+        if not tushare_data:
+            fin_df, fin_source, fin_errors = self._call_df_candidates(
             [
                 ("stock_financial_abstract", {"symbol": stock_code}),
                 ("stock_financial_analysis_indicator", {"symbol": stock_code}),
