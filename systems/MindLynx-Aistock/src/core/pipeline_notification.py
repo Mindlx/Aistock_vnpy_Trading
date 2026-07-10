@@ -219,7 +219,50 @@ class NotificationMixin:
                         if report_type != ReportType.BRIEF and len(dashboard_content) > 500:
                             try:
                                 from src.md2img import markdown_to_pdf
-                                pdf_data = markdown_to_pdf(dashboard_content, font_size="18pt")
+                                # 生成 PDF 专用 Markdown（非 WeChat 压缩版）
+                                _now_str = _dt.now().strftime("%Y-%m-%d %H:%M")
+                                _pdf_lines = [f"# 整点分析报告", f"**{_now_str}** | 共分析 {len(results)} 只股票\n", "---\n"]
+                                # 统计摘要
+                                _buy_r = [r for r in results if getattr(r, "sentiment_score", 50) >= 55]
+                                _sell_r = [r for r in results if getattr(r, "sentiment_score", 50) <= 45]
+                                _neutral_r = [r for r in results if 45 < getattr(r, "sentiment_score", 50) < 55]
+                                _pdf_lines.append("## 综合建议")
+                                _pdf_lines.append(f"| 建议 | 数量 | 股票 |")
+                                _pdf_lines.append(f"|------|:----:|------|")
+                                if _buy_r:
+                                    _names = ", ".join(getattr(r, "name", r.code) for r in _buy_r)
+                                    _pdf_lines.append(f"| 🟢 买入 | {len(_buy_r)} | {_names} |")
+                                if _neutral_r:
+                                    _names = ", ".join(getattr(r, "name", r.code) for r in _neutral_r[:5])
+                                    _extra = f"...等{len(_neutral_r)}只" if len(_neutral_r) > 5 else ""
+                                    _pdf_lines.append(f"| ➡️ 持有 | {len(_neutral_r)} | {_names}{_extra} |")
+                                if _sell_r:
+                                    _names = ", ".join(getattr(r, "name", r.code) for r in _sell_r)
+                                    _pdf_lines.append(f"| 🔴 卖出 | {len(_sell_r)} | {_names} |")
+                                _pdf_lines.append("")
+                                # 逐只分析
+                                _pdf_lines.append("## 个股详情\n")
+                                for r in results:
+                                    _score = getattr(r, "sentiment_score", 50)
+                                    _name = getattr(r, "name", r.code)
+                                    _op = getattr(r, "operation_advice", "") or ""
+                                    _trend = getattr(r, "trend_prediction", "") or ""
+                                    _s = "🟢" if _score >= 55 else ("🔴" if _score <= 45 else "➡️")
+                                    _dash = getattr(r, "dashboard", None) or {}
+                                    _buy_pt = _dash.get("execution_plan", {}).get("entry_price", "") if isinstance(_dash, dict) else ""
+                                    _stop = _dash.get("execution_plan", {}).get("stop_loss", "") if isinstance(_dash, dict) else ""
+                                    _target = _dash.get("execution_plan", {}).get("target", "") if isinstance(_dash, dict) else ""
+                                    _pdf_lines.append(f"### {_s} {_name} (评分{_score})")
+                                    _pdf_lines.append(f"- **操作建议**: {_op}")
+                                    _pdf_lines.append(f"- **趋势判断**: {_trend}")
+                                    if _buy_pt or _stop or _target:
+                                        _pts = []
+                                        if _buy_pt: _pts.append(f"建仓{_buy_pt}")
+                                        if _stop: _pts.append(f"止损{_stop}")
+                                        if _target: _pts.append(f"目标{_target}")
+                                        _pdf_lines.append(f"- **执行方案**: {' | '.join(_pts)}")
+                                    _pdf_lines.append("")
+                                pdf_data = markdown_to_pdf("\n".join(_pdf_lines), font_size="16pt")
                                 if pdf_data:
                                     _date_str = _dt.now().strftime("%Y%m%d_%H%M")
                                     _pdf_name = f"{_date_str}_整点分析报告.pdf"
