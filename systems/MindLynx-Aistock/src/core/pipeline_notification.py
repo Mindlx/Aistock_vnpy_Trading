@@ -228,16 +228,20 @@ class NotificationMixin:
                                     _buy = [l for l in _lines if "🟢" in l and "买入" in l]
                                     _sell = [l for l in _lines if "🔴" in l and "卖出" in l]
                                     _total = next((l for l in _lines if "共分析" in l), "")
-                                    _lines_brief = [f"整点分析 ({len(results)}只)"]
-                                    if _total:
-                                        _lines_brief.append(_total.strip("> "))
+                                    _buy_names = []
                                     if _buy:
-                                        _names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _buy[:5]]
-                                        _lines_brief.append(f"建议买入: {', '.join(_names)}")
+                                        _buy_names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _buy[:5]]
+                                    _sell_names = []
                                     if _sell:
-                                        _names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _sell[:5]]
-                                        _lines_brief.append(f"建议卖出: {', '.join(_names)}")
-                                    _lines_brief.append("完整报告见附件PDF")
+                                        _sell_names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _sell[:5]]
+                                    _brief_parts = [f"整点分析 ({len(results)}只)"]
+                                    if _total:
+                                        _total_clean = _total.strip("> ").replace("🟢","").replace("🟡","").replace("🔴","").replace("⚪","")
+                                        _brief_parts.append(_total_clean)
+                                    _brief_parts.append(f"买入: {', '.join(_buy_names) if _buy_names else '无'}")
+                                    _brief_parts.append(f"卖出: {', '.join(_sell_names) if _sell_names else '无'}")
+                                    _brief_parts.append("完整报告见附件PDF")
+                                    if self.notifier.send_to_wechat("\n".join(_brief_parts)):
                                     if self.notifier.send_to_wechat("\n".join(_lines_brief)):
                                         return self.notifier.send_to_wechat_file(pdf_data, _pdf_name)
                             except Exception as e:
