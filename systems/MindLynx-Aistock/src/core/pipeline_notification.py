@@ -237,9 +237,9 @@ class NotificationMixin:
                                     _neutral = len(results) - len(_buy) - len(_sell)
                                     _now_str = _dt.now().strftime("%H:%M")
                                     _brief = (
-                                        f"👾 {_now_str} 整点分析 ({len(results)})\n"
-                                        f"共{len(results)}只自选股票，分析建议买入{len(_buy)}-{', '.join(_buy_names)}；"
-                                        f"卖出{len(_sell)}-{', '.join(_sell_names)}；"
+                                        f"👾 {_now_str} 整点分析\n"
+                                        f"本次共分析{len(results)}只自选股票，建议买入{len(_buy)}只-{', '.join(_buy_names)}；"
+                                        f"卖出{len(_sell)}只-{', '.join(_sell_names)}；"
                                         f"中立持有{_neutral}只。\n"
                                         f"完整报告见附件PDF"
                                     )
