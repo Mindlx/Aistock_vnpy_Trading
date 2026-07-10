@@ -80,13 +80,13 @@ def main(compact: bool = False):
         rows_data.append((label, tot, f_ok, f_acc, ly_ok, ly_acc, ml_ok, ml_acc, tot, 0))
 
     # 格式化输出
-    print(f"{'场景':<20s} {'n':>5s} {'融合准确率':>14s} {'LY准确率':>12s} {'ML准确率':>12s}")
-    print("-" * 68)
+    print(f"{'场景':<20s} {'n':>5s} {'融合准确率':>14s}")
+    print("-" * 42)
     for label, tot, f_ok, f_acc, ly_ok, ly_acc, ml_ok, ml_acc, _, _ in rows_data:
         if tot == 0:
-            print(f"{label:<20s} {'0':>5s} {'-':>14s} {'-':>12s} {'-':>12s}")
+            print(f"{label:<20s} {'0':>5s} {'-':>14s}")
             continue
-        print(f"{label:<20s} {tot:>5d} {pct_str(f_ok, tot):>14s} {pct_str(ly_ok, tot):>12s} {pct_str(ml_ok, tot):>12s}")
+        print(f"{label:<20s} {tot:>5d} {pct_str(f_ok, tot):>14s}")
 
     # ── 同向细分 ──
     print()
@@ -179,8 +179,8 @@ def main(compact: bool = False):
     # ── 当前权重 vs 建议 ──
     print()
     print("=== 当前 vs 建议 ===")
-    current = (0.37, 0.50)
-    print(f"当前权重: LY={current[0]}, ML={current[1]} (AT=0.00)")
+    current = (0.20, 0.55, 0.30)
+    print(f"当前权重: LY={current[0]}, ML={current[1]} (AT={current[2]})")
 
     # 按场景模拟
     print()

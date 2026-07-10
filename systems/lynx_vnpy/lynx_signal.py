@@ -314,42 +314,18 @@ def predict_signal(df: pd.DataFrame, stock_code: str,
     }
 
 def _l7_score(prob_up: float) -> float:
-    """Map prob_up (0-1) to L7 score (-3~+3) — LY专属经验映射。
+    """Map prob_up (0-1) to L7 score (-3~+3) — 线性缩放。
 
-    基于 bt_predictions 数据验证的 LY prob_up 实际表现校准。
-    不使用 normalizer.normalize_lynx() (该映射为ML子系统校准,flat zone过宽)。
+    2026-07-09: 从锚点映射改为线性缩放，与 normalizer.normalize_lynx() 统一。
+    原锚点表校准在 12/18 只股票上降低了准确率 (49.4% vs raw 51.7%)，
+    因此退回直接使用 prob_up 的方向信息。
 
-    锚点依据:
-      prob_up < 25%  → 数据稀少,保守看空
-      25%~35%        → 反指区域(76.5%上涨率),但数据量有限,保守处理
-      35%~42%        → 38.7%上涨,适度看空
-      42%~45%        → 33.3%上涨,偏空,不再归为中性
-      45%~50%        → 窄flat zone(比fusion引擎的42-52%更紧)
-      50%~52%        → 出flat,谨慎看多
-      52%~59%        → ML标记为"反指"但该数据源于ML,对LY不适用
-      59%~65%        → 66.7%上涨,看多
-      > 65%          → 63-66%上涨,强烈看多
+    映射: prob_up (0~1) → L7 score (-3~+3)
+      prob_up=0   → -3.00
+      prob_up=0.5 →  0.00
+      prob_up=1.0 → +3.00
     """
-    pct = prob_up * 100.0
-    # (prob_up%, L7_score) 锚点表 (2026-07-06: 移除 flat zone, 单点中性 @45)
-    anchors = [
-        (0, -3.00),     # 钳位下限
-        (25, -2.00),    # 看空(低置信)
-        (35, -1.00),    # 谨慎看空
-        (45, 0.00),     # 单点中性 (原 flat zone 45-50 已移除)
-        (59, 1.00),     # 看多
-        (65, 2.00),     # 看多(较强)
-        (75, 3.00),     # 强烈看多
-        (100, 3.00),    # 钳位上限
-    ]
-    for i in range(len(anchors) - 1):
-        x1, y1 = anchors[i]
-        x2, y2 = anchors[i + 1]
-        if x1 <= pct <= x2:
-            if x2 == x1:
-                return round(y1, 2)
-            return round(y1 + (y2 - y1) * (pct - x1) / (x2 - x1), 2)
-    return 0.0
+    return round(prob_up * 6.0 - 3.0, 2)
 
 def _l7_label(score: float) -> str:
     """L7 score → 中文标签，复用normalizer的L7_SIGNAL_NAMES"""

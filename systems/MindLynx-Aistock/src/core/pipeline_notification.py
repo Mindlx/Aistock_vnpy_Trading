@@ -228,16 +228,16 @@ class NotificationMixin:
                                     _buy = [l for l in _lines if "🟢" in l and "买入" in l]
                                     _sell = [l for l in _lines if "🔴" in l and "卖出" in l]
                                     _total = next((l for l in _lines if "共分析" in l), "")
-                                    _lines_brief = [f"📊 整点分析 ({len(results)}只)"]
+                                    _lines_brief = [f"整点分析 ({len(results)}只)"]
                                     if _total:
                                         _lines_brief.append(_total.strip("> "))
                                     if _buy:
                                         _names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _buy[:5]]
-                                        _lines_brief.append(f"🟢 建议买入: {', '.join(_names)}")
+                                        _lines_brief.append(f"建议买入: {', '.join(_names)}")
                                     if _sell:
                                         _names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _sell[:5]]
-                                        _lines_brief.append(f"🔴 建议卖出: {', '.join(_names)}")
-                                    _lines_brief.append("📎 完整报告见附件PDF")
+                                        _lines_brief.append(f"建议卖出: {', '.join(_names)}")
+                                    _lines_brief.append("完整报告见附件PDF")
                                     if self.notifier.send_to_wechat("\n".join(_lines_brief)):
                                         return self.notifier.send_to_wechat_file(pdf_data, _pdf_name)
                             except Exception as e:

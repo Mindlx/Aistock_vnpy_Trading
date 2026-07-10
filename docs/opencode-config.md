@@ -23,8 +23,7 @@
 | Provider | 模型 | 接入方式 | 速度 | 适合任务 |
 |:---------|:-----|:---------|:----:|:---------|
 | `deepseek-flash` | v4-flash | API (api.deepseek.com) | ~100-200 tok/s | 🔵 **主会话调度**、快速响应 |
-| `gpu1-ornith` | Ornith 1.0 35B (GPU1) | llama.cpp, port 15433 | **~147 tok/s** | 🟢 代码审查、架构决策、复杂调试 |
-| `gpu0-qwen` | Qwen3.6-35B (GPU0) | llama.cpp, port 11434 | **~143 tok/s** | 🟢 文档分析、策略讨论、通用任务 |
+| `gpu1-sglang-selode` | Qwen3.6-35B-Selode | SGLang, port 15433 | **~121 tok/s** | 🟢 代码补全、代码审查、通用任务 |
 | `deepseek-pro` | v4-pro | API (api.deepseek.com) | ~50-100 tok/s | 🔴 高难度推理、长上下文 |
 
 ## 系统指令
@@ -44,8 +43,8 @@
 |:------|:-----|:------|
 | **build** (默认) | `deepseek-flash` | 主会话，快速响应、工具协调 |
 | **plan** | `deepseek-pro` | 规划模式，高难度推理、架构决策 |
-| **explore** | `gpu1-ornith` | 探索模式，代码审查、技术调研 |
-| **general** (subagent) | `gpu0-qwen` | 通用子任务，文档分析、并行研究 |
+| **explore** | `gpu1-sglang-selode` | 探索模式，代码审查、技术调研 |
+| **general** (subagent) | `gpu1-sglang-selode` | 通用子任务 |
 
 ## 其他重要配置
 

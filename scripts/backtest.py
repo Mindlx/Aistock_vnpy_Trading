@@ -686,8 +686,7 @@ def cmd_report(detail: bool = False) -> None:
 
     print(f"\n  📈 方向准确率 (T+1)")
     print("     {:12s} {:>6s}/{:<6s}".format("系统", "正确", ""))
-    for name, field in [("融合", "fusion"), ("Lynx", "ly"),
-                         ("MindLynx", "ml"), ("TradingAgent", "at")]:
+    for name, field in [("融合", "fusion")]:
         c = stats[f"{field}_correct"]
         t = stats[f"{field}_total"]
         pct = stats[f"{field}_pct"]

@@ -167,20 +167,17 @@ class SignalNormalizer:
     @classmethod
     def normalize_lynx(cls, signal: str, prob_up: float) -> Tuple[float, bool]:
         """
-        ly 归一化: 分段线性映射（v3.1，替代原 logit+tanh）。
+        ly 归一化: raw prob_up → L7 score (线性缩放)。
 
-        锚点（设计目标 ×3.75 缩放至 [-3, +3]）:
-          prob_up  0% → L7 -3.00 (钳位)
-          prob_up 25% → L7 -2.06 (S6 看空)
-          prob_up 35% → L7 -1.13 (S5 谨慎看空)
-          prob_up 42% → L7  0.00 (S4 中性边界)
-          prob_up 52% → L7  0.00 (S4 中性边界, flat zone)
-          prob_up 59% → L7 +1.00 (S3 谨慎看多, L7阈值上调后首个看多信号)
-          prob_up 65% → L7 +2.06 (S2 看多)
-          prob_up 75% → L7 +3.00 (S1 强烈看多, 其后钳位)
+        2026-07-09: 从锚点映射改为线性缩放。
+        原锚点表校准在 12/18 只股票上降低了准确率 (49.4% vs raw 51.7%)，
+        因此退回直接使用 prob_up 的方向信息。
 
-        flat zone 42~52%: prob_up 在此区间的信号无方向性倾向。
-        prob_up 52~59% 经数据验证为反指(真实上涨率<40%)，仍归中性。
+        映射方式: prob_up (0~100) → L7 score (-3~+3)
+          prob_up=0   → -3.00
+          prob_up=50  →  0.00  (方向分界点)
+          prob_up=100 → +3.00
+
         参数:
             signal: 原始信号（兼容旧格式，当前仅用于有效性判断）
             prob_up: 上涨概率 0-100
@@ -191,26 +188,9 @@ class SignalNormalizer:
         if p < 0 or p > 100:
             return 0.0, False
 
-        # prob_up → L7 锚点表 (2026-07-08: 与 _l7_score() 统一)
-        anchors = [
-            (0, -3.00),    # 钳位下限
-            (25, -2.00),   # 看空(低置信)
-            (35, -1.00),   # 谨慎看空
-            (45, 0.00),    # 单点中性 (原 flat zone 42-52 已移除)
-            (59, 1.00),    # 看多 (基于LY实际数据: 66.7%上涨率)
-            (65, 2.00),    # 看多(较强)
-            (75, 3.00),    # 强烈看多
-            (100, 3.00),   # 钳位上限
-        ]
-        for i in range(len(anchors) - 1):
-            x1, y1 = anchors[i]
-            x2, y2 = anchors[i + 1]
-            if x1 <= p <= x2:
-                if x2 == x1:
-                    return y1, True
-                score = y1 + (y2 - y1) * (p - x1) / (x2 - x1)
-                return score, True
-        return 0.0, False
+        # raw prob_up → L7 线性映射 (-3 ~ +3)
+        score = (p / 100.0) * 6.0 - 3.0
+        return score, True
 
     # ────────── ml: 操作建议归一化 ──────────
 

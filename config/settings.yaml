@@ -115,7 +115,7 @@ backtest:
     lynx_vnpy: 0.20
     mindlynx: 0.55
     tradingagent: 0.30
-  weight_search_range:      # 网格搜索范围（AT已移除，权重归零）
+  weight_search_range:      # 网格搜索范围（含历史搜索点，当前实际值见上方 weights）
     lynx_vnpy: [0.2, 0.3, 0.37, 0.4]
     mindlynx: [0.3, 0.4, 0.50, 0.55]
   report:

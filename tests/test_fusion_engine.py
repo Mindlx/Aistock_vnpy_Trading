@@ -46,12 +46,13 @@ else:
     print(f"❌ 全部无效: cnt={cnt}")
     errors += 1
 
-# AT 被移除后(tradingagent=0.00)不应出现
+# AT 恢复后(tradingagent=0.30)应有正常权重
 w, cnt, degraded = engine._compute_adjusted_weights(True, True, True)
-if w.get("tradingagent", 1) == 0.0:
-    print(f"✅ AT 权重已归零: {w}")
+ta_weight = w.get("tradingagent", 0)
+if ta_weight > 0:
+    print(f"✅ AT 权重正常: tradingagent={ta_weight:.2f}, all={w}")
 else:
-    print(f"ℹ️  AT 权重不为零 (不影响, 由主权重决定): {w}")
+    print(f"ℹ️  AT 权重为零 (可能与配置有关): {w}")
 
 # ── Test 2: _detect_disagreement ──
 print()

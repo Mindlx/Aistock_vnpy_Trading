@@ -49,9 +49,9 @@
 
 | 缩写 | 全称 | 性质 | 方法 | 频率 | 融合权重 |
 |:----:|------|:----:|------|:----:|:-------:|
-| **ly** | lynx_vnpy | **纯客观** | RF + LGB + 15技术指标 + Alpha158(58因子) | 日频 15:15 | **0.37** |
-| **ml** | MindLynx-Aistock | **半客观** | 12纯数学因子 + 策略Agent + LLM推理（注入客观数据） | 日频/实时 | **0.50** |
-| **at** | mind_TradingAgent | **纯主观** | 多智能体LLM辩论 (LangGraph, DeepSeek) | 09:31/13:00 | **0.00** |
+| **ly** | lynx_vnpy | **纯客观** | RF + LGB + 15技术指标 + Alpha158(58因子) | 日频 15:15 | **0.20** |
+| **ml** | MindLynx-Aistock | **半客观** | 12纯数学因子 + 策略Agent + LLM推理（注入客观数据） | 日频/实时 | **0.55** |
+| **at** | mind_TradingAgent | **纯主观** | 多智能体LLM辩论 (LangGraph, DeepSeek) | 09:31/13:00 | **0.30** |
 
 来源: `config/settings.yaml:weights` 区块。
 
@@ -127,9 +127,9 @@ realtime_fusion.py → data/realtime/ 文件交换区 → wecom_notifier.py
 
 | 系统 | 权重 | 依据 |
 |------|:----:|------|
-| mindlynx | **0.50** | 62.2% (p=0.010) 唯一统计显著系统 |
-| lynx_vnpy | **0.37** | 54.0% (p=0.373) 正向但不显著 |
-| tradingagent | **0.00** | 48.2% (p=0.745) 纯随机噪音, 归零 |
+| mindlynx | **0.55** | 62.2% (p=0.010) 唯一统计显著系统 |
+| lynx_vnpy | **0.20** | 54.0% (p=0.373) 正向但不显著 |
+| tradingagent | **0.30** | 53.9% 权重扫一扫后确认为最优值 |
 
 来源: `config/settings.yaml`
 
@@ -308,7 +308,7 @@ c1test.py (编排器)
 | 决策 | 内容 | 依据 |
 |------|------|------|
 | **零侵入** | 融合引擎不修改子系统代码 | 通过 import/文件/DB 接口读取 |
-| **AT权重归零** | 0.00, 保留运行积累数据 | 48.2% p=0.745 纯随机噪音 |
+| **AT权重恢复** | 0.30, 权重扫一扫后确认为最优值 | 53.9% |
 | **精度校准 v4.0** | sentiment_score 3值→7值非对称 | 看空89-100% vs 看多38-56% |
 | **分歧标记代替惩罚** | 分歧时不扣分, 只标记 | 分歧时ML 37.9%→51.0% |
 | **ML 80/20偏向** | sentiment_score 80% + op_advice 20% | 67.7% vs 27.5% |
@@ -325,7 +325,7 @@ c1test.py (编排器)
 | ML op_advice 27.5% | ✅ **已关闭** — op_advice 完全退出 L7 裁决 (42c01fd) | 不再影响融合 |
 | 资金流数据偶有缺失 | ✅ **已修复** — 3轮补丁 (tushare优先+多API fallback+数据湖) | 数据完整度恢复 |
 | 融合 57.7% | ⏳ 基线值, 所有修复后需重新跑 c1test | 理论上应改善 |
-| AT权重归零 | ✅ 提示词已重写(A股适配), 权重0.00积累数据 | 不参与当前融合 |
+| AT权重恢复 | ✅ 提示词已重写(A股适配), 权重0.30 | 参与融合加权 |
 
 ### 10.1 关键发现：ML"半客观割裂"（40pp 语义差距的根本原因）— ✅ 已解决
 
@@ -378,7 +378,7 @@ sentiment_score 继续保持快速评分路径，operation_advice 通过获得�
 
 | 声明 | 验证来源 | 结论 |
 |------|---------|:----:|
-| 权重 ml=0.50 ly=0.37 at=0.00 | `config/settings.yaml:weights` | ✅ |
+| 权重 ml=0.55 ly=0.20 at=0.30 | `config/settings.yaml:weights` | ✅ |
 | fusion_mode=dual | `config/settings.yaml:fusion_mode` | ✅ |
 | 三种融合模式 (linear/bayesian/dual) | `src/fusion_engine.py` | ✅ |
 | 零侵入读取三系统 | `src/data_loader.py` docstring + 代码 | ✅ |
