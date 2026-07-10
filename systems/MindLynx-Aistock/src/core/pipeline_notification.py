@@ -244,7 +244,6 @@ class NotificationMixin:
                                         f"完整报告见附件PDF"
                                     )
                                     if self.notifier.send_to_wechat(_brief):
-                                    if self.notifier.send_to_wechat("\n".join(_lines_brief)):
                                         return self.notifier.send_to_wechat_file(pdf_data, _pdf_name)
                             except Exception as e:
                                 logger.warning(f"整点分析 PDF 生成失败, 回退到文本: {e}")
