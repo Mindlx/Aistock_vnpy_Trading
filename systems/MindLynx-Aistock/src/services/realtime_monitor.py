@@ -443,7 +443,7 @@ class RealtimeMonitorService:
         self,
         config: Config | None = None,
         *,
-        briefing_interval: int = 1380,
+        briefing_interval: int,
         atr_multipliers: list[float] = None,
         volume_ratio_threshold: float = 3.0,
         price_change_threshold: float = 2.0,
@@ -1110,7 +1110,7 @@ class RealtimeMonitorService:
         from src.core.trading_calendar import get_market_now as _get_mkt_now
         _mkt = _get_mkt_now("cn")
         if _mkt.hour < 12:
-            _target = _mkt.replace(hour=9, minute=37, second=0, microsecond=0)
+            _target = _mkt.replace(hour=9, minute=40, second=0, microsecond=0)
         else:
             _target = _mkt.replace(hour=13, minute=7, second=0, microsecond=0)
         self._last_briefing_time = _target.timestamp() - self._briefing_interval

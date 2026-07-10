@@ -1501,7 +1501,7 @@ class Config(LLMConfig, NotificationConfig, DataConfig, AnalysisConfig):
             realtime_monitor_daemon_enabled=os.getenv("REALTIME_MONITOR_DAEMON_ENABLED", "false").lower() == "true",
             realtime_monitor_briefing_interval=parse_env_int(
                 os.getenv("REALTIME_MONITOR_BRIEFING_INTERVAL"),
-                900,
+                1740,  # 29分钟: 盘中简报间隔 (2026-07-10: 唯一源, 避开整点分析/大盘复盘)
                 field_name="REALTIME_MONITOR_BRIEFING_INTERVAL",
                 minimum=60,
             ),
