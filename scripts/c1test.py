@@ -1653,7 +1653,7 @@ def main():
     _ly = _subs.get("ly", {}).get("accuracy_pct", "?")
     _ml = _subs.get("ml", {}).get("accuracy_pct", "?")
     _at = _subs.get("at", {}).get("accuracy_pct", "?")
-    print(f"\n  📊 子系统准确率 (独立回测口径): LY {_ly}% | ML {_ml}% | AT {_at}%")
+    print(f"\n  📊 融合 {_fusion}% | LY {_ly}% | ML {_ml}% | AT {_at}% (独立回测)")
 
     # 告警摘要
     alerts = report.get("changes", {}).get("alerts", [])
