@@ -1647,6 +1647,14 @@ def main():
     )
     print(f"   ✅ State: {LAST_RUN_FILE.relative_to(PROJECT_ROOT)}")
 
+    # 统一口径控制台输出（覆盖 Phase 1 的融合原始数据）
+    _subs = report.get("subsystems", {})
+    _fusion = report.get("fusion_raw", {}).get("subsystem_accuracy", {}).get("fusion", {}).get("accuracy", 0)
+    _ly = _subs.get("ly", {}).get("accuracy_pct", "?")
+    _ml = _subs.get("ml", {}).get("accuracy_pct", "?")
+    _at = _subs.get("at", {}).get("accuracy_pct", "?")
+    print(f"\n  📊 子系统准确率 (独立回测口径): LY {_ly}% | ML {_ml}% | AT {_at}%")
+
     # 告警摘要
     alerts = report.get("changes", {}).get("alerts", [])
     if alerts:
