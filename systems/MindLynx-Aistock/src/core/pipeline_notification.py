@@ -208,11 +208,32 @@ class NotificationMixin:
                 if NotificationChannel.WECHAT in channels:
 
                     def _send_wechat_report() -> bool:
+                        from datetime import datetime as _dt
                         dashboard_content = (
                             self.notifier.generate_brief_report(results)
                             if report_type == ReportType.BRIEF
                             else self.notifier.generate_wechat_dashboard(results)
                         )
+
+                        # FULL 报告（整点分析）改为 PDF 推送：简短摘要 + PDF 附件
+                        if report_type != ReportType.BRIEF and len(dashboard_content) > 500:
+                            try:
+                                from src.md2img import markdown_to_pdf
+                                pdf_data = markdown_to_pdf(dashboard_content, font_size="18pt")
+                                if pdf_data:
+                                    _date_str = _dt.now().strftime("%Y%m%d_%H%M")
+                                    _pdf_name = f"{_date_str}_整点分析报告.pdf"
+                                    # 生成简讯摘要（取开头几行 + 结尾的 outlook）
+                                    _lines = dashboard_content.split("\n")
+                                    _summary_lines = [l for l in _lines if l.strip() and len(l) > 10]
+                                    _summary = "\n".join(_summary_lines[:3]) if len(_summary_lines) >= 3 else ""
+                                    _outlook = next((l for l in reversed(_lines) if "盘面" in l or "综合" in l or "展望" in l or "建议" in l), "")
+                                    _brief = f"📊 整点分析报告已生成 ({len(results)}只)\n\n{_summary}\n{_outlook}\n\n📎 完整报告见附件PDF"
+                                    if self.notifier.send_to_wechat(_brief):
+                                        return self.notifier.send_to_wechat_file(pdf_data, _pdf_name)
+                            except Exception as e:
+                                logger.warning(f"整点分析 PDF 生成失败, 回退到文本: {e}")
+
                         logger.info(f"企业微信仪表盘长度: {len(dashboard_content)} 字符")
                         logger.debug(f"企业微信推送内容:\n{dashboard_content}")
                         return self.notifier.send_to_wechat(dashboard_content)
