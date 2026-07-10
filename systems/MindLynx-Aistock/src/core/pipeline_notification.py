@@ -223,13 +223,22 @@ class NotificationMixin:
                                 if pdf_data:
                                     _date_str = _dt.now().strftime("%Y%m%d_%H%M")
                                     _pdf_name = f"{_date_str}_整点分析报告.pdf"
-                                    # 生成简讯摘要（取开头几行 + 结尾的 outlook）
+                                    # 提取简讯: 统计 + 建议买入 + 建议卖出
                                     _lines = dashboard_content.split("\n")
-                                    _summary_lines = [l for l in _lines if l.strip() and len(l) > 10]
-                                    _summary = "\n".join(_summary_lines[:3]) if len(_summary_lines) >= 3 else ""
-                                    _outlook = next((l for l in reversed(_lines) if "盘面" in l or "综合" in l or "展望" in l or "建议" in l), "")
-                                    _brief = f"📊 整点分析报告已生成 ({len(results)}只)\n\n{_summary}\n{_outlook}\n\n📎 完整报告见附件PDF"
-                                    if self.notifier.send_to_wechat(_brief):
+                                    _buy = [l for l in _lines if "🟢" in l and "买入" in l]
+                                    _sell = [l for l in _lines if "🔴" in l and "卖出" in l]
+                                    _total = next((l for l in _lines if "共分析" in l), "")
+                                    _lines_brief = [f"📊 整点分析 ({len(results)}只)"]
+                                    if _total:
+                                        _lines_brief.append(_total.strip("> "))
+                                    if _buy:
+                                        _names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _buy[:5]]
+                                        _lines_brief.append(f"🟢 建议买入: {', '.join(_names)}")
+                                    if _sell:
+                                        _names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _sell[:5]]
+                                        _lines_brief.append(f"🔴 建议卖出: {', '.join(_names)}")
+                                    _lines_brief.append("📎 完整报告见附件PDF")
+                                    if self.notifier.send_to_wechat("\n".join(_lines_brief)):
                                         return self.notifier.send_to_wechat_file(pdf_data, _pdf_name)
                             except Exception as e:
                                 logger.warning(f"整点分析 PDF 生成失败, 回退到文本: {e}")
