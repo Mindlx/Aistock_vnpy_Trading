@@ -106,29 +106,7 @@ class NotificationMixin:
             logger.info("生成决策仪表盘日报...")
             report = self._generate_aggregate_report(results, report_type)
 
-            # Multi-user routing: process grouped stock→channel mappings before default dispatch
-            try:
-                from src.core.multi_user import parse_user_groups, route_stock_results, send_to_group
-
-                user_groups = parse_user_groups()
-                if user_groups:
-                    routed = route_stock_results(results, user_groups)
-                    for idx, group_results in routed.items():
-                        if idx == -1:
-                            continue
-                        if not group_results:
-                            continue
-                        group_report = self._generate_aggregate_report(group_results, report_type)
-                        group = user_groups[idx]
-                        send_to_group(self.notifier, group_report, group)
-                        logger.info(
-                            "[MultiUser] ✅ 已向用户组 %d 推送 %d 只股票分析 (%s)",
-                            idx + 1,
-                            len(group_results),
-                            ", ".join(str(getattr(r, "code", "?")) for r in group_results),
-                        )
-            except Exception as exc:
-                logger.warning("[MultiUser] 多用户路由失败，回退到默认通知: %s", exc)
+            self._route_multi_user(results, report_type)
 
             # 跳过推送（单股推送模式 / 合并模式：报告已由 _save_local_report 保存）
             if skip_push:
@@ -144,22 +122,16 @@ class NotificationMixin:
                     codes_key = ",".join(sorted(str(getattr(result, "code", "") or "") for result in results))
                     noise_key = f"report:aggregate:{report_type_key}:{codes_key}"
                     noise_decision = self.notifier.evaluate_noise_control(
-                        report,
-                        route_type="report",
-                        severity="info",
-                        dedup_key=noise_key,
-                        cooldown_key=noise_key,
+                        report, route_type="report", severity="info",
+                        dedup_key=noise_key, cooldown_key=noise_key,
                     )
                     if not noise_decision.should_send:
                         logger.info(noise_decision.message)
                         return
 
-                # Issue #455: Markdown 转图片（与 notification.send 逻辑一致）
                 from src.md2img import markdown_to_image
-
                 channels_needing_image = {
-                    ch
-                    for ch in channels
+                    ch for ch in channels
                     if ch.value in self.notifier._markdown_to_image_channels
                     and ch not in {NotificationChannel.NTFY, NotificationChannel.GOTIFY}
                 }
@@ -172,79 +144,47 @@ class NotificationMixin:
                         engine = getattr(get_config(), "md2img_engine", "wkhtmltoimage")
                     except Exception:
                         engine = "wkhtmltoimage"
-                    return (
-                        "npm i -g markdown-to-file"
-                        if engine == "markdown-to-file"
-                        else "wkhtmltopdf (apt install wkhtmltopdf / brew install wkhtmltopdf)"
-                    )
-
-                def _send_channel_safely(channel_label: str, send_func: Callable[[], bool]) -> bool:
-                    try:
-                        return bool(send_func())
-                    except Exception as e:
-                        logger.exception(
-                            "通知渠道 %s 推送异常，继续尝试其他渠道: %s",
-                            channel_label,
-                            e,
-                        )
-                        return False
+                    return ("npm i -g markdown-to-file" if engine == "markdown-to-file"
+                            else "wkhtmltopdf (apt install wkhtmltopdf / brew install wkhtmltopdf)")
 
                 image_bytes = None
                 if non_wechat_channels_needing_image:
                     image_bytes = markdown_to_image(report, max_chars=self.notifier._markdown_to_image_max_chars)
                     if image_bytes:
-                        logger.info(
-                            "Markdown 已转换为图片，将向 %s 发送图片",
-                            [ch.value for ch in non_wechat_channels_needing_image],
-                        )
+                        logger.info("Markdown 已转换为图片")
                     else:
-                        logger.warning(
-                            "Markdown 转图片失败，将回退为文本发送。请检查 MARKDOWN_TO_IMAGE_CHANNELS 配置并安装 %s",
-                            _get_md2img_hint(),
-                        )
+                        logger.warning("Markdown 转图片失败，请安装 %s", _get_md2img_hint())
 
-                # 企业微信：发送精简文本（generate_wechat_dashboard 紧凑版）
                 wechat_success = False
                 if NotificationChannel.WECHAT in channels:
-
                     def _send_wechat_report() -> bool:
                         from datetime import datetime as _dt
-                        dashboard_content = (
-                            self.notifier.generate_brief_report(results)
-                            if report_type == ReportType.BRIEF
-                            else self.notifier.generate_wechat_dashboard(results)
-                        )
-
-                        # FULL 报告（整点分析）改为 PDF 推送：简短摘要 + PDF 附件
-                        if report_type != ReportType.BRIEF and len(dashboard_content) > 500:
+                        dc = (self.notifier.generate_brief_report(results) if report_type == ReportType.BRIEF
+                              else self.notifier.generate_wechat_dashboard(results))
+                        if report_type != ReportType.BRIEF and len(dc) > 500:
                             try:
                                 from src.md2img import markdown_to_pdf
-                                # 生成 PDF 专用 Markdown（非 WeChat 压缩版）
-                                _now_str = _dt.now().strftime("%Y-%m-%d %H:%M")
-                                _pdf_lines = [f"# 整点分析报告", f"**{_now_str}** | 共分析 {len(results)} 只股票\n", "---\n"]
-                                # 统计摘要
-                                _buy_r = [r for r in results if getattr(r, "sentiment_score", 50) >= 55]
-                                _sell_r = [r for r in results if getattr(r, "sentiment_score", 50) <= 45]
-                                _neutral_r = [r for r in results if 45 < getattr(r, "sentiment_score", 50) < 55]
-                                _pdf_lines.append("## 综合建议")
-                                _pdf_lines.append(f"| 建议 | 数量 | 股票 |")
-                                _pdf_lines.append(f"|------|:----:|------|")
-                                if _buy_r:
-                                    _names = ", ".join(getattr(r, "name", r.code) for r in _buy_r)
-                                    _pdf_lines.append(f"| 🟢 买入 | {len(_buy_r)} | {_names} |")
-                                if _neutral_r:
-                                    _names = ", ".join(getattr(r, "name", r.code) for r in _neutral_r[:5])
-                                    _extra = f"...等{len(_neutral_r)}只" if len(_neutral_r) > 5 else ""
-                                    _pdf_lines.append(f"| ➡️ 持有 | {len(_neutral_r)} | {_names}{_extra} |")
-                                if _sell_r:
-                                    _names = ", ".join(getattr(r, "name", r.code) for r in _sell_r)
-                                    _pdf_lines.append(f"| 🔴 卖出 | {len(_sell_r)} | {_names} |")
-                                _pdf_lines.append("")
-                                # 逐只分析
-                                _pdf_lines.append("## 个股详情\n")
+                                now = _dt.now().strftime("%Y-%m-%d %H:%M")
+                                lines = [f"# 整点分析报告", f"**{now}** | 共分析 {len(results)} 只股票\n", "---\n"]
+                                buy = [r for r in results if getattr(r, "sentiment_score", 50) >= 55]
+                                sell = [r for r in results if getattr(r, "sentiment_score", 50) <= 45]
+                                neutral = [r for r in results if 45 < getattr(r, "sentiment_score", 50) < 55]
+                                lines.append("## 综合建议")
+                                lines.append("| 建议 | 数量 | 股票 |\n|------|:----:|------|")
+                                if buy:
+                                    names = ", ".join(getattr(r, "name", r.code) for r in buy)
+                                    lines.append(f"| 🟢 买入 | {len(buy)} | {names} |")
+                                if neutral:
+                                    names = ", ".join(getattr(r, "name", r.code) for r in neutral[:5])
+                                    lines.append(f"| ➡️ 持有 | {len(neutral)} | {names} |")
+                                if sell:
+                                    names = ", ".join(getattr(r, "name", r.code) for r in sell)
+                                    lines.append(f"| 🔴 卖出 | {len(sell)} | {names} |")
+                                lines.append("")
+                                lines.append("## 个股详情\n")
                                 for r in results:
-                                    _score = getattr(r, "sentiment_score", 50)
-                                    _name = getattr(r, "name", r.code)
+                                    score = getattr(r, "sentiment_score", 50)
+                                    name = getattr(r, "name", r.code)
                                     _op = getattr(r, "operation_advice", "") or ""
                                     _trend = getattr(r, "trend_prediction", "") or ""
                                     _s = "🟢" if _score >= 55 else ("🔴" if _score <= 45 else "➡️")
@@ -506,6 +446,22 @@ class NotificationMixin:
             import traceback
 
             logger.error(f"发送通知失败: {e}\n{traceback.format_exc()}")
+
+    def _route_multi_user(self, results, report_type):
+        try:
+            from src.core.multi_user import parse_user_groups, route_stock_results, send_to_group
+            groups = parse_user_groups()
+            if not groups:
+                return
+            routed = route_stock_results(results, groups)
+            for idx, grp_results in routed.items():
+                if idx == -1 or not grp_results:
+                    continue
+                grp_report = self._generate_aggregate_report(grp_results, report_type)
+                send_to_group(self.notifier, grp_report, groups[idx])
+                logger.info("[MultiUser] ✅ 已向用户组 %d 推送 %d 只股票", idx + 1, len(grp_results))
+        except Exception as exc:
+            logger.warning("[MultiUser] 多用户路由失败，回退: %s", exc)
 
     def _generate_aggregate_report(
         self,
