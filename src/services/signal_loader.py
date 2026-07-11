@@ -32,14 +32,6 @@ class SignalLoader:
         self._cache.setdefault(stock_code, {})["ml_factor"] = result
         return result
 
-    def load_at_signal(self, stock_code: str) -> str:
-        cached = self._cache.get(stock_code, {}).get("at")
-        if cached is not None:
-            return cached
-        result = self._do_load_at_signal(stock_code)
-        self._cache.setdefault(stock_code, {})["at"] = result
-        return result
-
     def clear_cache(self, stock_code: Optional[str] = None):
         if stock_code:
             self._cache.pop(stock_code, None)
@@ -186,26 +178,4 @@ class SignalLoader:
         except Exception:
             return ""
 
-    def _do_load_at_signal(self, stock_code: str) -> str:
-        ta_dir = Path("data/tradingagent")
-        if not ta_dir.exists():
-            return ""
-
-        files = sorted(ta_dir.glob("ta_signals_*.json"), reverse=True)
-        if not files:
-            return ""
-
-        import json
-        try:
-            raw = json.loads(files[0].read_text(encoding="utf-8"))
-            for r in raw.get("results", []):
-                if r.get("code") == stock_code:
-                    rating = r.get("rating", "")
-                    decision = r.get("final_decision", "") or ""
-                    parts = [f"AT 评级={rating}"]
-                    if decision:
-                        parts.append(f"决策={decision}")
-                    return " | ".join(parts)
-        except Exception:
-            pass
-        return ""
+    pass

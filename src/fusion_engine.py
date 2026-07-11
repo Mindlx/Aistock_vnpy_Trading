@@ -21,7 +21,6 @@ import yaml
 from src.fusion import (
     BayesianFusionStrategy,
     LinearFusionStrategy,
-    PortfolioSummarizer,
     apply_bayesian_override,
     compute_adjusted_weights,
     compute_uncertainty_penalty,
@@ -97,7 +96,7 @@ class FusionEngine:
             self.normalizer, self.logger,
             self.probability_k, self.ly_veto_threshold,
         )
-        self._summarizer = PortfolioSummarizer()
+
 
     # ──────── 决策映射（7 级 L7 空间，从 normalizer 导入） ────────
 

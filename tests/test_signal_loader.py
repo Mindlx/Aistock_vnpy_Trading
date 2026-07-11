@@ -29,10 +29,6 @@ class TestSignalLoader:
             result = self.sl.load_ml_factor("601801")
             assert result == ""
 
-    def test_at_signal_empty(self):
-        result = self.sl.load_at_signal("601801")
-        assert result == ""
-
     def test_cache_same_stock_returns_cached(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.sl.REALTIME_DIR = Path(tmp)
