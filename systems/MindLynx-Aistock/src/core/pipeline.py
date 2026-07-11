@@ -804,191 +804,158 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             enhanced["allocation_prompt"] = allocation_text
 
         # P3: ATR position sizing
+        self._compute_position_sizing(enhanced, code, realtime_quote, context)
+
+        self._enrich_risk_and_fundamental(enhanced, code, realtime_quote, stock_name, fundamental_context)
+
+        self._inject_intelligence_context(enhanced, code)
+
+        return enhanced
+
+    def _compute_position_sizing(self, enhanced: dict[str, Any], code: str, realtime_quote, context: dict[str, Any]):
         try:
             from src.core.position_sizer import build_position_prompt, compute_position_size
-
-            price = None
-            if realtime_quote:
-                price = getattr(realtime_quote, "price", None)
+            price = getattr(realtime_quote, "price", None) if realtime_quote else None
             if not price and context.get("today") and isinstance(context["today"], dict):
                 price = context["today"].get("close")
             if price and price > 0:
-                close_arr = []
-                with self.db.session_scope() as _session:
-                    rows = _session.execute(
+                with self.db.session_scope() as _s:
+                    rows = _s.execute(
                         __import__("sqlalchemy").text(
                             "SELECT close, high, low FROM stock_daily WHERE code=:code ORDER BY date DESC LIMIT 30"
-                        ),
-                        {"code": code},
+                        ), {"code": code},
                     ).fetchall()
-                if rows and len(rows) >= 14:
-                    for r in reversed(rows):
-                        close_arr.append(float(r[0]))
-                    atr_val = 0.0
-                    if len(rows) >= 15:
-                        from src.core.indicators import atr as _atr_indicator
-                        highs = [float(r[1]) for r in rows]
-                        lows = [float(r[2]) for r in rows]
-                        closes = [float(r[0]) for r in rows]
-                        atr_arr = _atr_indicator(highs, lows, closes, period=14)
-                        atr_val = [v for v in atr_arr if v == v][-1] if atr_arr else 0.0
-                    atr_mult = _regime_atr_multiplier(self) if hasattr(self, '_regime_prompt') else 2.0
-                    ps = compute_position_size(float(price), atr_val, atr_multiplier=atr_mult)
-                    enhanced["position_prompt"] = build_position_prompt(ps)
+                atr_val = 0.0
+                if rows and len(rows) >= 15:
+                    from src.core.indicators import atr as _atr
+                    hs = [float(r[1]) for r in rows]
+                    ls = [float(r[2]) for r in rows]
+                    cs = [float(r[0]) for r in rows]
+                    arr = _atr(hs, ls, cs, period=14)
+                    atr_val = [v for v in arr if v == v][-1] if arr else 0.0
+                atr_mult = _regime_atr_multiplier(self) if hasattr(self, '_regime_prompt') else 2.0
+                ps = compute_position_size(float(price), atr_val, atr_multiplier=atr_mult)
+                enhanced["position_prompt"] = build_position_prompt(ps)
         except Exception:
             logger.debug("[pipeline] 仓位大小计算失败(code=%s)", code)
 
-        try:
-            ood_warning = getattr(self, "_ood_warnings", {}).get(code)
-            if ood_warning:
-                enhanced["ood_warning"] = ood_warning
-        except Exception:
-            pass
-
-        try:
-            factor_dist = getattr(self, "_factor_distributions", {}).get(code)
-            if factor_dist:
-                enhanced["factor_uncertainty"] = factor_dist
-        except Exception:
-            pass
-
+    def _enrich_risk_and_fundamental(self, enhanced: dict[str, Any], code: str,
+                                      realtime_quote, stock_name: str, fundamental_context: dict | None):
+        for attr, key in [("_ood_warnings", "ood_warning"), ("_factor_distributions", "factor_uncertainty")]:
+            try:
+                val = getattr(self, attr, {}).get(code)
+                if val:
+                    enhanced[key] = val
+            except Exception:
+                pass
         try:
             boards = (fundamental_context or {}).get("belong_boards") or []
             if boards:
                 enhanced["concept_context"] = f"所属概念/板块: {', '.join(boards[:5])}"
         except Exception:
             pass
-
+        # PE/PB calibration
         try:
             pe = getattr(realtime_quote, "pe_ratio", None) if realtime_quote else None
             pb = getattr(realtime_quote, "pb_ratio", None) if realtime_quote else None
             if pe is not None or pb is not None:
-                from src.core.fundamental_calibration import (
-                    build_calibration_prompt,
-                    compute_fundamental_calibration,
-                )
-
+                from src.core.fundamental_calibration import build_calibration_prompt, compute_fundamental_calibration
                 cal = compute_fundamental_calibration(pe, pb)
                 if cal.get("status") == "ok":
-                    cal_prompt = build_calibration_prompt(cal, code, stock_name)
-                    enhanced["fundamental_calibration"] = cal_prompt
+                    cp = build_calibration_prompt(cal, code, stock_name)
+                    enhanced["fundamental_calibration"] = cp
                     if not hasattr(self, '_fundamental_calibration'):
                         self._fundamental_calibration = {}
-                    self._fundamental_calibration[code] = cal_prompt
+                    self._fundamental_calibration[code] = cp
         except Exception:
             pass
-
-        # 计算支撑/阻力位（供 LLM 替代硬猜）
+        # Support/resistance levels
         try:
             from src.core.support_resistance import compute_levels, format_levels
-
             with self.db.session_scope() as sess:
                 rows = sess.execute(
                     __import__("sqlalchemy").text(
                         "SELECT close, high, low, volume FROM stock_daily WHERE code=:code ORDER BY date"
-                    ),
-                    {"code": code},
+                    ), {"code": code},
                 ).fetchall()
             if rows and len(rows) >= 20:
-                c = [float(r[0]) for r in rows]
-                h = [float(r[1]) for r in rows]
-                l = [float(r[2]) for r in rows]
-                v = [float(r[3]) for r in rows]
-                sup, res = compute_levels(c, h, l, v)
-                sr_text = format_levels(sup, res)
-                if sr_text:
-                    enhanced["sr_levels"] = sr_text
+                c_ = [float(r[0]) for r in rows]
+                h_ = [float(r[1]) for r in rows]
+                l_ = [float(r[2]) for r in rows]
+                v_ = [float(r[3]) for r in rows]
+                sup_, res_ = compute_levels(c_, h_, l_, v_)
+                sr_t = format_levels(sup_, res_)
+                if sr_t:
+                    enhanced["sr_levels"] = sr_t
         except Exception:
-            logger.debug("[pipeline] 支撑压力位(support_resistance)计算失败(code=%s)", code)
+            logger.debug("[pipeline] 支撑压力位计算失败(code=%s)", code)
 
-        # O6: inject recent daily intelligence if available
+    def _inject_intelligence_context(self, enhanced: dict[str, Any], code: str):
         try:
             with self.db.session_scope() as sess:
                 from sqlalchemy import text
-
-                rows = sess.execute(
-                    text(
-                        "SELECT title, snippet, importance, source FROM news_intel "
-                        "WHERE dimension='daily_intel' "
-                        "AND created_at > datetime('now', '-1 day') "
-                        "ORDER BY importance DESC, created_at DESC LIMIT 8"
-                    )
-                ).fetchall()
+                rows = sess.execute(text(
+                    "SELECT title, snippet, importance, source FROM news_intel "
+                    "WHERE dimension='daily_intel' AND created_at > datetime('now', '-1 day') "
+                    "ORDER BY importance DESC, created_at DESC LIMIT 8"
+                )).fetchall()
                 if rows:
                     lines = ["## 📰 近日要闻 (Daily Intel)"]
                     for r in rows:
-                        imp = r[2]
-                        imp_icon = get_importance_emoji(imp)
-                        src = r[3] or ""
-                        lines.append(f"{imp_icon} [{src}] {r[0][:60]} — {r[1][:80]}")
+                        lines.append(f"{get_importance_emoji(r[2])} [{r[3] or ''}] {r[0][:60]} — {r[1][:80]}")
                     lines.append("> 以上要闻基于最近24小时搜集，仅供参考。")
                     enhanced["daily_intel_context"] = "\n".join(lines)
         except Exception:
             pass
-
-        # RSS intelligence items: inject pre-fetched RSS data for this stock
         try:
             if getattr(self.config, "rss_pipeline_enabled", False):
                 from src.repositories.intelligence_repo import IntelligenceRepository
-
-                _code = context.get("code", "")
-                if _code:
-                    _repo = IntelligenceRepository()
-                    _items = _repo.get_recent_items_by_scope("symbol", _code, limit=10, max_days=7)
-                    if _items:
-                        _lines = ["## 📡 RSS 情报（最近 7 天）"]
-                        for _item in _items:
-                            _pub = _item.published_at.strftime("%m-%d") if _item.published_at else ""
-                            _src = _item.source_name or _item.source or ""
-                            _lines.append(f"- [{_pub}] [{_src}] {_item.title[:80]}")
-                            if _item.summary:
-                                _lines.append(f"  {_item.summary[:150]}")
-                        _lines.append("> 以上 RSS 情报由已配置的资讯源自动抓取，仅供参考。")
-                        _rss_text = "\n".join(_lines)
-                        if len(_rss_text) > 2000:
-                            _rss_text = _rss_text[:2000] + "\n...（已截断）"
-                        enhanced["rss_intelligence"] = _rss_text
+                if code:
+                    items = IntelligenceRepository().get_recent_items_by_scope("symbol", code, limit=10, max_days=7)
+                    if items:
+                        lines = ["## 📡 RSS 情报（最近 7 天）"]
+                        for it in items:
+                            pub = it.published_at.strftime("%m-%d") if it.published_at else ""
+                            src = it.source_name or it.source or ""
+                            lines.append(f"- [{pub}] [{src}] {it.title[:80]}")
+                            if it.summary:
+                                lines.append(f"  {it.summary[:150]}")
+                        lines.append("> 以上 RSS 情报由已配置的资讯源自动抓取，仅供参考。")
+                        rss = "\n".join(lines)
+                        if len(rss) > 2000:
+                            rss = rss[:2000] + "\n...（已截断）"
+                        enhanced["rss_intelligence"] = rss
         except Exception:
-            logger.debug("[pipeline] RSS intelligence injection failed(code=%s)", context.get("code", "?"))
-
-        # Extract market background from latest market review report
+            logger.debug("[pipeline] RSS intelligence injection failed(code=%s)", code)
         try:
-            from pathlib import Path
-            import glob as _glob, re as _re
-
-            reports_dir = Path("reports")
-            pattern = str(reports_dir / "market_review_*.md")
-            files = sorted(_glob.glob(pattern), reverse=True)
+            import glob
+            files = sorted(glob.glob("reports/market_review_*.md"), reverse=True)
             if files:
-                with open(files[0], "r", encoding="utf-8") as f:
+                with open(files[0]) as f:
                     content = f.read()
-                # Extract key lines: one-liner summary, temperature, main sectors
                 lines = []
                 for ln in content.split("\n"):
                     if ln.startswith("> ") and "核心原因" not in ln and "操作建议" not in ln:
                         if "盘面温度" in ln or "大盘红绿灯" in ln:
                             lines.append(ln.lstrip("> ").strip())
                         elif not lines or len(lines[-1]) < 120:
-                            # First non-cause/non-advice summary line
                             if len(lines) == 0:
                                 lines.append(ln.lstrip("> ").strip())
-                # Extract sector main line (section 三 first paragraph)
                 sec3 = content.find("### 三、板块主线")
                 if sec3 > 0:
-                    para = content[sec3:].split("\n")
-                    for p in para[1:4]:
+                    for p in content[sec3:].split("\n")[1:4]:
                         p = p.strip()
-                        if p and not p.startswith("|") and not p.startswith("#"):
-                            if len(p) > 30:
-                                lines.append(p[:150])
+                        if p and not p.startswith("|") and not p.startswith("#") and len(p) > 30:
+                            lines.append(p[:150])
                             break
                 if lines:
-                    enhanced["market_background"] = "## 📊 今日大盘背景\n" + "\n".join(f"> {l}" for l in lines[:3])
-                    enhanced["market_background"] += "\n> 以上大盘背景基于最新复盘报告，供个股分析参考。"
+                    enhanced["market_background"] = (
+                        "## 📊 今日大盘背景\n" + "\n".join(f"> {l}" for l in lines[:3])
+                        + "\n> 以上大盘背景基于最新复盘报告，供个股分析参考。"
+                    )
         except Exception:
             pass
 
-        return enhanced
     def _load_ly_signals(self, stock_codes: list[str]) -> dict[str, str]:
         """
         Load LY quantitative model signals from data/realtime/ JSON files.
