@@ -18,6 +18,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+from src.fusion import (
+    BayesianFusionStrategy,
+    LinearFusionStrategy,
+    PortfolioSummarizer,
+    apply_bayesian_override,
+    compute_adjusted_weights,
+    compute_uncertainty_penalty,
+    detect_disagreement,
+    get_final_decision,
+)
 from src.logger import FusionLogger
 from src.normalizer import (
     SignalNormalizer,
@@ -75,326 +85,58 @@ class FusionEngine:
         self.sentiment_threshold_bull = st.get("bull", 52)
         self.sentiment_threshold_bear = st.get("bear", 49)
 
+        # 策略类
+        w = self.weights
+        self._linear = LinearFusionStrategy(
+            self.normalizer, self.logger,
+            {"lynx": w.get("lynx_vnpy", 0.35), "mindlynx": w.get("mindlynx", 0.35),
+             "tradingagent": w.get("tradingagent", 0.30)},
+            self.sentiment_threshold_bull, self.sentiment_threshold_bear,
+        )
+        self._bayesian = BayesianFusionStrategy(
+            self.normalizer, self.logger,
+            self.probability_k, self.ly_veto_threshold,
+        )
+        self._summarizer = PortfolioSummarizer()
+
     # ──────── 决策映射（7 级 L7 空间，从 normalizer 导入） ────────
 
     def _get_final_decision(self, score: float, disagreement: bool = False) -> Dict[str, Any]:
-        """
-        根据 L7 得分判断最终决策（7 级）。
-
-        当检测到分歧时，仓位上限为 1成。
-        """
-        t = L7_THRESHOLDS
-        if score > t["strong_bullish"]:
-            signal = "strong_bullish"
-        elif score > t["bullish"]:
-            signal = "bullish"
-        elif score > t["cautious_bullish"]:
-            signal = "cautious_bullish"
-        elif score > t["cautious_bearish"]:
-            signal = "neutral"
-        elif score > t["bearish"]:
-            signal = "cautious_bearish"
-        elif score > t["strong_bearish"]:
-            signal = "bearish"
-        else:
-            signal = "strong_bearish"
-
-        name = L7_SIGNAL_NAMES.get(signal, "中性/持有")
-        position = L7_POSITION.get(signal, "0成")
-
+        result = get_final_decision(score, disagreement, L7_THRESHOLDS)
         if disagreement:
-            position = SignalNormalizer.cap_position_for_disagreement(position)
-
-        return {
-            "signal": signal,
-            "name": name,
-            "position": position,
-            "disagreement_capped": disagreement,
-        }
+            from src.normalizer import SignalNormalizer
+            result["position"] = SignalNormalizer.cap_position_for_disagreement(result["position"])
+        return result
 
     # ──────── 分歧检测 ────────
 
     @staticmethod
-    def _detect_disagreement(
-        lynx_score: float, mindlynx_score: float, tradingagent_score: float,
-        lynx_valid: bool, mindlynx_valid: bool, tradingagent_valid: bool,
-    ) -> Tuple[bool, float, int]:
-        """
-        检测系统间分歧。
-
-        Oracle v1: 线性融合将方向相反的强信号"归零"为中性，这是危险的。
-        Oracle v2 (2026-06-29, c1test分歧模式分析):
-          分歧是 ML 信号强度的隐式过滤器。分歧时 ML 准确率从 37.9%→51.0%。
-          返回 ml_minority 标记，供调用方在分歧时提升 ML 权重。
-
-        返回:
-            (有分歧, 分歧分数, ml_minority)
-            分歧分数 = 各方向信号的标准差
-            ml_minority: 1=ML是分歧中的少数方, 0=ML不是, -1=不足2个系统
-        """
-        scores = []
-        if lynx_valid:
-            scores.append(("lynx", lynx_score))
-        if mindlynx_valid:
-            scores.append(("mindlynx", mindlynx_score))
-        if tradingagent_valid:
-            scores.append(("tradingagent", tradingagent_score))
-
-        if len(scores) < 2:
-            return False, 0.0, -1
-
-        # 判断方向: 正=看多 (>0.5), 负=看空 (<-0.5), 0=中性
-        has_bullish = any(s > 0.5 for _, s in scores)
-        has_bearish = any(s < -0.5 for _, s in scores)
-        disagreement = has_bullish and has_bearish
-
-        # 分歧量化: 分数标准差
-        disagreement_score = 0.0
-        ml_minority = 0
-        if disagreement:
-            raw = [s for _, s in scores]
-            mean = sum(raw) / len(raw)
-            variance = sum((s - mean) ** 2 for s in raw) / len(raw)
-            disagreement_score = math.sqrt(variance)
-
-            # ML 是否为少数方？(与多数方向不同)
-            ml_s = next((s for name, s in scores if name == "mindlynx"), 0.0)
-            others = [s for name, s in scores if name != "mindlynx"]
-            majority_dir = sum(1 for s in others if s > 0.5) - sum(1 for s in others if s < -0.5)
-            if abs(majority_dir) >= len(others):  # 其他系统方向一致
-                ml_dir = 1 if ml_s > 0.5 else (-1 if ml_s < -0.5 else 0)
-                if ml_dir != 0 and ml_dir != (1 if majority_dir > 0 else -1):
-                    ml_minority = 1  # ML 是少数方，分歧时可信度更高
-
-        return disagreement, disagreement_score, ml_minority
+    def _detect_disagreement(*args, **kwargs) -> Tuple[bool, float, int]:
+        return detect_disagreement(*args, **kwargs)
 
     @staticmethod
     def _compute_uncertainty_penalty(disagreement_score: float) -> float:
-        """
-        根据分歧程度计算不确定性惩罚系数。
-        v3.0: 适配 [-3,+3] 宽范围，最大惩罚升至 2.0
-        """
-        if disagreement_score <= 0.5:  # 宽范围下小幅分歧不惩罚
-            return 0.0
-        penalty = min(2.0, max(0.0, (disagreement_score - 0.5) * 1.2))
-        return penalty
+        return compute_uncertainty_penalty(disagreement_score)
 
     # ──────── 缺失数据处理 ────────
 
     def _compute_adjusted_weights(
         self, lynx_valid: bool, mindlynx_valid: bool, tradingagent_valid: bool,
     ) -> Tuple[Dict[str, float], int, bool]:
-        """
-        Oracle 建议: 缺失系统时重新分配权重。
-
-        返回:
-            (adjusted_weights, valid_count, is_degraded)
-        """
-        weight_map = {
-            "lynx": self.weights["lynx_vnpy"],
-            "mindlynx": self.weights["mindlynx"],
-            "tradingagent": self.weights["tradingagent"],
-        }
-        valid_map = {
-            "lynx": lynx_valid,
-            "mindlynx": mindlynx_valid,
-            "tradingagent": tradingagent_valid,
-        }
-
-        # 只保留有效系统
-        valid_weights = {
-            sys: w for sys, w in weight_map.items() if valid_map.get(sys, True)
-        }
-        valid_count = len(valid_weights)
-
-        if valid_count == 0:
-            return {}, 0, True
-
-        # 重新归一化权重
-        total_weight = sum(valid_weights.values())
-        adjusted = {
-            sys: w / total_weight for sys, w in valid_weights.items()
-        }
-
-        # 判断是否降级
-        is_degraded = valid_count < 3
-
-        return adjusted, valid_count, is_degraded
+        w = {"lynx": self.weights["lynx_vnpy"],
+             "mindlynx": self.weights["mindlynx"],
+             "tradingagent": self.weights["tradingagent"]}
+        return compute_adjusted_weights(lynx_valid, mindlynx_valid, tradingagent_valid, w)
 
     # ──────── 核心融合方法 ────────
 
-    def _fuse_bayesian(
-        self,
-        stock_code: str,
-        stock_name: str = "",
-        lynx_signal: str = "观望",
-        lynx_prob_up: float = 50.0,
-        mindlynx_advice: str = "观望",
-        mindlynx_score: int = 50,
-        mindlynx_trend: Optional[str] = None,
-        mindlynx_valid: bool = False,
-        mindlynx_factor_baseline: Optional[float] = None,
-        tradingagent_rating: str = "Hold",
-        tradingagent_valid: bool = False,
-        ta_is_stale: bool = False,
-        ta_debate_state: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        贝叶斯融合模式 — 可靠性调制概率融合。
-
-        融合管线:
-          1. 概率空间校准（得分→概率）
-          2. 幻觉检测门控（ml:因子偏差, at:辩论一致性）
-          3. 置信度校准（各系统独立公式）
-          4. 有效权重计算（w = α × c × (1-h)）
-          5. 加权概率融合
-          6. 数学否决权（ly 强信号时覆盖）
-        """
-        # Step 1: 归一化 + 概率空间映射
-        lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
-            lynx_signal, lynx_prob_up
-        )
-        mindlynx_normalized = self.normalizer.normalize_mindlynx(
-            mindlynx_advice, mindlynx_score, mindlynx_trend
-        )
-        # HP3: sentiment_score 独立信号路径
-        mindlynx_score_normalized = self.normalizer.normalize_mindlynx_score(
-            mindlynx_score,
-            threshold_bull=self.sentiment_threshold_bull,
-            threshold_bear=self.sentiment_threshold_bear,
-        )
-        # v3.0: op_advice 恢复 0.2 权重参与 L7
-        mindlynx_normalized = mindlynx_score_normalized * 0.8 + mindlynx_normalized * 0.2
-        tradingagent_normalized = self.normalizer.normalize_tradingagent(
-            tradingagent_rating, debate_state=ta_debate_state
-        )
-
-        p_ly = self.normalizer.to_probability(lynx_normalized, self.probability_k)
-        p_ml = self.normalizer.to_probability(mindlynx_normalized, self.probability_k)
-        p_at = self.normalizer.to_probability(tradingagent_normalized, self.probability_k)
-
-        # Step 2: 幻觉检测
-        h_ly = HallucinationDetector.detect_ly()
-        h_ml = HallucinationDetector.detect_ml(
-            sentiment_score=mindlynx_score,
-            factor_baseline=mindlynx_factor_baseline,
-            operation_advice=mindlynx_advice,
-            trend_prediction=mindlynx_trend,
-        )
-        h_at = HallucinationDetector.detect_at(debate_state=ta_debate_state)
-
-        # Step 3: 置信度校准
-        c_ly = ConfidenceCalibrator.calibrate_ly(lynx_prob_up)
-        c_ml = ConfidenceCalibrator.calibrate_ml(float(mindlynx_score))
-        c_at = ConfidenceCalibrator.calibrate_at(
-            (ta_debate_state or {}).get("investment_agreement", 0.5)
-        )
-
-        # Step 4: 有效权重
-        w_ly = ReliabilityConfig.alpha("lynx_vnpy") * c_ly * (1.0 - h_ly)
-        w_ml = ReliabilityConfig.alpha("mindlynx", stock_code=stock_code) * c_ml * (1.0 - h_ml)
-        w_at = ReliabilityConfig.alpha("tradingagent") * c_at * (1.0 - h_at)
-
-        # 子系统不可用：权重归零（与 _fuse_linear 一致）
-        if not mindlynx_valid:
-            self.logger.info(f"[Bayesian][{stock_code}] mindlynx 不可用，ML 权重归零")
-            w_ml = 0.0
-        if not tradingagent_valid:
-            self.logger.info(f"[Bayesian][{stock_code}] tradingagent 不可用，AT 权重归零")
-            w_at = 0.0
-
-        # ⚡ TA 数据过期处理：降低有效权重（与 linear 模式一致）
-        if ta_is_stale:
-            w_at *= 0.7
-            self.logger.info(f"[Bayesian][{stock_code}] TA 过期，权重降低 30%")
-
-        total_w = w_ly + w_ml + w_at
-        if total_w == 0:
-            return {
-                "stock_code": stock_code, "stock_name": stock_name,
-                "valid": False, "message": "所有系统有效权重为零，无法融合",
-                "fusion_mode": "bayesian",
-            }
-
-        # Step 5: 加权概率融合
-        p_fused = (w_ly * p_ly + w_ml * p_ml + w_at * p_at) / total_w
-
-        # Step 6: 数学否决权
-        p_final = self._apply_bayesian_override(p_ly, p_ml, p_at, p_fused)
-
-        # Step 7: 映射到 7 级决策
-        signal_label = probability_to_decision(p_final, {
-            "strong_bullish": 0.88, "bullish": 0.73,
-            "cautious_bullish": 0.62, "cautious_bearish": 0.38,
-            "bearish": 0.27, "strong_bearish": 0.12,
-        })
-        signal_name_map = L7_SIGNAL_NAMES
-        position_map = L7_POSITION
-
-        # 检查分歧（使用概率空间的等价判断，含 ml）
-        has_disagreement = ((p_ly - 0.50) * (p_at - 0.50) < -0.2
-                           or (p_ly - 0.50) * (p_ml - 0.50) < -0.2
-                           or (p_ml - 0.50) * (p_at - 0.50) < -0.2)
-        position = position_map.get(signal_label, "0成")
-        if has_disagreement:
-            position = SignalNormalizer.cap_position_for_disagreement(position)
-
-        return {
-            "stock_code": stock_code, "stock_name": stock_name,
-            "valid": True, "fusion_mode": "bayesian",
-            "p_ly": round(p_ly, 3), "p_ml": round(p_ml, 3), "p_at": round(p_at, 3),
-            "w_ly": round(w_ly, 3), "w_ml": round(w_ml, 3), "w_at": round(w_at, 3),
-            "h_ly": h_ly, "h_ml": round(h_ml, 3), "h_at": round(h_at, 3),
-            "c_ly": round(c_ly, 3), "c_ml": round(c_ml, 3), "c_at": round(c_at, 3),
-            "p_fused": round(p_fused, 3), "p_final": round(p_final, 3),
-            "has_disagreement": has_disagreement,
-            "lynx_valid": lynx_valid,
-            "mindlynx_valid": mindlynx_valid,
-            "tradingagent_valid": tradingagent_valid,
-            "ta_is_stale": ta_is_stale,
-            "signal": signal_label,
-            "signal_name": signal_name_map.get(signal_label, "中性/观望"),
-            "position_advice": position,
-        }
+    def _fuse_bayesian(self, **kwargs) -> Dict[str, Any]:
+        return self._bayesian.fuse(**kwargs)
 
     @staticmethod
-    def _apply_bayesian_override(
-        p_ly: float, p_ml: float, p_at: float, p_fused: float,
-    ) -> float:
-        """
-        数学否决权: 当 ly 强信号且与融合结果冲突时调整。
-
-        设计原则:
-        - ly+ml (数学+混合) vs at (纯LLM) → 信任数学
-        - ly+at vs ml → 信任 ly，但 at 附议增加可信度
-        - ml+at vs ly → 2v1，不完全采用 ly
-        """
-        ly_conviction = abs(p_ly - 0.50)
-        if ly_conviction <= 0.30:
-            return p_fused  # ly 不够强，不触发
-
-        def _direction(p: float) -> int:
-            """概率 → 方向: 1=看多, -1=看空, 0=中性"""
-            return 1 if p > 0.55 else (-1 if p < 0.45 else 0)
-
-        ly_dir = _direction(p_ly)
-        fused_dir = _direction(p_fused)
-
-        if ly_dir == 0 or ly_dir == fused_dir:
-            return p_fused  # ly中性或方向一致，不干预
-
-        # 方向冲突: 检查各系统方向
-        ml_dir = _direction(p_ml)
-        at_dir = _direction(p_at)
-
-        if ml_dir == at_dir == -ly_dir:
-            return 0.40 * p_ly + 0.60 * p_fused
-        elif ml_dir == ly_dir:
-            return 0.80 * p_ly + 0.20 * p_fused
-        elif at_dir == ly_dir:
-            return 0.70 * p_ly + 0.30 * p_fused
-        else:
-            return p_fused
+    @staticmethod
+    def _apply_bayesian_override(*args, **kwargs) -> float:
+        return apply_bayesian_override(*args, **kwargs)
 
     def fuse_single_stock(
         self,
@@ -500,197 +242,8 @@ class FusionEngine:
         )
 
     # ──────── 原始线性融合逻辑（重命名自 fuse_single_stock） ────────
-
-    def _fuse_linear(
-        self,
-        stock_code: str,
-        stock_name: str = "",
-        lynx_signal: str = "观望",
-        lynx_prob_up: float = 50.0,
-        mindlynx_advice: str = "观望",
-        mindlynx_score: int = 50,
-        mindlynx_trend: Optional[str] = None,
-        mindlynx_valid: bool = False,
-        tradingagent_rating: str = "Hold",
-        tradingagent_valid: bool = False,
-        ta_is_stale: bool = False,
-        ta_debate_state: Optional[Dict[str, Any]] = None,
-        alpha158_l7: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """
-        线性加权融合（原始逻辑）。
-
-        包含 Oracle 建议的 3 项修正:
-          ⚡ 分歧检测 + 不确定性惩罚
-          ⚡ 置信度调制（lynx prob_up 自然调制，mindlynx 评分细分）
-          ⚡ 缺失系统自动重分配权重
-          ⚡ alpha158: 58因子+LGB信号增强ly（同源OHLCV，不独立投票）
-        """
-        # ── Step 1: 归一化各系统 + alpha158增强ly ──
-        lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
-            lynx_signal, lynx_prob_up
-        )
-
-        # alpha158 因子信号增强ly（独立因子通道）
-        if alpha158_l7 is not None and lynx_valid:
-            blend = 0.10
-            lynx_normalized = lynx_normalized * (1 - blend) + float(alpha158_l7) * blend
-            self.logger.info(f"[{stock_code}] alpha158增强ly: a158={float(alpha158_l7):.2f} ly→{lynx_normalized:.2f}")
-
-        # 防御性守卫：无效系统强制中性，防止下游遗漏处理
-        if not mindlynx_valid:
-            mindlynx_normalized = 0.0
-            mindlynx_score_normalized = 0.0
-        else:
-            mindlynx_normalized = self.normalizer.normalize_mindlynx(
-                mindlynx_advice, mindlynx_score, mindlynx_trend
-            )
-            # HP3: sentiment_score 独立信号路径（不依赖 op_advice）
-            mindlynx_score_normalized = self.normalizer.normalize_mindlynx_score(
-                mindlynx_score,
-                threshold_bull=self.sentiment_threshold_bull,
-                threshold_bear=self.sentiment_threshold_bear,
-            )
-            # 权重分配: sentiment_score 80% + operation_advice 20%
-        # v3.0 (2026-07-06): op_advice 恢复独立方向 + 表态率提升至 ~50%,
-        # 恢复 0.2 权重参与 L7 裁决, 观察融合效果变化
-            mindlynx_normalized = mindlynx_score_normalized * 0.8 + mindlynx_normalized * 0.2
-
-        if not tradingagent_valid:
-            tradingagent_normalized = 0.0
-        else:
-            tradingagent_normalized = self.normalizer.normalize_tradingagent(
-                tradingagent_rating, debate_state=ta_debate_state
-            )
-
-        # 子系统有效性（来自 data_loader，不依赖默认参数）
-
-
-        # ⚡ TA 数据过期处理：降权 30%，权重重新分配
-        ta_stale_penalty = 0.0
-        if ta_is_stale:
-            ta_stale_penalty = 0.30  # TA 权重打七折
-            self.logger.info(
-                f"[{stock_code}] TA 数据为昨日结果，权重降低 {ta_stale_penalty*100:.0f}%"
-            )
-
-        # ── Step 2: 分歧检测 + 不确定性惩罚 (Oracle 建议 1) ──
-        has_disagreement, disagreement_score, ml_minority = self._detect_disagreement(
-            lynx_normalized, mindlynx_normalized, tradingagent_normalized,
-            lynx_valid, mindlynx_valid, tradingagent_valid,
-        )
-        uncertainty_penalty = self._compute_uncertainty_penalty(disagreement_score)
-
-        # ⚡ 分歧时 ML 少数方信号增强 (c1skill 分歧模式分析 2026-06-29)
-        # 分析显示: 分歧时 ML 准确率从 37.9%→51.0%, ML 是分歧中最可信的参与方
-        # 当 ML 与多数方向不同时, 小幅提升融合得分以反映 ML 的实际价值
-        ml_minority_boost = 0.0
-        if has_disagreement and ml_minority == 1:
-            # 按分歧程度比例提升, 最大 +0.3 L7 (≈半步的谨慎看多方向)
-            ml_minority_boost = min(0.3, disagreement_score * 0.15)
-
-        # ── Step 3: 处理缺失系统 + 权重重分配 (Oracle 建议 2) ──
-        adjusted_weights, valid_count, is_degraded = self._compute_adjusted_weights(
-            lynx_valid, mindlynx_valid, tradingagent_valid,
-        )
-
-        # ⚡ TA 数据过期：降低 TA 权重，分配给 lynx 和 mindlynx
-        if ta_is_stale and "tradingagent" in adjusted_weights:
-            ta_weight = adjusted_weights["tradingagent"]
-            penalty = ta_weight * ta_stale_penalty
-            adjusted_weights["tradingagent"] = ta_weight - penalty
-            # 平均分配给其他有效系统
-            others = [k for k in adjusted_weights if k != "tradingagent"]
-            if others:
-                split = penalty / len(others)
-                for k in others:
-                    adjusted_weights[k] += split
-
-        if valid_count == 0:
-            return {
-                "stock_code": stock_code,
-                "stock_name": stock_name,
-                "valid": False,
-                "message": "所有系统均无效，无法生成信号",
-                "is_degraded": True,
-            }
-
-        # ── Step 4: 计算融合得分（含置信度调制） ──
-        normalized_scores = {}
-        if "lynx" in adjusted_weights:
-            normalized_scores["lynx"] = lynx_normalized
-        if "mindlynx" in adjusted_weights:
-            normalized_scores["mindlynx"] = mindlynx_normalized
-        if "tradingagent" in adjusted_weights:
-            normalized_scores["tradingagent"] = tradingagent_normalized
-
-        fusion_score = sum(
-            normalized_scores[sys] * adjusted_weights[sys]
-            for sys in normalized_scores
-        )
-
-        # 分歧处理：不施加分数惩罚(避免退化输出)，改为置信度标记
-        # Oracle验证:分歧时加权平均已产生正确方向，惩罚反而是噪声
-        disagreement_capped = has_disagreement and disagreement_score > 0.5
-
-        # ML 少数方分歧增强 (c1skill 2026-06-29 分歧模式分析)
-        # 分歧时 ML 准确率 51.0%(无分歧仅37.9%), 分歧是 ML 信号强度过滤器
-        if ml_minority_boost > 0:
-            self.logger.info(
-                f"[{stock_code}] 分歧时ML少数方增强: +{ml_minority_boost:.2f} "
-                f"(分歧分数={disagreement_score:.2f})"
-            )
-            fusion_score += ml_minority_boost
-            # 钳位边界
-            fusion_score = max(-3.0, min(3.0, fusion_score))
-
-        # ── Step 5: 映射到最终决策 ──
-        final = self._get_final_decision(fusion_score, has_disagreement)
-
-        # ── Step 6: 构建结果 ──
-        result = {
-            "stock_code": stock_code,
-            "stock_name": stock_name,
-            "valid": True,
-            "is_degraded": is_degraded,
-            "degraded_info": f"{valid_count}/3 系统有效" if is_degraded else "",
-            "has_disagreement": has_disagreement,
-            "disagreement_score": round(disagreement_score, 3),
-            "uncertainty_penalty": round(uncertainty_penalty, 3),
-            "lynx_score": round(lynx_normalized, 3),
-            "lynx_valid": lynx_valid,
-            "mindlynx_score": round(mindlynx_normalized, 3),
-            "mindlynx_valid": mindlynx_valid,
-            "tradingagent_score": round(tradingagent_normalized, 3),
-            "tradingagent_valid": tradingagent_valid,
-            "fusion_score": round(fusion_score, 3),
-            "signal": final["signal"],
-            "signal_name": final["name"],
-            "position_advice": final["position"],
-            "disagreement_capped": final.get("disagreement_capped", False),
-            "ta_is_stale": ta_is_stale,
-            "ta_stale_penalty": ta_stale_penalty,
-        }
-
-        # 记录日志
-        self.logger.record_decision(
-            stock_code=stock_code,
-            stock_name=stock_name,
-            lynx_score=lynx_normalized,
-            lynx_valid=lynx_valid,
-            mindlynx_score=mindlynx_normalized,
-            mindlynx_valid=mindlynx_valid,
-            tradingagent_score=tradingagent_normalized,
-            tradingagent_valid=tradingagent_valid,
-            fusion_score=fusion_score,
-            final_signal=final["signal"],
-            position_advice=final["position"],
-            is_degraded=is_degraded,
-            has_disagreement=has_disagreement,
-            fusion_mode=self.fusion_mode,
-        )
-
-        return result
+    def _fuse_linear(self, **kwargs) -> Dict[str, Any]:
+        return self._linear.fuse(**kwargs)
 
     def fuse_stock_pool(
         self, stock_signals: List[Dict[str, Any]],

@@ -238,12 +238,12 @@ class TestFusionEngine:
         # bearish 基础position="大幅减仓", cap_position_for_disagreement 保持"减仓至0.5成以内"
 
     def test_detect_disagreement(self):
-        has, sc = FusionEngine._detect_disagreement(2.0, 2.0, -1.5, True, True, True)
+        has, sc, _ = FusionEngine._detect_disagreement(2.0, 2.0, -1.5, True, True, True)
         assert has is True
         assert sc > 0
 
     def test_detect_no_disagreement(self):
-        has, sc = FusionEngine._detect_disagreement(2.0, 1.5, 0.5, True, True, True)
+        has, sc, _ = FusionEngine._detect_disagreement(2.0, 1.5, 0.5, True, True, True)
         assert has is False
         assert sc == 0.0
 
