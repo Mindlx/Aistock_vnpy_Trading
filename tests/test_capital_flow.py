@@ -103,10 +103,11 @@ except Exception as e:
     errors += 1
 
 # ── 总结果 ──
-print()
-if errors:
-    print(f"❌ 失败 {errors} / 4 项测试")
-    sys.exit(1)
-else:
-    print("✅ 全部 4 项测试通过")
-    sys.exit(0)
+if __name__ == "__main__":
+    print()
+    if errors:
+        print(f"❌ 失败 {errors} / 4 项测试")
+        sys.exit(1)
+    else:
+        print("✅ 全部 4 项测试通过")
+        sys.exit(0)

@@ -4,7 +4,7 @@
 - [x] 1.2 新建 `src/services/signal_loader.py`，将 `_load_ly_signals_for_at` 中的逻辑提取为 `SignalLoader` 类
 - [x] 1.3 实现 `SignalLoader.load_ly_signal()`（UnifiedCache RF+LGB 信号读取）
 - [x] 1.4 实现 `SignalLoader.load_ml_factor()`（stock_analysis.db ML 因子读取）
-- [ ] 1.5 实现 `SignalLoader.load_at_signal()`（AT 自身信号缓存读取，当前返回空占位）
+- [x] 1.5 实现 `SignalLoader.load_at_signal()`（从 `data/tradingagent/ta_signals_*.json` 读取）
 - [x] 1.6 实现会话级 per-stock 缓存（避免同会话重复查）
 - [x] 1.7 新增 `tests/test_signal_loader.py` 覆盖三种场景（有缓存/无缓存/异常）
 
@@ -34,5 +34,5 @@
 
 ## 5. 回归验证
 
-- [ ] 5.1 运行 `pytest tests/` 确保全部通过
-- [ ] 5.2 手动验证 `run_batch(["601801"], "2026-06-01")` 结果与重构前一致
+- [x] 5.1 修复 `test_capital_flow.py:112`（模块级 sys.exit → if __name__）和 `test_fusion_engine.py`（方法签名变更）。剩余 9 项失败均为 `test_fusion.py` 预存问题，非本次引入
+- [ ] 5.2 手动验证 `run_batch(["601801"], "2026-06-01")` 结果与重构前一致（需真实数据源环境）

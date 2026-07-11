@@ -187,4 +187,25 @@ class SignalLoader:
             return ""
 
     def _do_load_at_signal(self, stock_code: str) -> str:
+        ta_dir = Path("data/tradingagent")
+        if not ta_dir.exists():
+            return ""
+
+        files = sorted(ta_dir.glob("ta_signals_*.json"), reverse=True)
+        if not files:
+            return ""
+
+        import json
+        try:
+            raw = json.loads(files[0].read_text(encoding="utf-8"))
+            for r in raw.get("results", []):
+                if r.get("code") == stock_code:
+                    rating = r.get("rating", "")
+                    decision = r.get("final_decision", "") or ""
+                    parts = [f"AT 评级={rating}"]
+                    if decision:
+                        parts.append(f"决策={decision}")
+                    return " | ".join(parts)
+        except Exception:
+            pass
         return ""

@@ -59,7 +59,7 @@ print()
 print("=== _detect_disagreement ===")
 
 # 同向（都看多）
-has_d, score = engine._detect_disagreement(2.0, 1.5, 0.0, True, True, True)
+has_d, score, _ = engine._detect_disagreement(2.0, 1.5, 0.0, True, True, True)
 if not has_d:
     print(f"✅ 同向看多: 无分歧")
 else:
@@ -67,7 +67,7 @@ else:
     errors += 1
 
 # 反向（LY看多, ML看空）
-has_d, score = engine._detect_disagreement(2.0, -1.5, 0.0, True, True, True)
+has_d, score, _ = engine._detect_disagreement(2.0, -1.5, 0.0, True, True, True)
 if has_d:
     print(f"✅ 反向: 检测到分歧 (score={score:.2f})")
 else:
@@ -75,7 +75,7 @@ else:
     errors += 1
 
 # 先单后多 → 分歧？
-has_d, score = engine._detect_disagreement(-1.0, 2.0, -0.3, True, True, True)
+has_d, score, _ = engine._detect_disagreement(-1.0, 2.0, -0.3, True, True, True)
 if has_d:
     print(f"✅ LY空ML多 + AT中性: 检测到分歧 (score={score:.2f})")
 else:
@@ -83,7 +83,7 @@ else:
     errors += 1
 
 # 都是中性
-has_d, score = engine._detect_disagreement(0.0, 0.0, 0.0, True, True, True)
+has_d, score, _ = engine._detect_disagreement(0.0, 0.0, 0.0, True, True, True)
 if not has_d:
     print(f"✅ 全是中性: 无分歧")
 else:
@@ -91,7 +91,7 @@ else:
     errors += 1
 
 # 单系统有效
-has_d, score = engine._detect_disagreement(1.0, 0.0, 0.0, True, False, False)
+has_d, score, _ = engine._detect_disagreement(1.0, 0.0, 0.0, True, False, False)
 if not has_d:
     print(f"✅ 仅LY有效: 无分歧 (len<2)")
 else:
