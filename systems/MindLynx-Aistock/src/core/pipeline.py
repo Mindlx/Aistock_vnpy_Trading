@@ -428,169 +428,14 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                     trend_result,
                 )
 
-            # Step 4: 多维度情报搜索（最新消息+风险排查+业绩预期）
-            news_context = None
-            self._emit_progress(46, f"{stock_name}：正在检索新闻与舆情")
-            if self.search_service is not None and self.search_service.is_available:
-                logger.info(f"{stock_name}({code}) 开始多维度情报搜索...")
-
-                # 使用多维度搜索（最多5次搜索）
-                intel_results = self.search_service.search_comprehensive_intel(
-                    stock_code=code, stock_name=stock_name, max_searches=5
-                )
-
-                # 格式化情报报告
-                if intel_results:
-                    news_context = self.search_service.format_intel_report(intel_results, stock_name)
-                    total_results = sum(len(r.results) for r in intel_results.values() if r.success)
-                    logger.info(f"{stock_name}({code}) 情报搜索完成: 共 {total_results} 条结果")
-                    logger.debug(f"{stock_name}({code}) 情报搜索结果:\n{news_context}")
-
-                    # 保存新闻情报到数据库（用于后续复盘与查询）
-                    try:
-                        query_context = self._build_query_context(query_id=query_id)
-                        for dim_name, response in intel_results.items():
-                            if response and response.success and response.results:
-                                self.db.save_news_intel(
-                                    code=code,
-                                    name=stock_name,
-                                    dimension=dim_name,
-                                    query=response.query,
-                                    response=response,
-                                    query_context=query_context,
-                                )
-                    except Exception as e:
-                        logger.warning(f"{stock_name}({code}) 保存新闻情报失败: {e}")
-            else:
-                logger.info(f"{stock_name}({code}) 搜索服务不可用，跳过情报搜索")
-
-            # 追加 EastMoney/Cninfo 到 news_context（Step 3.5 采集的数据）
-            if _daily_intel_eastmoney_digest:
-                if news_context:
-                    news_context = news_context + "\n\n" + _daily_intel_eastmoney_digest
-                else:
-                    news_context = _daily_intel_eastmoney_digest
-
-            # Step 4.5: Social sentiment intelligence (US stocks only)
-            if (
-                self.social_sentiment_service is not None
-                and self.social_sentiment_service.is_available
-                and is_us_stock_code(code)
-            ):
-                try:
-                    social_context = self.social_sentiment_service.get_social_context(code)
-                    if social_context:
-                        logger.info(f"{stock_name}({code}) Social sentiment data retrieved")
-                        if news_context:
-                            news_context = news_context + "\n\n" + social_context
-                        else:
-                            news_context = social_context
-                except Exception as e:
-                    logger.warning(f"{stock_name}({code}) Social sentiment fetch failed: {e}")
-
-            # Step 5: 获取分析上下文（技术面数据）
-            self._emit_progress(58, f"{stock_name}：正在整理分析上下文")
-            context = self.db.get_analysis_context(code)
-
-            if context is None:
-                logger.warning(f"{stock_name}({code}) 无法获取历史行情数据，将仅基于新闻和实时行情分析")
-                _mkt_date = get_market_now(get_market_for_stock(normalize_stock_code(code))).date()
-                context = {
-                    "code": code,
-                    "stock_name": stock_name,
-                    "date": _mkt_date.isoformat(),
-                    "data_missing": True,
-                    "today": {},
-                    "yesterday": {},
-                }
-
-            # Step 6: 增强上下文数据（添加实时行情、筹码、趋势分析结果、股票名称）
-            enhanced_context = self._enhance_context(
-                context,
-                realtime_quote,
-                chip_data,
-                trend_result,
-                stock_name,  # 传入股票名称
-                fundamental_context,
+            news_context = self._gather_intelligence(
+                code, stock_name, query_id, _daily_intel_eastmoney_digest,
             )
 
-            # Step 7: 调用 AI 分析（传入增强的上下文和新闻）
-            llm_progress_state = {"last_progress": 64}
-
-            def _on_llm_stream(chars_received: int) -> None:
-                dynamic_progress = min(92, 64 + min(chars_received // 80, 28))
-                if dynamic_progress <= llm_progress_state["last_progress"]:
-                    return
-                llm_progress_state["last_progress"] = dynamic_progress
-                self._emit_progress(
-                    dynamic_progress,
-                    f"{stock_name}：LLM 正在生成分析结果（已接收 {chars_received} 字符）",
-                )
-
-            self._emit_progress(64, f"{stock_name}：正在请求 LLM 生成报告")
-            result = self.analyzer.analyze(
-                enhanced_context,
-                news_context=news_context,
-                progress_callback=self._emit_progress,
-                stream_progress_callback=_on_llm_stream,
+            result = self._analyze_traditional(
+                code, stock_name, report_type, query_id,
+                realtime_quote, chip_data, trend_result, fundamental_context, news_context,
             )
-
-            # Step 7.5: 填充分析时的价格信息到 result
-            if result:
-                self._emit_progress(94, f"{stock_name}：正在校验并整理分析结果")
-                result.query_id = query_id
-                realtime_data = enhanced_context.get("realtime", {})
-                result.current_price = realtime_data.get("price")
-                result.change_pct = realtime_data.get("change_pct")
-                # 同步设置 volume_ratio 到 result，供通知推送使用
-                result.volume_ratio_5d = realtime_data.get("volume_ratio")
-                result.volume_ratio_is_daily = getattr(realtime_quote, "_vr_is_daily", False)
-
-            # Step 7.6: chip_structure fallback (Issue #589)
-            if result and chip_data:
-                fill_chip_structure_if_needed(result, chip_data)
-
-            # Step 7.7: price_position fallback
-            if result:
-                fill_price_position_if_needed(result, trend_result, realtime_quote)
-                stabilize_decision_with_structure(result, trend_result, fundamental_context)
-
-            # Step 8: 保存分析历史记录
-            if result and result.success:
-                try:
-                    self._emit_progress(97, f"{stock_name}：正在保存分析报告")
-                    context_snapshot = self._build_context_snapshot(
-                        enhanced_context=enhanced_context,
-                        news_content=news_context,
-                        realtime_quote=realtime_quote,
-                        chip_data=chip_data,
-                    )
-                    self.db.save_analysis_history(
-                        result=result,
-                        query_id=query_id,
-                        report_type=report_type.value,
-                        news_content=news_context,
-                        context_snapshot=context_snapshot,
-                        save_snapshot=self.save_context_snapshot,
-                        skill_id=",".join(self.analysis_skills) if self.analysis_skills else "consensus",
-                    )
-                except Exception as e:
-                    logger.warning(f"{stock_name}({code}) 保存分析历史失败: {e}")
-
-            # 持久化决策信号（P0: fail-open, 不影响主流程）
-            if result and result.success:
-                try:
-                    from src.services.decision_signal_service import DecisionSignalService
-
-                    ds = DecisionSignalService()
-                    ds.save_from_agent_result(
-                        dashboard=result.dashboard if hasattr(result, "dashboard") else None,
-                        stock_code=code,
-                        stock_name=stock_name,
-                        query_id=query_id,
-                    )
-                except Exception as e:
-                    logger.debug(f"[{code}] 保存决策信号失败: {e}")
 
             return result
 
@@ -598,6 +443,95 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             logger.error(f"{stock_name}({code}) 分析失败: {e}")
             logger.exception(f"{stock_name}({code}) 详细错误信息:")
             return None
+
+    def _gather_intelligence(
+        self, code: str, stock_name: str, query_id: str,
+        daily_intel_digest: str | None,
+    ) -> str | None:
+        news_context = None
+        self._emit_progress(46, f"{stock_name}：正在检索新闻与舆情")
+        if self.search_service is not None and self.search_service.is_available:
+            intel = self.search_service.search_comprehensive_intel(
+                stock_code=code, stock_name=stock_name, max_searches=5)
+            if intel:
+                news_context = self.search_service.format_intel_report(intel, stock_name)
+                try:
+                    qc = self._build_query_context(query_id=query_id)
+                    for dim, resp in intel.items():
+                        if resp and resp.success and resp.results:
+                            self.db.save_news_intel(
+                                code=code, name=stock_name, dimension=dim,
+                                query=resp.query, response=resp, query_context=qc)
+                except Exception as e:
+                    logger.warning(f"{stock_name}({code}) 保存新闻情报失败: {e}")
+        if daily_intel_digest:
+            news_context = (news_context + "\n\n" + daily_intel_digest) if news_context else daily_intel_digest
+        if (self.social_sentiment_service is not None and self.social_sentiment_service.is_available
+                and is_us_stock_code(code)):
+            try:
+                sc = self.social_sentiment_service.get_social_context(code)
+                if sc:
+                    news_context = (news_context + "\n\n" + sc) if news_context else sc
+            except Exception as e:
+                logger.warning(f"{stock_name}({code}) Social sentiment fetch failed: {e}")
+        return news_context
+
+    def _analyze_traditional(
+        self, code: str, stock_name: str, report_type: ReportType, query_id: str,
+        realtime_quote, chip_data, trend_result, fundamental_context, news_context,
+    ) -> AnalysisResult | None:
+        self._emit_progress(58, f"{stock_name}：正在整理分析上下文")
+        context = self.db.get_analysis_context(code)
+        if context is None:
+            mkt = get_market_now(get_market_for_stock(normalize_stock_code(code))).date()
+            context = {"code": code, "stock_name": stock_name, "date": mkt.isoformat(),
+                       "data_missing": True, "today": {}, "yesterday": {}}
+        enhanced = self._enhance_context(context, realtime_quote, chip_data, trend_result, stock_name, fundamental_context)
+
+        llm_state = {"last": 64}
+        def _on_stream(chars: int):
+            dp = min(92, 64 + min(chars // 80, 28))
+            if dp > llm_state["last"]:
+                llm_state["last"] = dp
+                self._emit_progress(dp, f"{stock_name}：LLM 生成中（已接收 {chars} 字符）")
+
+        self._emit_progress(64, f"{stock_name}：正在请求 LLM 生成报告")
+        result = self.analyzer.analyze(enhanced, news_context=news_context,
+                                       progress_callback=self._emit_progress,
+                                       stream_progress_callback=_on_stream)
+
+        if result:
+            result.query_id = query_id
+            rd = enhanced.get("realtime", {})
+            result.current_price = rd.get("price")
+            result.change_pct = rd.get("change_pct")
+            result.volume_ratio_5d = rd.get("volume_ratio")
+            result.volume_ratio_is_daily = getattr(realtime_quote, "_vr_is_daily", False)
+        if result and chip_data:
+            fill_chip_structure_if_needed(result, chip_data)
+        if result:
+            fill_price_position_if_needed(result, trend_result, realtime_quote)
+            stabilize_decision_with_structure(result, trend_result, fundamental_context)
+
+        if result and result.success:
+            try:
+                snap = self._build_context_snapshot(enhanced_context=enhanced, news_content=news_context,
+                                                    realtime_quote=realtime_quote, chip_data=chip_data)
+                self.db.save_analysis_history(
+                    result=result, query_id=query_id, report_type=report_type.value,
+                    news_content=news_context, context_snapshot=snap,
+                    save_snapshot=self.save_context_snapshot,
+                    skill_id=",".join(self.analysis_skills) if self.analysis_skills else "consensus")
+            except Exception as e:
+                logger.warning(f"{stock_name}({code}) 保存分析历史失败: {e}")
+            try:
+                from src.services.decision_signal_service import DecisionSignalService
+                DecisionSignalService().save_from_agent_result(
+                    dashboard=result.dashboard if hasattr(result, "dashboard") else None,
+                    stock_code=code, stock_name=stock_name, query_id=query_id)
+            except Exception as e:
+                logger.debug(f"[{code}] 保存决策信号失败: {e}")
+        return result
 
     def _enhance_context(
         self,
