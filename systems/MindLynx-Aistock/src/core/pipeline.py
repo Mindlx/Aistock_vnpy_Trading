@@ -1308,513 +1308,35 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
         fundamental_context: dict[str, Any] | None = None,
         trend_result: TrendAnalysisResult | None = None,
     ) -> AnalysisResult | None:
-        """
-        使用 Agent 模式分析单只股票。
-        """
         try:
             from src.agent.factory import build_agent_executor
-
             report_language = normalize_report_language(getattr(self.config, "report_language", "zh"))
-
             requested_skills = (
-                self.analysis_skills
-                if self.analysis_skills is not None
+                self.analysis_skills if self.analysis_skills is not None
                 else (getattr(self.config, "agent_skills", None) or None)
             )
-            # Build executor from shared factory (ToolRegistry and SkillManager prototype are cached)
             executor = build_agent_executor(self.config, requested_skills)
 
-            # Build initial context to avoid redundant tool calls
-            initial_context = {
-                "stock_code": code,
-                "stock_name": stock_name,
-                "report_type": report_type.value,
-                "report_language": report_language,
-                "fundamental_context": fundamental_context,
-            }
-            if self.analysis_skills is not None:
-                initial_context["skills"] = self.analysis_skills
-
-            if realtime_quote:
-                initial_context["realtime_quote"] = self._safe_to_dict(realtime_quote)
-                # ⚡ 如果实时数据中量比缺失，从日K线数据自行计算（与 _enhance_context 相同逻辑）
-                if getattr(realtime_quote, "volume_ratio", None) is None:
-                    try:
-                        rows = self.db.get_latest_data(code, days=6)
-                        if rows and len(rows) >= 2:
-                            today_vol = float(getattr(rows[0], "volume", 0) or 0)
-                            vols = [float(getattr(r, "volume", 0) or 0) for r in rows[1:]]
-                            avg_5d = sum(vols) / len(vols) if vols else 0
-                            if today_vol > 0 and avg_5d > 0:
-                                vr = round(today_vol / avg_5d, 2)
-                                initial_context["realtime_quote"]["volume_ratio"] = vr
-                    except Exception as e:
-                        logger.debug(f"[pipeline] 整点量比计算失败({code}): {e}")
-            if chip_data:
-                initial_context["chip_distribution"] = self._safe_to_dict(chip_data)
-            if trend_result:
-                initial_context["trend_result"] = self._safe_to_dict(trend_result)
-
-            # East Money rating (market sentiment) for agent path
-            em_text = self._get_stock_eastmoney_rating(code)
-            if em_text:
-                initial_context["eastmoney_rating"] = em_text
-
-            # Agent path: inject social sentiment as news_context so both
-            # executor (_build_user_message) and orchestrator (ctx.set_data)
-            # can consume it through the existing news_context channel
-            if (
-                self.social_sentiment_service is not None
-                and self.social_sentiment_service.is_available
-                and is_us_stock_code(code)
-            ):
-                try:
-                    social_context = self.social_sentiment_service.get_social_context(code)
-                    if social_context:
-                        existing = initial_context.get("news_context")
-                        if existing:
-                            initial_context["news_context"] = existing + "\n\n" + social_context
-                        else:
-                            initial_context["news_context"] = social_context
-                        logger.info(f"[{code}] Agent mode: social sentiment data injected into news_context")
-                except Exception as e:
-                    logger.warning(f"[{code}] Agent mode: social sentiment fetch failed: {e}")
-
-            # Issue #1066: ensure deep history is in DB before agent tools run
-            self._ensure_agent_history(code)
-
-            # O6: inject daily intelligence into agent path
-            try:
-                with self.db.session_scope() as sess:
-                    from sqlalchemy import text
-                    rows = sess.execute(
-                        text(
-                            "SELECT title, snippet, importance, source FROM news_intel "
-                            "WHERE dimension='daily_intel' "
-                            "AND created_at > datetime('now', '-1 day') "
-                            "ORDER BY importance DESC, created_at DESC LIMIT 8"
-                        )
-                    ).fetchall()
-                    if rows:
-                        lines = ["## 📰 近日要闻 (Daily Intel)"]
-                        for r in rows:
-                            imp = r[2]
-                            imp_icon = get_importance_emoji(imp)
-                            src = r[3] or ""
-                            lines.append(f"{imp_icon} [{src}] {r[0][:60]} — {r[1][:80]}")
-                        lines.append("> 以上要闻基于最近24小时搜集，仅供参考。")
-                        daily_intel = "\n".join(lines)
-                        existing = initial_context.get("news_context", "")
-                        initial_context["news_context"] = daily_intel + ("\n\n" + existing if existing else "")
-            except Exception:
-                logger.debug("[pipeline] 每日情报(daily_intel)注入失败(code=%s)", code)
-
-            # RSS intelligence: inject pre-fetched RSS items for this stock
-            try:
-                if getattr(self.config, "rss_pipeline_enabled", False):
-                    from src.repositories.intelligence_repo import IntelligenceRepository
-
-                    _repo = IntelligenceRepository()
-                    _items = _repo.get_recent_items_by_scope("symbol", code, limit=10, max_days=7)
-                    if _items:
-                        _lines = ["## 📡 RSS 情报（最近 7 天）"]
-                        for _item in _items:
-                            _pub = _item.published_at.strftime("%m-%d") if _item.published_at else ""
-                            _src = _item.source_name or _item.source or ""
-                            _lines.append(f"- [{_pub}] [{_src}] {_item.title[:80]}")
-                            if _item.summary:
-                                _lines.append(f"  {_item.summary[:150]}")
-                        _lines.append("> 以上 RSS 情报由已配置的资讯源自动抓取，仅供参考。")
-                        _rss_text = "\n".join(_lines)
-                        if len(_rss_text) > 2000:
-                            _rss_text = _rss_text[:2000] + "\n...（已截断）"
-                        initial_context["rss_intelligence"] = _rss_text
-                        logger.info("[%s] RSS intelligence injected into agent context", code)
-            except Exception:
-                logger.debug("[pipeline] RSS情报注入失败(code=%s)", code)
-
-            # Inject market background into agent message
-            try:
-                from pathlib import Path
-                import glob as _glob
-                files = sorted(_glob.glob("reports/market_review_*.md"), reverse=True)
-                if files:
-                    with open(files[0], "r", encoding="utf-8") as f:
-                        content = f.read()
-                    lines = []
-                    for ln in content.split("\n"):
-                        if ln.startswith("> ") and "核心原因" not in ln and "操作建议" not in ln:
-                            if "盘面温度" in ln or "大盘红绿灯" in ln:
-                                lines.append(ln.lstrip("> ").strip())
-                            elif not lines:
-                                lines.append(ln.lstrip("> ").strip())
-                    sec3 = content.find("### 三、板块主线")
-                    if sec3 > 0:
-                        for p in content[sec3:].split("\n")[1:4]:
-                            p = p.strip()
-                            if p and not p.startswith("|") and not p.startswith("#") and len(p) > 30:
-                                lines.append(p[:150])
-                                break
-                    if lines:
-                        market_bg = "## 📊 今日大盘背景\n" + "\n".join(f"> {l}" for l in lines[:3])
-                        market_bg += "\n> 以上大盘背景基于最新复盘报告，供个股分析参考。"
-                        existing = initial_context.get("news_context", "")
-                        initial_context["news_context"] = market_bg + ("\n\n" + existing if existing else "")
-            except Exception:
-                pass
-
-            # P4: 注入股票知识库（历史对比，非覆盖）
-            try:
-                from src.core.stock_knowledge import build_stock_knowledge
-
-                knowledge = build_stock_knowledge(code)
-                initial_context["knowledge_prompt"] = knowledge.get("knowledge_prompt", "")
-            except Exception as exc:
-                logger.debug("[KnowledgeBase] %s unavailable: %s", code, exc)
-
-            # 注入 concept_context（所属板块）到 agent 上下文
-            try:
-                _boards = (fundamental_context or {}).get("belong_boards") or []
-                if _boards:
-                    initial_context["concept_context"] = f"所属概念/板块: {', '.join(_boards[:5])}"
-            except Exception:
-                pass
-
-            # 注入 sr_levels（支撑/阻力位）到 agent 上下文
-            try:
-                from src.core.support_resistance import compute_levels, format_levels
-                with self.db.session_scope() as sess:
-                    _rows = sess.execute(
-                        __import__("sqlalchemy").text(
-                            "SELECT close, high, low, volume FROM stock_daily WHERE code=:code ORDER BY date"
-                        ),
-                        {"code": code},
-                    ).fetchall()
-                if _rows and len(_rows) >= 20:
-                    _c = [float(r[0]) for r in _rows]
-                    _h = [float(r[1]) for r in _rows]
-                    _l = [float(r[2]) for r in _rows]
-                    _v = [float(r[3]) for r in _rows]
-                    _sup, _res = compute_levels(_c, _h, _l, _v)
-                    _sr_text = format_levels(_sup, _res)
-                    if _sr_text:
-                        initial_context["sr_levels"] = _sr_text
-            except Exception:
-                pass
-
-            # P5: 注入定量锚定数据 — 因子/机制/仓位/估值校准
-            factor_text = getattr(self, "_factor_profiles", {}).get(code, "")
-            if factor_text:
-                initial_context["factor_profile"] = factor_text
-            regime_text = getattr(self, "_regime_prompt", "")
-            if regime_text:
-                initial_context["regime_prompt"] = regime_text
-            allocation_text = getattr(self, "_allocation_prompt", "")
-            if allocation_text:
-                initial_context["allocation_prompt"] = allocation_text
-
-            # Inject market phase context so LLM knows current trading session timing
-            try:
-                from src.market_phase_prompt import build_market_phase_prompt_for_stock
-
-                _phase_prompt = build_market_phase_prompt_for_stock(code)
-                if _phase_prompt:
-                    initial_context["market_phase_prompt"] = _phase_prompt
-            except Exception:
-                pass
-
-            position_text = ""
-            try:
-                from src.core.position_sizer import build_position_prompt, compute_position_size
-
-                price = None
-                if realtime_quote:
-                    price = getattr(realtime_quote, "price", None)
-                if not price and trend_result:
-                    price = getattr(trend_result, "current_price", None)
-                if price and price > 0:
-                    # Compute ATR from DB (matching traditional path at line 676-700)
-                    with self.db.session_scope() as _session:
-                        rows = _session.execute(
-                            __import__("sqlalchemy").text(
-                                "SELECT close, high, low FROM stock_daily WHERE code=:code ORDER BY date DESC LIMIT 30"
-                            ),
-                            {"code": code},
-                        ).fetchall()
-                    atr_val = 0.0
-                    if rows and len(rows) >= 15:
-                        from src.core.indicators import atr as _atr_indicator
-                        highs = [float(r[1]) for r in rows]
-                        lows = [float(r[2]) for r in rows]
-                        closes = [float(r[0]) for r in rows]
-                        atr_arr = _atr_indicator(highs, lows, closes, period=14)
-                        atr_val = [v for v in atr_arr if v == v][-1] if atr_arr else 0.0
-                    # Use regime ATR multiplier if available, else default 2.0
-                    atr_mult = _regime_atr_multiplier(self) if hasattr(self, '_regime_prompt') else 2.0
-                    ps = compute_position_size(float(price), atr_val, atr_multiplier=atr_mult)
-                    position_text = build_position_prompt(ps)
-            except Exception:
-                pass
-            if position_text:
-                initial_context["position_prompt"] = position_text
-            cal_text = getattr(self, "_fundamental_calibration", {}).get(code, "")
-            if cal_text:
-                initial_context["fundamental_calibration"] = cal_text
-
-            # 运行 Agent
-
-            # 注入 LY 量化信号（与 traditional path 共用 _ly_signals）
-            ly_text = getattr(self, "_ly_signals", {}).get(code, "")
-            if ly_text:
-                initial_context["ly_signal"] = ly_text
-            if report_language == "en":
-                message = f"Analyze stock {code} ({stock_name}) and return the full decision dashboard JSON in English."
-            else:
-                message = f"请分析股票 {code} ({stock_name})，并生成决策仪表盘报告。"
-
-            # 注入知识库到消息末尾（对比参考）
-            kb_text = initial_context.get("knowledge_prompt", "")
-            if kb_text:
-                message += "\n\n---\n\n" + kb_text
-                message += "\n\n> 📋 对比指令：请将历史背景与当前数据做比较分析。如历史结论与当前数据存在重大冲突（如上次看空、本次看多），请在分析摘要中备注说明原因。**重要**：上述历史分析分数是 AI 自身之前的判断——仅作为背景参考。应以当前 OHLCV 衍生数据为主要判断依据。若历史判断与当前数据矛盾，优先跟随当前数据。"
-
-            # 注入数据新鲜度：告知 AI 各项数据的采集时间和来源，帮助判断可靠性
-            from datetime import datetime as _dt
-
-            _now_str = _dt.now().strftime("%Y-%m-%d %H:%M")
-            message += f"\n\n---\n\n## ⏱️ 数据新鲜度\n> 当前时间: {_now_str}\n> 日线数据来源: 17取数器优先级链 (efinance→akshare→tushare→...)\n> 实时行情: 腾讯/新浪/东财 (缓存≤10min)\n> 因子评分: 基于最近60个交易日计算\n> 估值校准: 当日PE/PB vs 行业均值\n> ⚠️ 如某项数据早于当前日期,请降低其在决策中的参考权重"
-
-            # === C1 修复：信号相关性提示 ===
-            # 告知 LLM 定量因子、技术指标、体制分类共享相同底层 OHLCV 数据
-            message += (
-                "\n\n---\n\n## ⚠️ 信号相关性提示\n\n"
-                "以下定量因子得分（z-scores）、市场体制状态、ATR 仓位建议均源自相同的基础行情数据（OHLCV）。它们并非独立的验证来源。\n\n"
-                "**信号分组**（同组内信号高度相关，跨组间独立性较强）：\n"
-                "- **趋势组**：均线排列、momentum_reversal、momentum_spread、regime 趋势分类、consecutive_direction\n"
-                "- **波动/风险组**：low_volatility、volatility_ratio、regime 波动分类、max_effect\n"
-                "- **位置组**：price_position、乖离率\n\n"
-                "**解读规则**：\n"
-                "1. 同组内多个信号方向一致 → 构成额外确认（约 1.2-1.5× 证据强度），**不是**多重独立验证\n"
-                "2. 跨组信号方向一致（如趋势组看多 + 波动组看多）→ 置信度可适度更高（约 1.5-2.0×）\n"
-                "3. 同组内信号方向冲突 → 该组信号本身存在不确定性，降低该维度的权重\n"
-            )
-            # === C2 修复：成交量多机制区分 ===
-            # 告知 LLM 逆向/情绪类 vs 趋势跟随/量价确认类是不同的市场机制
-            message += (
-                "\n\n---\n\n## 📊 成交量信号多机制说明\n\n"
-                "成交量衍生的多个信号测量的是**不同的市场机制**：\n"
-                "- **逆向/情绪类**（turnover_sentiment、emotion_cycle）：高成交量 = 散户追涨/情绪过热 → 偏空/谨慎\n"
-                "- **趋势跟随/量价确认类**（volume_breakout、volume_status、bottom_volume、放量拉升）：高成交量 = 突破确认/主力介入/恐慌出清 → 偏多\n"
-                "> 请分别评估这两种机制，而非将其视为矛盾信号。\n"
+            initial_context = self._build_agent_context(
+                code, stock_name, report_type, report_language,
+                realtime_quote, chip_data, fundamental_context, trend_result,
             )
 
-
-                        # === F1+F2 修复：因子 vs 趋势分析关系 + 优先级指引 ===
-            message += (
-                "\n\n---\n\n## 📊 因子评分与趋势分析的关系\n\n"
-                "因子 z-scores（FactorEngine）与趋势评分（StockTrendAnalyzer）代表了**两种不同的评分体系**：\n"
-                "- **因子层**：IC/IR 经验校准的定量笼子，划定评分区间（方向性判断优先）\n"
-                "- **趋势层**：用户交易理念驱动的规则信号（入场时机判断优先）\n"
-                "> 两者一致时适度提升置信度；分歧时：方向性以因子为主导，时机性以趋势为主导。\n"
+            message = self._build_agent_message(
+                initial_context, code, stock_name, report_language,
             )
-
-            # === C5+C6 修复：策略规则关系 + S/R 使用规则 ===
-            message += (
-                "\n\n---\n\n## 📋 策略规则与支撑阻力使用指引\n\n"
-                "**策略规则**：提示中已包含原始行情数据（OHLCV、均线值、乖离率、量比、换手率等）。"
-                "策略 YAML 中定义的触发条件（如 MA5 > MA10 > MA20、量比 > 2.0）可直接对照原始数据进行判断。"
-                "请勿将「对照数据检查策略条件」视为独立于原始数据的额外分析步骤。\n"
-                "**支撑/阻力位**：请直接使用系统计算的关键支撑/阻力位（基于 OHLCV 聚类）"
-                "填充 support_level 和 resistance_level 字段，而非自行重新推导。若系统未能提供，再自行计算。\n"
-            )
-
-            # 注入定量锚定数据（因子+机制+仓位+PE/PB+概念+S/R校准）
-            for _key, _label in [
-                ("factor_profile", "📊 量化因子评分"),
-                ("regime_prompt", "🌡️ 市场体制状态"),
-                ("allocation_prompt", "📐 组合风险分配"),
-                ("position_prompt", "🎯 ATR 动态仓位建议"),
-                ("concept_context", "📂 所属概念/板块"),
-                ("sr_levels", "📊 关键支撑/阻力位"),
-                ("fundamental_calibration", "💰 PE/PB 估值校准"),
-            ]:
-                _val = initial_context.get(_key, "")
-                if _val:
-                    message += f"\n\n---\n\n## {_label}\n{_val}"
 
             agent_result = executor.run(message, context=initial_context)
 
-            # 转换为 AnalysisResult
-            result = self._agent_result_to_analysis_result(
-                agent_result,
-                code,
-                stock_name,
-                report_type,
-                query_id,
-                trend_result=trend_result,
+            result = self._process_agent_result(
+                agent_result, code, stock_name, report_type, query_id, trend_result,
             )
+
             if result:
-                result.query_id = query_id
-
-            if result and result.success:
-                factor_score = self._factor_scores.get(code, 0.0)
-                if abs(factor_score) > 0.01:
-                    factor_mapped = int(50 + factor_score * 15)
-                    factor_mapped = max(10, min(90, factor_mapped))
-                    llm_score = result.sentiment_score
-                    divergence = abs(llm_score - factor_mapped)
-                    if divergence >= 20:
-                        # D2 fix: time-series normalization is reliable for N=1 (self-historical
-                        # distribution). Use 0.7/0.3 to preserve some cross-sectional context gap.
-                        n_stocks = getattr(self, "_stock_count", 0)
-                        llm_w = 0.7 if n_stocks == 1 else 0.6
-                        factor_w = 0.3 if n_stocks == 1 else 0.4
-                        logger.info(
-                            "[锚定] %s LLM=%d vs Factor=%d (divergence=%d, N=%d, llm_w=%.1f)",
-                            code, llm_score, factor_mapped, divergence, n_stocks, llm_w,
-                        )
-                        result.sentiment_score = int(llm_score * llm_w + factor_mapped * factor_w)
-                        if result.dashboard:
-                            result.dashboard.setdefault("quant_summary", {})
-                            result.dashboard["quant_summary"]["factor_anchor"] = (
-                                f"⚠️ LLM({llm_score})与因子({factor_mapped})分歧{divergence}分,"
-                                f" 加权融合为{result.sentiment_score}"
-                            )
-
-            # Agent weak integrity: placeholder fill only, no LLM retry
-            if result and getattr(self.config, "report_integrity_enabled", False):
-                from src.analyzer import apply_placeholder_fill, check_content_integrity
-
-                pass_integrity, missing = check_content_integrity(result)
-                if not pass_integrity:
-                    apply_placeholder_fill(result, missing)
-                    # D3 fix: mark that placeholders were filled so downstream consumers know
-                    if result.dashboard:
-                        result.dashboard.setdefault("quant_summary", {})
-                        result.dashboard["quant_summary"]["integrity_placeholder_filled"] = True
-                    logger.info(
-                        "[LLM完整性] integrity_mode=agent_weak 必填字段缺失 %s，已占位补全",
-                        missing,
-                    )
-            # chip_structure fallback (Issue #589), before save_analysis_history
-            if result and chip_data:
-                fill_chip_structure_if_needed(result, chip_data)
-
-            # price_position fallback (same as non-agent path Step 7.7)
-            if result:
-                fill_price_position_if_needed(result, trend_result, realtime_quote)
-                realtime_data = initial_context.get("realtime_quote", {})
-                if isinstance(realtime_data, dict):
-                    result.current_price = realtime_data.get("price")
-                    result.change_pct = realtime_data.get("change_pct")
-                    # 同步设置 volume_ratio 到 result，供通知推送使用（与 _enhance_context 相同逻辑）
-                    result.volume_ratio_5d = realtime_data.get("volume_ratio")
-                    result.volume_ratio_is_daily = getattr(realtime_quote, "_vr_is_daily", False)
-                stabilize_decision_with_structure(result, trend_result, fundamental_context)
-
-            # 注入量化摘要到 dashboard（移动端推送用）
-            if result:
-                quant_extra: dict[str, Any] = {}
-                try:
-                    factor_text = initial_context.get("factor_profile", "")
-                    kb_text = initial_context.get("knowledge_prompt", "")
-                    regime_text = getattr(self, "_regime_prompt", "")
-                    if factor_text:
-                        # 按行边界截断，避免切碎表格行产生孤立符号
-                        _truncated = factor_text[:200]
-                        _last_newline = _truncated.rfind('\n')
-                        if _last_newline > 50:  # 至少在50字之后才回退行尾
-                            _truncated = _truncated[:_last_newline]
-                        quant_extra["factor_summary"] = _truncated
-                    if kb_text:
-                        quant_extra["knowledge_summary"] = kb_text[:150]
-                    if regime_text:
-                        quant_extra["regime_summary"] = regime_text[:100]
-                    if quant_extra and result.dashboard:
-                        result.dashboard.setdefault("quant_summary", {}).update(quant_extra)
-                except Exception:
-                    logger.debug("[pipeline] 量化摘要注入失败(code=%s)", code)
-
-                # 注入支撑/压力位
-                try:
-                    from src.core.support_resistance import compute_levels, format_levels
-
-                    with self.db.session_scope() as _session:
-                        rows = _session.execute(
-                            __import__("sqlalchemy").text(
-                                "SELECT close, high, low, volume FROM stock_daily WHERE code=:code ORDER BY date"
-                            ),
-                            {"code": code},
-                        ).fetchall()
-                    if rows and len(rows) >= 20:
-                        c = [float(r[0]) for r in rows]
-                        h = [float(r[1]) for r in rows]
-                        l = [float(r[2]) for r in rows]
-                        v = [float(r[3]) for r in rows]
-                        sup, res = compute_levels(c, h, l, v)
-                        sr_text = format_levels(sup, res)
-                        if sr_text and result.dashboard:
-                            result.dashboard.setdefault("quant_summary", {})["sr_levels"] = sr_text
-                except Exception:
-                    pass
-
-            resolved_stock_name = result.name if result and result.name else stock_name
-
-            # 保存新闻情报到数据库（Agent 工具结果仅用于 LLM 上下文，未持久化，Fixes #396）
-            # 使用 search_stock_news（与 Agent 工具调用逻辑一致），仅 1 次 API 调用，无额外延迟
-            if self.search_service is not None and self.search_service.is_available:
-                try:
-                    news_response = self.search_service.search_stock_news(
-                        stock_code=code, stock_name=resolved_stock_name, max_results=5
-                    )
-                    if news_response.success and news_response.results:
-                        query_context = self._build_query_context(query_id=query_id)
-                        self.db.save_news_intel(
-                            code=code,
-                            name=resolved_stock_name,
-                            dimension="latest_news",
-                            query=news_response.query,
-                            response=news_response,
-                            query_context=query_context,
-                        )
-                        logger.info(f"[{code}] Agent 模式: 新闻情报已保存 {len(news_response.results)} 条")
-                except Exception as e:
-                    logger.warning(f"[{code}] Agent 模式保存新闻情报失败: {e}")
-
-            # 保存分析历史记录
-            if result and result.success:
-                try:
-                    initial_context["stock_name"] = resolved_stock_name
-                    # P2+P3: inject factor_profile and regime_prompt into context_snapshot
-                    initial_context["factor_profile"] = self._factor_profiles.get(code, "")
-                    initial_context["factor_zscores"] = self._factor_zscores.get(code, {})
-                    initial_context["regime_prompt"] = getattr(self, "_regime_prompt", "")
-                    self.db.save_analysis_history(
-                        result=result,
-                        query_id=query_id,
-                        report_type=report_type.value,
-                        news_content=None,
-                        context_snapshot=initial_context,
-                        save_snapshot=self.save_context_snapshot,
-                        skill_id=",".join(self.analysis_skills) if self.analysis_skills else "consensus",
-                    )
-                except Exception as e:
-                    logger.warning(f"[{code}] 保存 Agent 分析历史失败: {e}")
-
-            # 持久化决策信号（P0: fail-open, 不影响主流程）
-            if result and result.success:
-                try:
-                    from src.services.decision_signal_service import DecisionSignalService
-
-                    ds = DecisionSignalService()
-                    ds.save_from_agent_result(
-                        dashboard=result.dashboard,
-                        stock_code=code,
-                        stock_name=resolved_stock_name,
-                        query_id=query_id,
-                    )
-                except Exception as e:
-                    logger.debug(f"[{code}] 保存决策信号失败: {e}")
+                self._post_process_agent(
+                    result, code, stock_name, chip_data, trend_result, realtime_quote,
+                    initial_context, query_id, report_type,
+                )
 
             return result
 
@@ -1822,6 +1344,429 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             logger.error(f"[{code}] Agent 分析失败: {e}")
             logger.exception(f"[{code}] Agent 详细错误信息:")
             return None
+
+    def _build_agent_context(
+        self, code: str, stock_name: str, report_type: ReportType, report_language: str,
+        realtime_quote: Any, chip_data: ChipDistribution | None,
+        fundamental_context: dict[str, Any] | None,
+        trend_result: TrendAnalysisResult | None,
+    ) -> dict[str, Any]:
+        ctx: dict[str, Any] = {
+            "stock_code": code, "stock_name": stock_name,
+            "report_type": report_type.value, "report_language": report_language,
+            "fundamental_context": fundamental_context,
+        }
+        if self.analysis_skills is not None:
+            ctx["skills"] = self.analysis_skills
+
+        if realtime_quote:
+            ctx["realtime_quote"] = self._safe_to_dict(realtime_quote)
+            if getattr(realtime_quote, "volume_ratio", None) is None:
+                try:
+                    rows = self.db.get_latest_data(code, days=6)
+                    if rows and len(rows) >= 2:
+                        tv = float(getattr(rows[0], "volume", 0) or 0)
+                        vols = [float(getattr(r, "volume", 0) or 0) for r in rows[1:]]
+                        av = sum(vols) / len(vols) if vols else 0
+                        if tv > 0 and av > 0:
+                            ctx["realtime_quote"]["volume_ratio"] = round(tv / av, 2)
+                except Exception as e:
+                    logger.debug(f"[pipeline] 整点量比计算失败({code}): {e}")
+        if chip_data:
+            ctx["chip_distribution"] = self._safe_to_dict(chip_data)
+        if trend_result:
+            ctx["trend_result"] = self._safe_to_dict(trend_result)
+
+        em_text = self._get_stock_eastmoney_rating(code)
+        if em_text:
+            ctx["eastmoney_rating"] = em_text
+
+        # Social sentiment (US stocks only)
+        if (self.social_sentiment_service is not None and self.social_sentiment_service.is_available
+                and is_us_stock_code(code)):
+            try:
+                sc = self.social_sentiment_service.get_social_context(code)
+                if sc:
+                    ctx["news_context"] = (ctx.get("news_context", "") + "\n\n" + sc).strip()
+            except Exception as e:
+                logger.warning(f"[{code}] Agent mode: social sentiment fetch failed: {e}")
+
+        self._ensure_agent_history(code)
+
+        # Daily intel
+        try:
+            with self.db.session_scope() as sess:
+                from sqlalchemy import text
+                rows = sess.execute(text(
+                    "SELECT title, snippet, importance, source FROM news_intel "
+                    "WHERE dimension='daily_intel' AND created_at > datetime('now', '-1 day') "
+                    "ORDER BY importance DESC, created_at DESC LIMIT 8"
+                )).fetchall()
+                if rows:
+                    lines = ["## 📰 近日要闻 (Daily Intel)"]
+                    for r in rows:
+                        lines.append(f"{get_importance_emoji(r[2])} [{r[3] or ''}] {r[0][:60]} — {r[1][:80]}")
+                    lines.append("> 以上要闻基于最近24小时搜集，仅供参考。")
+                    di = "\n".join(lines)
+                    ctx["news_context"] = di + ("\n\n" + ctx.get("news_context", "") if ctx.get("news_context") else "")
+        except Exception:
+            logger.debug("[pipeline] 每日情报注入失败(code=%s)", code)
+
+        # RSS intel
+        try:
+            if getattr(self.config, "rss_pipeline_enabled", False):
+                from src.repositories.intelligence_repo import IntelligenceRepository
+                items = IntelligenceRepository().get_recent_items_by_scope("symbol", code, limit=10, max_days=7)
+                if items:
+                    lines = ["## 📡 RSS 情报（最近 7 天）"]
+                    for it in items:
+                        pub = it.published_at.strftime("%m-%d") if it.published_at else ""
+                        src = it.source_name or it.source or ""
+                        lines.append(f"- [{pub}] [{src}] {it.title[:80]}")
+                        if it.summary:
+                            lines.append(f"  {it.summary[:150]}")
+                    lines.append("> 以上 RSS 情报由已配置的资讯源自动抓取，仅供参考。")
+                    rss = "\n".join(lines)
+                    if len(rss) > 2000:
+                        rss = rss[:2000] + "\n...（已截断）"
+                    ctx["rss_intelligence"] = rss
+        except Exception:
+            logger.debug("[pipeline] RSS情报注入失败(code=%s)", code)
+
+        # Market background
+        try:
+            import glob
+            files = sorted(glob.glob("reports/market_review_*.md"), reverse=True)
+            if files:
+                with open(files[0]) as f:
+                    content = f.read()
+                lines = []
+                for ln in content.split("\n"):
+                    if ln.startswith("> ") and "核心原因" not in ln and "操作建议" not in ln:
+                        if "盘面温度" in ln or "大盘红绿灯" in ln:
+                            lines.append(ln.lstrip("> ").strip())
+                        elif not lines:
+                            lines.append(ln.lstrip("> ").strip())
+                sec3 = content.find("### 三、板块主线")
+                if sec3 > 0:
+                    for p in content[sec3:].split("\n")[1:4]:
+                        p = p.strip()
+                        if p and not p.startswith("|") and not p.startswith("#") and len(p) > 30:
+                            lines.append(p[:150])
+                            break
+                if lines:
+                    mb = "## 📊 今日大盘背景\n" + "\n".join(f"> {l}" for l in lines[:3])
+                    mb += "\n> 以上大盘背景基于最新复盘报告，供个股分析参考。"
+                    ctx["news_context"] = mb + ("\n\n" + ctx.get("news_context", "") if ctx.get("news_context") else "")
+        except Exception:
+            pass
+
+        # Knowledge base
+        try:
+            from src.core.stock_knowledge import build_stock_knowledge
+            kb = build_stock_knowledge(code)
+            ctx["knowledge_prompt"] = kb.get("knowledge_prompt", "")
+        except Exception as exc:
+            logger.debug("[KnowledgeBase] %s unavailable: %s", code, exc)
+
+        # Concept context
+        try:
+            boards = (fundamental_context or {}).get("belong_boards") or []
+            if boards:
+                ctx["concept_context"] = f"所属概念/板块: {', '.join(boards[:5])}"
+        except Exception:
+            pass
+
+        # SR levels
+        try:
+            with self.db.session_scope() as sess:
+                from sqlalchemy import text as _t
+                rows = sess.execute(_t(
+                    "SELECT close, high, low, volume FROM stock_daily WHERE code=:code ORDER BY date"
+                ), {"code": code}).fetchall()
+            if rows and len(rows) >= 20:
+                from src.core.support_resistance import compute_levels, format_levels
+                c_ = [float(r[0]) for r in rows]
+                h_ = [float(r[1]) for r in rows]
+                l_ = [float(r[2]) for r in rows]
+                v_ = [float(r[3]) for r in rows]
+                sup, res = compute_levels(c_, h_, l_, v_)
+                sr_t = format_levels(sup, res)
+                if sr_t:
+                    ctx["sr_levels"] = sr_t
+        except Exception:
+            pass
+
+        # Quantitative anchor data
+        for attr, key in [("_factor_profiles", "factor_profile"), ("_regime_prompt", "regime_prompt"),
+                          ("_allocation_prompt", "allocation_prompt")]:
+            val = getattr(self, attr, {}).get(code, "") if isinstance(getattr(self, attr, None), dict) else getattr(self, attr, "")
+            if val:
+                ctx[key] = val
+
+        # LY signal
+        ly_text = getattr(self, "_ly_signals", {}).get(code, "")
+        if ly_text:
+            ctx["ly_signal"] = ly_text
+
+        # Position sizing
+        try:
+            from src.core.position_sizer import build_position_prompt, compute_position_size
+            price = getattr(realtime_quote, "price", None) if realtime_quote else None
+            if not price and trend_result:
+                price = getattr(trend_result, "current_price", None)
+            if price and price > 0:
+                with self.db.session_scope() as _session:
+                    rows = _session.execute(
+                        __import__("sqlalchemy").text(
+                            "SELECT close, high, low FROM stock_daily WHERE code=:code ORDER BY date DESC LIMIT 30"
+                        ), {"code": code},
+                    ).fetchall()
+                atr_val = 0.0
+                if rows and len(rows) >= 15:
+                    from src.core.indicators import atr as _atr
+                    hs = [float(r[1]) for r in rows]
+                    ls = [float(r[2]) for r in rows]
+                    cs = [float(r[0]) for r in rows]
+                    arr = _atr(hs, ls, cs, period=14)
+                    atr_val = [v for v in arr if v == v][-1] if arr else 0.0
+                atr_mult = getattr(self, '_regime_atr_mult', 2.0)
+                ps = compute_position_size(float(price), atr_val, atr_multiplier=atr_mult)
+                pt = build_position_prompt(ps)
+                if pt:
+                    ctx["position_prompt"] = pt
+        except Exception:
+            pass
+
+        # Fundamental calibration
+        cal = getattr(self, "_fundamental_calibration", {}).get(code, "")
+        if cal:
+            ctx["fundamental_calibration"] = cal
+
+        return ctx
+
+    def _build_agent_message(
+        self, initial_context: dict[str, Any], code: str, stock_name: str, report_language: str,
+    ) -> str:
+        msg = (
+            f"{'Analyze stock' if report_language == 'en' else '请分析股票'}"
+            f" {code} ({stock_name})"
+            f"{' and return the full decision dashboard JSON in English.' if report_language == 'en' else '，并生成决策仪表盘报告。'}"
+        )
+
+        kb_text = initial_context.get("knowledge_prompt", "")
+        if kb_text:
+            msg += "\n\n---\n\n" + kb_text + (
+                "\n\n> 📋 对比指令：请将历史背景与当前数据做比较分析。如历史结论与当前数据存在重大冲突"
+                "（如上次看空、本次看多），请在分析摘要中备注说明原因。**重要**：上述历史分析分数是"
+                " AI 自身之前的判断——仅作为背景参考。应以当前 OHLCV 衍生数据为主要判断依据。"
+                "若历史判断与当前数据矛盾，优先跟随当前数据。"
+            )
+
+        from datetime import datetime as _dt
+        msg += (
+            f"\n\n---\n\n## ⏱️ 数据新鲜度\n> 当前时间: {_dt.now().strftime('%Y-%m-%d %H:%M')}\n"
+            "> 日线数据来源: 17取数器优先级链 (efinance→akshare→tushare→...)\n"
+            "> 实时行情: 腾讯/新浪/东财 (缓存≤10min)\n"
+            "> 因子评分: 基于最近60个交易日计算\n"
+            "> 估值校准: 当日PE/PB vs 行业均值\n"
+            "> ⚠️ 如某项数据早于当前日期,请降低其在决策中的参考权重"
+        )
+
+        msg += (
+            "\n\n---\n\n## ⚠️ 信号相关性提示\n\n"
+            "以下定量因子得分（z-scores）、市场体制状态、ATR 仓位建议均源自相同的基础行情数据（OHLCV）。"
+            "它们并非独立的验证来源。\n\n"
+            "**信号分组**（同组内信号高度相关，跨组间独立性较强）：\n"
+            "- **趋势组**：均线排列、momentum_reversal、momentum_spread、regime 趋势分类、consecutive_direction\n"
+            "- **波动/风险组**：low_volatility、volatility_ratio、regime 波动分类、max_effect\n"
+            "- **位置组**：price_position、乖离率\n\n"
+            "**解读规则**：\n"
+            "1. 同组内多个信号方向一致 → 构成额外确认（约 1.2-1.5× 证据强度），**不是**多重独立验证\n"
+            "2. 跨组信号方向一致（如趋势组看多 + 波动组看多）→ 置信度可适度更高（约 1.5-2.0×）\n"
+            "3. 同组内信号方向冲突 → 该组信号本身存在不确定性，降低该维度的权重\n"
+        )
+
+        msg += (
+            "\n\n---\n\n## 📊 成交量信号多机制说明\n\n"
+            "成交量衍生的多个信号测量的是**不同的市场机制**：\n"
+            "- **逆向/情绪类**（turnover_sentiment、emotion_cycle）：高成交量 = 散户追涨/情绪过热 → 偏空/谨慎\n"
+            "- **趋势跟随/量价确认类**（volume_breakout、volume_status、bottom_volume、放量拉升）："
+            "高成交量 = 突破确认/主力介入/恐慌出清 → 偏多\n"
+            "> 请分别评估这两种机制，而非将其视为矛盾信号。\n"
+        )
+
+        msg += (
+            "\n\n---\n\n## 📊 因子评分与趋势分析的关系\n\n"
+            "因子 z-scores（FactorEngine）与趋势评分（StockTrendAnalyzer）代表了**两种不同的评分体系**：\n"
+            "- **因子层**：IC/IR 经验校准的定量笼子，划定评分区间（方向性判断优先）\n"
+            "- **趋势层**：用户交易理念驱动的规则信号（入场时机判断优先）\n"
+            "> 两者一致时适度提升置信度；分歧时：方向性以因子为主导，时机性以趋势为主导。\n"
+        )
+
+        msg += (
+            "\n\n---\n\n## 📋 策略规则与支撑阻力使用指引\n\n"
+            "**策略规则**：提示中已包含原始行情数据（OHLCV、均线值、乖离率、量比、换手率等）。"
+            "策略 YAML 中定义的触发条件（如 MA5 > MA10 > MA20、量比 > 2.0）可直接对照原始数据进行判断。"
+            "请勿将「对照数据检查策略条件」视为独立于原始数据的额外分析步骤。\n"
+            "**支撑/阻力位**：请直接使用系统计算的关键支撑/阻力位（基于 OHLCV 聚类）"
+            "填充 support_level 和 resistance_level 字段，而非自行重新推导。若系统未能提供，再自行计算。\n"
+        )
+
+        for _key, _label in [
+            ("factor_profile", "📊 量化因子评分"), ("regime_prompt", "🌡️ 市场体制状态"),
+            ("allocation_prompt", "📐 组合风险分配"), ("position_prompt", "🎯 ATR 动态仓位建议"),
+            ("concept_context", "📂 所属概念/板块"), ("sr_levels", "📊 关键支撑/阻力位"),
+            ("fundamental_calibration", "💰 PE/PB 估值校准"),
+        ]:
+            val = initial_context.get(_key, "")
+            if val:
+                msg += f"\n\n---\n\n## {_label}\n{val}"
+
+        return msg
+
+    def _process_agent_result(
+        self, agent_result, code: str, stock_name: str, report_type: ReportType,
+        query_id: str, trend_result: TrendAnalysisResult | None,
+    ) -> AnalysisResult | None:
+        result = self._agent_result_to_analysis_result(
+            agent_result, code, stock_name, report_type, query_id, trend_result=trend_result,
+        )
+        if result:
+            result.query_id = query_id
+
+        if result and result.success:
+            factor_score = self._factor_scores.get(code, 0.0)
+            if abs(factor_score) > 0.01:
+                factor_mapped = int(50 + factor_score * 15)
+                factor_mapped = max(10, min(90, factor_mapped))
+                llm_score = result.sentiment_score
+                divergence = abs(llm_score - factor_mapped)
+                if divergence >= 20:
+                    n_stocks = getattr(self, "_stock_count", 0)
+                    llm_w = 0.7 if n_stocks == 1 else 0.6
+                    factor_w = 0.3 if n_stocks == 1 else 0.4
+                    logger.info(
+                        "[锚定] %s LLM=%d vs Factor=%d (divergence=%d, N=%d, llm_w=%.1f)",
+                        code, llm_score, factor_mapped, divergence, n_stocks, llm_w,
+                    )
+                    result.sentiment_score = int(llm_score * llm_w + factor_mapped * factor_w)
+                    if result.dashboard:
+                        result.dashboard.setdefault("quant_summary", {})
+                        result.dashboard["quant_summary"]["factor_anchor"] = (
+                            f"⚠️ LLM({llm_score})与因子({factor_mapped})分歧{divergence}分,"
+                            f" 加权融合为{result.sentiment_score}"
+                        )
+
+        if result and getattr(self.config, "report_integrity_enabled", False):
+            from src.analyzer import apply_placeholder_fill, check_content_integrity
+            ok, missing = check_content_integrity(result)
+            if not ok:
+                apply_placeholder_fill(result, missing)
+                if result.dashboard:
+                    result.dashboard.setdefault("quant_summary", {})
+                    result.dashboard["quant_summary"]["integrity_placeholder_filled"] = True
+                logger.info("[LLM完整性] integrity_mode=agent_weak 必填字段缺失 %s，已占位补全", missing)
+
+        return result
+
+    def _post_process_agent(
+        self, result: AnalysisResult, code: str, stock_name: str,
+        chip_data: ChipDistribution | None, trend_result: TrendAnalysisResult | None,
+        realtime_quote: Any, initial_context: dict[str, Any],
+        query_id: str, report_type: ReportType,
+    ):
+        if chip_data:
+            fill_chip_structure_if_needed(result, chip_data)
+        fill_price_position_if_needed(result, trend_result, realtime_quote)
+        realtime_data = initial_context.get("realtime_quote", {})
+        if isinstance(realtime_data, dict):
+            result.current_price = realtime_data.get("price")
+            result.change_pct = realtime_data.get("change_pct")
+            result.volume_ratio_5d = realtime_data.get("volume_ratio")
+            result.volume_ratio_is_daily = getattr(realtime_quote, "_vr_is_daily", False)
+        stabilize_decision_with_structure(result, trend_result, initial_context.get("fundamental_context"))
+
+        # Inject quant summary into dashboard
+        if result:
+            quant_extra: dict[str, Any] = {}
+            for k, v in [("factor_profile", "factor_summary"), ("knowledge_prompt", "knowledge_summary")]:
+                txt = initial_context.get(k, "")
+                if txt:
+                    trunc = txt[:200] if k == "factor_profile" else txt[:150]
+                    if k == "factor_profile":
+                        last_nl = trunc.rfind('\n')
+                        if last_nl > 50:
+                            trunc = trunc[:last_nl]
+                    quant_extra[v] = trunc
+            rgm = getattr(self, "_regime_prompt", "")
+            if rgm:
+                quant_extra["regime_summary"] = rgm[:100]
+            if quant_extra and result.dashboard:
+                result.dashboard.setdefault("quant_summary", {}).update(quant_extra)
+
+        # SR levels in dashboard
+        try:
+            with self.db.session_scope() as _session:
+                rows = _session.execute(
+                    __import__("sqlalchemy").text(
+                        "SELECT close, high, low, volume FROM stock_daily WHERE code=:code ORDER BY date"
+                    ), {"code": code},
+                ).fetchall()
+            if rows and len(rows) >= 20 and result and result.dashboard:
+                from src.core.support_resistance import compute_levels, format_levels
+                c_ = [float(r[0]) for r in rows]
+                h_ = [float(r[1]) for r in rows]
+                l_ = [float(r[2]) for r in rows]
+                v_ = [float(r[3]) for r in rows]
+                sup_, res_ = compute_levels(c_, h_, l_, v_)
+                sr_t = format_levels(sup_, res_)
+                if sr_t:
+                    result.dashboard.setdefault("quant_summary", {})["sr_levels"] = sr_t
+        except Exception:
+            pass
+
+        resolved_name = result.name if result and result.name else stock_name
+
+        # Save news intel
+        if self.search_service is not None and self.search_service.is_available:
+            try:
+                nr = self.search_service.search_stock_news(
+                    stock_code=code, stock_name=resolved_name, max_results=5,
+                )
+                if nr.success and nr.results:
+                    qc = self._build_query_context(query_id=query_id)
+                    self.db.save_news_intel(
+                        code=code, name=resolved_name, dimension="latest_news",
+                        query=nr.query, response=nr, query_context=qc,
+                    )
+            except Exception as e:
+                logger.warning(f"[{code}] Agent 模式保存新闻情报失败: {e}")
+
+        # Save analysis history + decision signal
+        if result and result.success:
+            try:
+                initial_context["stock_name"] = resolved_name
+                initial_context["factor_profile"] = self._factor_profiles.get(code, "")
+                initial_context["factor_zscores"] = self._factor_zscores.get(code, {})
+                initial_context["regime_prompt"] = getattr(self, "_regime_prompt", "")
+                self.db.save_analysis_history(
+                    result=result, query_id=query_id, report_type=report_type.value,
+                    news_content=None, context_snapshot=initial_context,
+                    save_snapshot=self.save_context_snapshot,
+                    skill_id=",".join(self.analysis_skills) if self.analysis_skills else "consensus",
+                )
+            except Exception as e:
+                logger.warning(f"[{code}] 保存 Agent 分析历史失败: {e}")
+
+            try:
+                from src.services.decision_signal_service import DecisionSignalService
+                DecisionSignalService().save_from_agent_result(
+                    dashboard=result.dashboard, stock_code=code,
+                    stock_name=resolved_name, query_id=query_id,
+                )
+            except Exception as e:
+                logger.debug(f"[{code}] 保存决策信号失败: {e}")
 
     def _agent_result_to_analysis_result(
         self,
