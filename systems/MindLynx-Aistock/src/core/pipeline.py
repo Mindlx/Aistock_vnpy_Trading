@@ -2680,290 +2680,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 "已启用单股推送模式：分析仍并发执行，通知改为在结果收集侧串行发送（报告类型: %s）",
                 report_type_str,
             )
-
-        # === 量化因子 + Regime 预计算 ===
-        self._factor_profiles: dict[str, str] = {}
-        self._factor_scores: dict[str, float] = {}
-        self._factor_zscores: dict[str, dict[str, float]] = {}
-        self._factor_distributions: dict[str, dict] = {}
-        self._ood_warnings: dict[str, str] = {}
-        self._regime_prompt: str = ""
-        self._ly_signals: dict[str, str] = {}
-        try:
-            from sqlalchemy import text
-
-            import numpy as np
-
-            from src.core.factor_engine import FactorEngine
-
-            engine = FactorEngine()
-            all_results = []
-            # Collect full arrays for time-series normalization
-            stock_data: dict[str, dict[str, np.ndarray]] = {}
-            per_stock_regimes: list[dict] = []  # per-stock regime results for mode vote
-            with self.db.session_scope() as session:
-                for code in stock_codes:
-                    rows = session.execute(
-                        text(
-                            "SELECT close, volume, high, low, pct_chg FROM stock_daily WHERE code=:code ORDER BY date"
-                        ),
-                        {"code": code},
-                    ).fetchall()
-                    if not rows or len(rows) < 30:
-                        continue
-                    close_arr = np.array([float(r[0]) for r in rows], dtype=float)
-                    volume_arr = np.array([float(r[1]) for r in rows], dtype=float)
-                    df = [
-                        {
-                            "close": float(r[0]),
-                            "volume": float(r[1]),
-                            "high": float(r[2]),
-                            "low": float(r[3]),
-                            "pct_chg": float(r[4]),
-                        }
-                        for r in rows
-                    ]
-                    stock_data[code] = {"close": close_arr, "volume": volume_arr}
-                    try:
-                        r = engine.compute_for_stock(code, df)
-                        all_results.append(r)
-                    except Exception as exc:
-                        logger.warning("[FactorEngine] compute_for_stock(%s) failed: %s", code, exc)
-                        continue
-                    # Per-stock regime classification (correct: single-stock price series)
-                    if len(close_arr) >= 40:
-                        try:
-                            from src.core.regime_classifier import classify_regime as _classify
-                            regime_r = _classify(close_arr[-40:].tolist())
-                            per_stock_regimes.append(regime_r)
-                        except Exception:
-                            pass
-            # ── Regime-conditional factor weights ──────────────────────────
-            # Mode-vote per-stock regimes → dominant regime → adjust weights
-            try:
-                from collections import Counter as _Counter
-                from src.core.regime_factor_weights import (
-                    get_regime_weights as _get_regime_weights,
-                    make_regime_key as _make_regime_key,
-                    log_weight_diff as _log_weight_diff,
-                )
-                from src.core.factor_engine import CORE_FACTORS as _BASE_FACTORS
-
-                if per_stock_regimes:
-                    _counter = _Counter(r.get("regime", "sideways_mid_vol") for r in per_stock_regimes)
-                    _dominant = _counter.most_common(1)[0][0]
-                else:
-                    _dominant = "sideways_mid_vol"
-
-                _trend, _vol = _dominant.split("_", 1) if "_" in _dominant else ("sideways", "mid_vol")
-                _regime_key = _make_regime_key(_trend, _vol)
-                _weight_map = _get_regime_weights(_regime_key)
-                if _weight_map is not None:
-                    _updated = engine.apply_regime_weights(_weight_map)
-                    if _updated:
-                        _base_weights = {fd.name: fd.weight for fd in _BASE_FACTORS}
-                        _log_weight_diff(_regime_key, _weight_map, _base_weights)
-                        logger.info(
-                            "[RegimeWeights] %s — %d/%d stocks match, %d factors adjusted",
-                            _regime_key,
-                            _counter.get(_dominant, 0) if per_stock_regimes else 0,
-                            len(per_stock_regimes) if per_stock_regimes else 0,
-                            len(_updated),
-                        )
-            except Exception:
-                logger.debug("[RegimeWeights] weight adjustment skipped", exc_info=True)
-            # ── End regime weights ─────────────────────────────────────────
-
-            if all_results and len(all_results) >= 2:
-                if len(all_results) < 30:
-                    engine.time_series_normalize(all_results, stock_data)
-                    logger.info(
-                        "[FactorEngine] time-series normalization applied for %d stocks (N<30)",
-                        len(all_results),
-                    )
-                else:
-                    engine.cross_sectional_normalize(all_results)
-                    logger.info(
-                        "[FactorEngine] cross-sectional normalization applied for %d stocks",
-                        len(all_results),
-                    )
-            elif all_results and len(all_results) == 1:
-                # N=1: 强制使用时序归一化 (截面归一化需要 ≥2 样本)
-                engine.time_series_normalize(all_results, stock_data)
-                logger.info("[FactorEngine] time-series normalization applied for single stock (N=1)")
-
-            # Store factor profiles and scores for ALL cases (N>=1)
-            for r in all_results:
-                self._factor_profiles[r.code] = engine.build_factor_profile(r)
-                self._factor_scores[r.code] = r.composite_score
-                self._factor_zscores[r.code] = r.z_scores
-
-            # Append cross-sectional rankings to factor profiles
-            if len(all_results) >= 3:
-                rank_data: dict[str, dict[str, tuple[float, int]]] = {}
-                for r in all_results:
-                    rank_data[r.code] = {}
-                    for fd in engine.factors:
-                        z = r.z_scores.get(fd.name, 0.0)
-                        rank_data[r.code][fd.name] = (z, 0)
-                for fd in engine.factors:
-                    fn = fd.name
-                    scores = [(code, rank_data[code][fn][0]) for code in rank_data]
-                    scores.sort(key=lambda x: x[1], reverse=True)
-                    for rank, (code, _) in enumerate(scores, 1):
-                        old = rank_data[code][fn]
-                        rank_data[code][fn] = (old[0], rank)
-                for r in all_results:
-                    total_n = len(all_results)
-                    lines_rank = ["", f"### 横截面排名 (跨{total_n}只)"]
-                    for fd in engine.factors:
-                        z, rank = rank_data[r.code].get(fd.name, (0.0, 0))
-                        arrow = "↑" if z > 0.1 else ("↓" if z < -0.1 else "→")
-                        lines_rank.append(f"  {arrow} {fd.display_name}: {rank}/{total_n}")
-                    self._factor_profiles[r.code] += "\n" + "\n".join(lines_rank)
-            # F6 fix: add computation timestamp to factor profiles
-            from datetime import datetime as _dt
-            _ts = _dt.now().strftime("%Y-%m-%d %H:%M")
-            for code in stock_codes:
-                if code in self._factor_profiles:
-                    self._factor_profiles[code] += f"\n> 因子计算时间: {_ts}（基于此前60个交易日数据）"
-            logger.info("[FactorEngine] computed factors for %d stocks", len(all_results))
-            if not self._factor_scores:
-                logger.warning("[FactorEngine] _factor_scores 为空 — 所有股票因子锚定将静默退化到0.0")
-
-            # Multicollinearity check: diagnostic monitoring, not automatic correction.
-            # Factor weights are already IC/IR calibrated (1658-sample Spearman) —
-            # correlated factors' joint predictive power is accounted for in the
-            # calibration process. Warnings here alert the operator, not the algorithm.
-            try:
-                from src.core.factor_monitor import FactorMonitor
-
-                factor_vals = {}
-                for r in all_results:
-                    for name, z in r.z_scores.items():
-                        factor_vals.setdefault(name, []).append(z)
-                if factor_vals:
-                    monitor = FactorMonitor()
-                    coll_warnings = monitor.check_multicollinearity(factor_vals)
-                    for w in coll_warnings:
-                        logger.warning(w)
-            except Exception:
-                pass
-        except Exception as exc:
-            logger.debug("Factor engine unavailable: %s", exc)
-
-        try:
-            from src.core.uncertainty import UncertaintyQuantifier
-
-            uq = UncertaintyQuantifier()
-            with self.db.session_scope() as _session:
-                for code in stock_codes:
-                    rows = _session.execute(
-                        __import__("sqlalchemy").text(
-                            "SELECT close, volume, high, low, pct_chg FROM stock_daily WHERE code=:code ORDER BY date"
-                        ),
-                        {"code": code},
-                    ).fetchall()
-                    if rows and len(rows) >= 30:
-                        df = [
-                            {
-                                "close": float(r[0]),
-                                "volume": float(r[1]),
-                                "high": float(r[2]),
-                                "low": float(r[3]),
-                                "pct_chg": float(r[4]),
-                            }
-                            for r in rows
-                        ]
-                        self._factor_distributions[code] = uq.compute_distribution(code, df)
-        except Exception:
-            pass
-
-        # F3 fix: inject uncertainty CI into factor profiles
-        for code in stock_codes:
-            dist = self._factor_distributions.get(code)
-            profile = self._factor_profiles.get(code, "")
-            if dist and profile:
-                ci = dist["ci_95"]
-                rob = dist["robustness"]
-                rob_cn = {"high": "高", "medium": "中", "low": "低"}.get(rob, rob)
-                profile += f"\n> 因子可靠性: {rob_cn} (bootstrap 95% CI: [{ci[0]:.1f}, {ci[1]:.1f}], n={dist['n_samples']})"
-                self._factor_profiles[code] = profile
-
-        # OOD detection — moved after regime computation (R2 fix)
-        try:
-            from src.core.uncertainty import UncertaintyQuantifier
-
-            uq = UncertaintyQuantifier()
-            if per_stock_regimes:
-                from collections import Counter
-                regime_label = Counter(r["regime"] for r in per_stock_regimes).most_common(1)[0][0]
-            else:
-                regime_label = "unknown"
-            recent_regimes = [r["regime"] for r in per_stock_regimes]
-            for code in stock_codes:
-                result = uq.classify_ood(regime_label, recent_regimes)
-                if result["is_ood"] and result["warning"]:
-                    self._ood_warnings[code] = result["warning"]
-        except Exception:
-            pass
-
-        # Regime: per-stock classification → mode vote (fix: concatenation produced
-        # meaningless synthetic series with artificial price jumps between stocks)
-        if per_stock_regimes:
-            try:
-                from src.core.regime_classifier import build_regime_prompt
-                from collections import Counter
-
-                regime_labels = [r["regime"] for r in per_stock_regimes]
-                mode_regime = Counter(regime_labels).most_common(1)[0][0]
-                # Use the first stock whose regime matches the mode for full prompt
-                for r in per_stock_regimes:
-                    if r["regime"] == mode_regime:
-                        self._regime_prompt = build_regime_prompt(r)
-                        logger.info(
-                            "[Regime] %s (mode over %d/%d stocks, MA20 slope=%s)",
-                            r["regime"], regime_labels.count(mode_regime),
-                            len(per_stock_regimes), r["ma20_slope"],
-                        )
-                        break
-            except Exception as exc:
-                logger.debug("Regime classifier unavailable: %s", exc)
-
-        # === 组合优化 (Phase 4) ===
-        self._allocation_prompt: str = ""
-        try:
-            returns_per_stock = []
-            valid_codes = []
-            with self.db.session_scope() as session:
-                for code in stock_codes:
-                    rows = session.execute(
-                        __import__("sqlalchemy").text(
-                            "SELECT close FROM stock_daily WHERE code=:code ORDER BY date DESC LIMIT 90"
-                        ),
-                        {"code": code},
-                    ).fetchall()
-                    if rows and len(rows) >= 20:
-                        closes = [float(r[0]) for r in reversed(rows)]
-                        rets = [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))]
-                        returns_per_stock.append(rets)
-                        valid_codes.append(code)
-            if len(valid_codes) >= 2:
-                from src.core.portfolio_optimizer import build_allocation_prompt, build_portfolio_allocation
-
-                alloc = build_portfolio_allocation(valid_codes, returns_per_stock, "risk_parity")
-                self._allocation_prompt = build_allocation_prompt(alloc, valid_codes)
-                logger.info("[Portfolio] risk-parity allocation for %d stocks", len(valid_codes))
-        except Exception as exc:
-            logger.debug("Portfolio optimizer unavailable: %s", exc)
-
-
-        # === 载入 LY 量化信号 (零侵入: 仅读 JSON 文件) ===
-        try:
-            self._ly_signals = self._load_ly_signals(stock_codes)
-        except Exception as e:
-            logger.debug("[LY] LY signal loading failed (non-fatal): %s", e)
-            self._ly_signals = {}
+        self._precompute_analysis_inputs(stock_codes)
         # 收集个股分析结果
         results: list[AnalysisResult] = []
 
@@ -3054,6 +2771,199 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 self._send_notifications(results, report_type)
 
         return results
+
+    def _precompute_analysis_inputs(self, stock_codes: list[str]):
+        self._factor_profiles: dict[str, str] = {}
+        self._factor_scores: dict[str, float] = {}
+        self._factor_zscores: dict[str, dict[str, float]] = {}
+        self._factor_distributions: dict[str, dict] = {}
+        self._ood_warnings: dict[str, str] = {}
+        self._regime_prompt: str = ""
+        self._ly_signals: dict[str, str] = {}
+        per_stock_regimes: list[dict] = []
+        try:
+            import numpy as np
+            from sqlalchemy import text
+            from src.core.factor_engine import FactorEngine
+            engine = FactorEngine()
+            all_results = []
+            stock_data: dict[str, dict[str, np.ndarray]] = {}
+            with self.db.session_scope() as session:
+                for code in stock_codes:
+                    rows = session.execute(text(
+                        "SELECT close, volume, high, low, pct_chg FROM stock_daily WHERE code=:code ORDER BY date"
+                    ), {"code": code}).fetchall()
+                    if not rows or len(rows) < 30:
+                        continue
+                    ca = np.array([float(r[0]) for r in rows], dtype=float)
+                    va = np.array([float(r[1]) for r in rows], dtype=float)
+                    df = [{"close": float(r[0]), "volume": float(r[1]), "high": float(r[2]),
+                           "low": float(r[3]), "pct_chg": float(r[4])} for r in rows]
+                    stock_data[code] = {"close": ca, "volume": va}
+                    try:
+                        all_results.append(engine.compute_for_stock(code, df))
+                    except Exception as exc:
+                        logger.warning("[FactorEngine] compute_for_stock(%s) failed: %s", code, exc)
+                    if len(ca) >= 40:
+                        try:
+                            from src.core.regime_classifier import classify_regime
+                            per_stock_regimes.append(classify_regime(ca[-40:].tolist()))
+                        except Exception:
+                            pass
+            self._apply_regime_weights(engine, per_stock_regimes)
+            self._normalize_factors(engine, all_results, stock_data)
+            self._store_factor_profiles(engine, all_results, stock_codes, per_stock_regimes)
+        except Exception as exc:
+            logger.debug("Factor engine unavailable: %s", exc)
+        self._compute_uncertainty_and_ood(stock_codes, per_stock_regimes)
+        self._compute_portfolio_allocation(stock_codes)
+        try:
+            self._ly_signals = self._load_ly_signals(stock_codes)
+        except Exception as e:
+            logger.debug("[LY] LY signal loading failed: %s", e)
+            self._ly_signals = {}
+
+    def _apply_regime_weights(self, engine, per_stock_regimes: list[dict]):
+        try:
+            from collections import Counter as _Counter
+            from src.core.regime_factor_weights import (
+                get_regime_weights, make_regime_key, log_weight_diff)
+            from src.core.factor_engine import CORE_FACTORS as _BASE_FACTORS
+            dominant = (_Counter(r["regime"] for r in per_stock_regimes).most_common(1)[0][0]
+                        if per_stock_regimes else "sideways_mid_vol")
+            trend, vol = dominant.split("_", 1) if "_" in dominant else ("sideways", "mid_vol")
+            wm = get_regime_weights(make_regime_key(trend, vol))
+            if wm is not None and engine.apply_regime_weights(wm):
+                bw = {fd.name: fd.weight for fd in _BASE_FACTORS}
+                log_weight_diff(make_regime_key(trend, vol), wm, bw)
+                logger.info("[RegimeWeights] %s — %d stocks", make_regime_key(trend, vol), len(per_stock_regimes))
+        except Exception:
+            logger.debug("[RegimeWeights] skipped", exc_info=True)
+
+    def _normalize_factors(self, engine, all_results, stock_data):
+        if len(all_results) >= 2:
+            if len(all_results) < 30:
+                engine.time_series_normalize(all_results, stock_data)
+            else:
+                engine.cross_sectional_normalize(all_results)
+        elif len(all_results) == 1:
+            engine.time_series_normalize(all_results, stock_data)
+
+    def _store_factor_profiles(self, engine, all_results, stock_codes, per_stock_regimes):
+        for r in all_results:
+            self._factor_profiles[r.code] = engine.build_factor_profile(r)
+            self._factor_scores[r.code] = r.composite_score
+            self._factor_zscores[r.code] = r.z_scores
+        if len(all_results) >= 3:
+            self._append_cross_sectional_rankings(engine, all_results)
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%Y-%m-%d %H:%M")
+        for code in stock_codes:
+            if code in self._factor_profiles:
+                self._factor_profiles[code] += f"\n> 因子计算时间: {ts}"
+        logger.info("[FactorEngine] computed factors for %d stocks", len(all_results))
+        try:
+            from src.core.factor_monitor import FactorMonitor
+            fv = {}
+            for r in all_results:
+                for n, z in r.z_scores.items():
+                    fv.setdefault(n, []).append(z)
+            if fv:
+                for w in FactorMonitor().check_multicollinearity(fv):
+                    logger.warning(w)
+        except Exception:
+            pass
+        # OOD + Regime prompt
+        if per_stock_regimes:
+            try:
+                from collections import Counter
+                from src.core.regime_classifier import build_regime_prompt
+                labels = [r["regime"] for r in per_stock_regimes]
+                mode = Counter(labels).most_common(1)[0][0]
+                for r in per_stock_regimes:
+                    if r["regime"] == mode:
+                        self._regime_prompt = build_regime_prompt(r)
+                        logger.info("[Regime] %s (mode %d/%d)", mode, labels.count(mode), len(labels))
+                        break
+            except Exception as exc:
+                logger.debug("Regime classifier unavailable: %s", exc)
+
+    def _append_cross_sectional_rankings(self, engine, all_results):
+        rank_data: dict = {}
+        for r in all_results:
+            rank_data[r.code] = {fd.name: (r.z_scores.get(fd.name, 0.0), 0) for fd in engine.factors}
+        for fd in engine.factors:
+            scores = sorted([(c, rank_data[c][fd.name][0]) for c in rank_data], key=lambda x: -x[1])
+            for rank, (c, _) in enumerate(scores, 1):
+                old = rank_data[c][fd.name]
+                rank_data[c][fd.name] = (old[0], rank)
+        for r in all_results:
+            lines = [f"### 横截面排名 (跨{len(all_results)}只)"]
+            for fd in engine.factors:
+                z, rank = rank_data[r.code].get(fd.name, (0.0, 0))
+                arrow = "↑" if z > 0.1 else ("↓" if z < -0.1 else "→")
+                lines.append(f"  {arrow} {fd.display_name}: {rank}/{len(all_results)}")
+            self._factor_profiles[r.code] += "\n" + "\n".join(lines)
+
+    def _compute_uncertainty_and_ood(self, stock_codes, per_stock_regimes):
+        try:
+            from src.core.uncertainty import UncertaintyQuantifier
+            uq = UncertaintyQuantifier()
+            with self.db.session_scope() as _session:
+                for code in stock_codes:
+                    rows = _session.execute(
+                        __import__("sqlalchemy").text(
+                            "SELECT close, volume, high, low, pct_chg FROM stock_daily WHERE code=:code ORDER BY date"
+                        ), {"code": code}).fetchall()
+                    if rows and len(rows) >= 30:
+                        df = [{"close": float(r[0]), "volume": float(r[1]), "high": float(r[2]),
+                               "low": float(r[3]), "pct_chg": float(r[4])} for r in rows]
+                        self._factor_distributions[code] = uq.compute_distribution(code, df)
+        except Exception:
+            pass
+        for code in stock_codes:
+            dist = self._factor_distributions.get(code)
+            profile = self._factor_profiles.get(code, "")
+            if dist and profile:
+                ci = dist["ci_95"]
+                rob_cn = {"high": "高", "medium": "中", "low": "低"}.get(dist["robustness"], dist["robustness"])
+                profile += f"\n> 因子可靠性: {rob_cn} (bootstrap 95% CI: [{ci[0]:.1f}, {ci[1]:.1f}], n={dist['n_samples']})"
+                self._factor_profiles[code] = profile
+        try:
+            uq = UncertaintyQuantifier()
+            if per_stock_regimes:
+                from collections import Counter
+                regime_label = Counter(r["regime"] for r in per_stock_regimes).most_common(1)[0][0]
+            else:
+                regime_label = "unknown"
+            recent = [r["regime"] for r in per_stock_regimes]
+            for code in stock_codes:
+                r = uq.classify_ood(regime_label, recent)
+                if r["is_ood"] and r["warning"]:
+                    self._ood_warnings[code] = r["warning"]
+        except Exception:
+            pass
+
+    def _compute_portfolio_allocation(self, stock_codes):
+        self._allocation_prompt = ""
+        try:
+            returns, valid = [], []
+            with self.db.session_scope() as session:
+                for code in stock_codes:
+                    rows = session.execute(
+                        __import__("sqlalchemy").text(
+                            "SELECT close FROM stock_daily WHERE code=:code ORDER BY date DESC LIMIT 90"
+                        ), {"code": code}).fetchall()
+                    if rows and len(rows) >= 20:
+                        cs = [float(r[0]) for r in reversed(rows)]
+                        returns.append([(cs[i] - cs[i - 1]) / cs[i - 1] for i in range(1, len(cs))])
+                        valid.append(code)
+            if len(valid) >= 2:
+                from src.core.portfolio_optimizer import build_allocation_prompt, build_portfolio_allocation
+                alloc = build_portfolio_allocation(valid, returns, "risk_parity")
+                self._allocation_prompt = build_allocation_prompt(alloc, valid)
+        except Exception as exc:
+            logger.debug("Portfolio optimizer unavailable: %s", exc)
 
 
 def _trigger_factor_recalibration_if_needed() -> None:
