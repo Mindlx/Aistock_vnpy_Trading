@@ -23,7 +23,8 @@
 | Provider | 模型 | 接入方式 | 速度 | 适合任务 |
 |:---------|:-----|:---------|:----:|:---------|
 | `deepseek-flash` | v4-flash | API (api.deepseek.com) | ~100-200 tok/s | 🔵 **主会话调度**、快速响应 |
-| `gpu1-sglang-selode` | Qwen3.6-35B-Selode | SGLang, port 15433 | **~121 tok/s** | 🟢 代码补全、代码审查、通用任务 |
+| `lla-selode` | Qwen3.6-35B-MoE (SGLang) | Docker (port 15433), 65536 ctx | **~121 tok/s** | 🟢 代码补全、代码审查、通用任务 |
+| `lla-qwen27B` | Qwen3.6-27B-Dense (llama.cpp) | Docker (port 11434), 65536 ctx, 投机解码 | **~30-50 tok/s** | 🟡 探索代理、标题生成 |
 | `deepseek-pro` | v4-pro | API (api.deepseek.com) | ~50-100 tok/s | 🔴 高难度推理、长上下文 |
 
 ## 系统指令
@@ -43,15 +44,15 @@
 |:------|:-----|:------|
 | **build** (默认) | `deepseek-flash` | 主会话，快速响应、工具协调 |
 | **plan** | `deepseek-pro` | 规划模式，高难度推理、架构决策 |
-| **explore** | `gpu1-sglang-selode` | 探索模式，代码审查、技术调研 |
-| **general** (subagent) | `gpu1-sglang-selode` | 通用子任务 |
+| **explore** | `lla-qwen27B//models/Qwen3.6-27B-UD-Q4_K_XL.gguf` | 探索模式，代码审查、复杂调试 (27B Dense) |
+| **general** (subagent) | `lla-selode//models/huggingface/selode-ai/Qwen-3.6-35B-A3B-VRAP-4-bit-AWQ-21.2GB` | 通用子任务 (35B MoE) |
 
 ## 其他重要配置
 
 | 配置 | 值 | 说明 |
 |:-----|:---|:------|
 | `default_agent` | `build` | 默认进入 build 模式 |
-| `small_model` | `gpu0-qwen` | 标题生成等轻量任务用本地模型 |
+| `small_model` | `lla-qwen27B//models/Qwen3.6-27B-UD-Q4_K_XL.gguf` | 标题生成等轻量任务用本地模型 (GPU0) |
 | `autoupdate` | `notify` | 有新版本时通知，不自动升级 |
 | `shell` | `bash` | 默认 shell |
 | `compaction.auto` | `true` | 上下文满时自动压缩 |

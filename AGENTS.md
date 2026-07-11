@@ -35,11 +35,12 @@ python scripts/diagnose_agreement.py
 
 ## 模型选择
 
-| 任务 | 推荐模型 |
-|------|---------|
-| 日常编码、bug修复 | DeepSeek V4 Flash |
-| 架构决策、复杂调试 | Qwen3.6-35B-Selode (SGLang, GPU1) |
-| 代码审查、代码补全 | Qwen3.6-35B-Selode (SGLang, GPU1) |
+| 任务 | 推荐模型 | Provider |
+|------|---------|---------|
+| 日常编码、bug修复 | DeepSeek V4 Flash | 系统默认 |
+| 架构决策、复杂调试 | Qwen3.6-27B-Dense (llama.cpp, GPU0) | `lla-qwen27B` |
+| 代码审查、代码补全 | Qwen3.6-27B-Dense (llama.cpp, GPU0) | `lla-qwen27B` |
+| 文档分析、并行研究 | Qwen3.6-35B-MoE (SGLang, GPU1) | `lla-selode` |
 
 ## 文档参考
 
