@@ -1315,106 +1315,313 @@ def _build_schedule_time_provider(default_schedule_time: str):
     return _provider
 
 
-def main() -> int:
-    """
-    主入口函数
-
-    Returns:
-        退出码（0 表示成功）
-    """
-    # 解析命令行参数
-    args = parse_arguments()
-
-    # 在配置加载前先初始化 bootstrap 日志，确保早期失败也能落盘
+def _init_main_environment(args: argparse.Namespace):
     try:
         _setup_bootstrap_logging(debug=args.debug)
     except Exception as exc:
-        logging.basicConfig(
-            level=logging.DEBUG if getattr(args, "debug", False) else logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            stream=sys.stderr,
-        )
-        logger.warning("Bootstrap 日志初始化失败，已回退到 stderr: %s", exc)
-
-    # 加载配置（在 bootstrap logging 之后执行，确保异常有日志）
+        logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
+                            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", stream=sys.stderr)
+        logger.warning("Bootstrap 日志初始化失败，已回退: %s", exc)
     try:
         config = get_config()
     except Exception as exc:
         logger.exception("加载配置失败: %s", exc)
-        return 1
-
-    # 配置日志（输出到控制台和文件）
+        return None
     try:
         _setup_runtime_logging(config.log_dir, debug=args.debug)
     except Exception as exc:
-        logger.exception("切换到配置日志目录失败: %s", exc)
-        return 1
-
+        logger.exception("切换日志目录失败: %s", exc)
+        return None
     logger.info("=" * 60)
     logger.info("A股自选股智能分析系统 启动")
     logger.info(f"运行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 60)
+    for w in config.validate():
+        logger.warning(w)
+    return config
 
-    # 验证配置
-    warnings = config.validate()
-    for warning in warnings:
-        logger.warning(warning)
 
-    if getattr(args, "check_notify", False):
-        from src.services.notification_diagnostics import (
-            format_notification_diagnostics,
-            run_notification_diagnostics,
-        )
-
-        result = run_notification_diagnostics(config)
-        print(format_notification_diagnostics(result))
-        return 0 if result.ok else 1
-
-    # 解析股票列表（统一为大写 Issue #355）
-    stock_codes = None
-    if args.stocks:
-        stock_codes = [canonical_stock_code(c) for c in args.stocks.split(",") if (c or "").strip()]
-        logger.info(f"使用命令行指定的股票列表: {stock_codes}")
-
-    # === 处理 --webui / --webui-only 参数，映射到 --serve / --serve-only ===
+def _start_web_if_enabled(config, args) -> bool:
     if args.webui:
         args.serve = True
     if args.webui_only:
         args.serve_only = True
-
-    # 兼容旧版 WEBUI_ENABLED 环境变量
     if config.webui_enabled and not (args.serve or args.serve_only):
         args.serve = True
-
-    # === 启动 Web 服务 (如果启用) ===
     start_serve = (args.serve or args.serve_only) and os.getenv("GITHUB_ACTIONS") != "true"
-
-    # 兼容旧版 WEBUI_HOST/WEBUI_PORT：如果用户未通过 --host/--port 指定，则使用旧变量
+    bot_started = False
     if start_serve:
         if args.host == "0.0.0.0" and os.getenv("WEBUI_HOST"):
             args.host = os.getenv("WEBUI_HOST")
         if args.port == 8000 and os.getenv("WEBUI_PORT"):
             args.port = int(os.getenv("WEBUI_PORT"))
-
-    bot_clients_started = False
-    if start_serve:
         if not prepare_webui_frontend_assets():
-            logger.warning("前端静态资源未就绪，继续启动 FastAPI 服务（Web 页面可能不可用）")
+            logger.warning("前端静态资源未就绪")
         try:
             start_api_server(host=args.host, port=args.port, config=config)
-            bot_clients_started = True
+            bot_started = True
         except Exception as e:
             logger.error(f"启动 FastAPI 服务失败: {e}")
-
-    if bot_clients_started:
+    if bot_started:
         start_bot_stream_clients(config)
+    return start_serve
 
-    # === 仅 Web 服务模式：不自动执行分析 ===
+
+def _run_schedule_mode(config, args, stock_codes):
+    logger.info("模式: 定时任务")
+    logger.info(f"每日执行时间: {config.schedule_time}")
+    should_run_immediately = False
+    logger.info("已禁用启动时立即执行")
+    from src.scheduler import run_with_schedule
+    scheduled_stock_codes = _resolve_scheduled_stock_codes(stock_codes)
+    schedule_time_provider = _build_schedule_time_provider(config.schedule_time)
+
+    def scheduled_task():
+        pass
+
+    background_tasks = []
+    if getattr(config, "agent_event_monitor_enabled", False):
+        from src.services.event_monitor import ThresholdEventMonitor, parse_threshold_alert_rules, TriggeredThresholdAlert
+        interval = max(1, getattr(config, "agent_event_monitor_interval_minutes", 5))
+        rules = parse_threshold_alert_rules(getattr(config, "agent_event_alert_rules_json", ""))
+        if rules:
+            monitor = ThresholdEventMonitor.from_dict_list(rules)
+            from src.notification import NotificationBuilder, NotificationService
+            ns = NotificationService()
+            def _notify(t: TriggeredThresholdAlert):
+                sent = ns.send(NotificationBuilder.build_simple_alert(
+                    title=f"Event Alert | {t.rule.stock_code}",
+                    content=t.message or t.rule.description or "Alert triggered",
+                    alert_type="warning"), route_type="alert")
+                if not sent:
+                    logger.info("[ThresholdMonitor] No channel available for: %s", t.rule.stock_code)
+            monitor.on_trigger(_notify)
+            import asyncio
+            def _threshold_task():
+                triggered = asyncio.run(monitor.check_all())
+                if triggered:
+                    logger.info("[ThresholdMonitor] 本轮触发 %d 条提醒", len(triggered))
+            background_tasks.append({"task": _threshold_task, "interval_seconds": interval * 60,
+                                      "run_immediately": True, "name": "threshold_event_monitor"})
+
+    if getattr(config, "event_monitor_enabled", False):
+        em_int = getattr(config, "event_monitor_check_interval", 300)
+        em_codes = getattr(config, "event_monitor_stock_codes", []) or scheduled_stock_codes or config.stock_list
+        import asyncio
+        def _em_task():
+            try:
+                from src.services.event_monitor import run_event_monitor_cli
+                asyncio.run(run_event_monitor_cli(stock_codes=em_codes, config=_reload_runtime_config(), daemon=False))
+            except Exception as e:
+                logger.exception("EventMonitor后台任务失败: %s", e)
+        background_tasks.append({"task": _em_task, "interval_seconds": em_int,
+                                  "run_immediately": True, "name": "event_monitor"})
+
+    if getattr(config, "rss_pipeline_enabled", False):
+        def _rss_task():
+            try:
+                from src.services.intelligence_service import IntelligenceService
+                results = IntelligenceService().fetch_all_enabled()
+                ok = sum(1 for r in results if r.get("status") == "ok")
+                items = sum(r.get("items_fetched", 0) for r in results)
+                if results:
+                    logger.info("[RSS] Fetched %d/%d sources, %d new items", ok, len(results), items)
+            except Exception as e:
+                logger.warning("RSS background fetch failed: %s", e)
+        background_tasks.append({"task": _rss_task, "interval_seconds": 3600,
+                                  "run_immediately": True, "name": "rss_fetch"})
+
+    def _db_maint():
+        try:
+            from scripts.db_maintenance import main as db_maint
+            db_maint()
+        except Exception as e:
+            logger.warning("DB maintenance failed: %s", e)
+    background_tasks.append({"task": _db_maint, "interval_seconds": 7*24*3600,
+                              "run_immediately": False, "name": "db_maintenance"})
+
+    additional_daily = []
+    additional_weekly = []
+
+    def _sched_market_review():
+        try:
+            if datetime.now().isoweekday() >= 6:
+                return
+            from src.core.market_review import run_market_review
+            from src.core.market_review_runtime import build_market_review_runtime
+            cfg = _reload_runtime_config()
+            n, a, s = build_market_review_runtime(cfg)
+            _run_market_review_with_shared_lock(cfg, run_market_review, notifier=n, analyzer=a, search_service=s, send_notification=True)
+        except Exception as e:
+            logger.exception("大盘复盘失败: %s", e)
+
+    for t in ("11:45", "15:45"):
+        additional_daily.append({"task": _sched_market_review, "time": t, "name": f"大盘复盘@{t}"})
+
+    for t in ("11:00", "14:00"):
+        def _make_analysis(slot=t):
+            def _run():
+                try:
+                    cfg = _reload_runtime_config()
+                    cfg.market_review_enabled = False
+                    run_full_analysis(cfg, args, scheduled_stock_codes)
+                except Exception as e:
+                    logger.exception("整点分析@%s 失败: %s", slot, e)
+            return _run
+        additional_daily.append({"task": _make_analysis(), "time": t, "name": f"整点分析@{t}"})
+
+    def _sched_daily_intel():
+        try:
+            from src.core.trading_calendar import get_open_markets_today
+            if 'cn' not in get_open_markets_today():
+                return
+            _run_daily_intel(_reload_runtime_config(), "preopen")
+        except Exception as e:
+            logger.exception("日间情报失败: %s", e)
+    additional_daily.append({"task": _sched_daily_intel, "time": "08:30", "name": "日间情报(盘前)"})
+
+    def _sched_weekend_intel():
+        try:
+            _run_weekend_intel(_reload_runtime_config(), is_refresh=False, no_push=False)
+        except Exception as e:
+            logger.exception("周末情报失败: %s", e)
+    additional_weekly.append({"task": _sched_weekend_intel, "time": "20:00", "day": "sunday", "name": "周末情报"})
+
+    def _sched_weekend_refresh():
+        try:
+            _run_weekend_intel(_reload_runtime_config(), is_refresh=True, no_push=False)
+        except Exception as e:
+            logger.exception("周末情报补量失败: %s", e)
+    additional_weekly.append({"task": _sched_weekend_refresh, "time": "07:30", "day": "monday", "name": "周末情报补量"})
+
+    run_with_schedule(task=scheduled_task, schedule_time=config.schedule_time,
+                      run_immediately=should_run_immediately, background_tasks=background_tasks,
+                      schedule_time_provider=schedule_time_provider,
+                      additional_daily_tasks=additional_daily, additional_weekly_tasks=additional_weekly)
+    return 0
+
+
+def _dispatch_mode(config, args, stock_codes, start_serve) -> bool:
+    if getattr(args, "backtest", False):
+        from src.services.backtest_service import BacktestService
+        svc = BacktestService()
+        stats = svc.run_backtest(code=getattr(args, "backtest_code", None),
+                                  force=getattr(args, "backtest_force", False),
+                                  eval_window_days=getattr(args, "backtest_days", None))
+        logger.info("回测完成: processed=%(processed)s saved=%(saved)s completed=%(completed)s" % stats)
+        if getattr(config, "backtest_report_enabled", True):
+            try:
+                from src.core.backtest_report import BacktestReportGenerator
+                summary = svc.get_summary(scope="overall", code=None, eval_window_days=getattr(args, "backtest_days", None))
+                if summary:
+                    BacktestReportGenerator().generate(summary, strategy_name="Overall Backtest")
+            except Exception as exc:
+                logger.warning("生成回测报告失败: %s", exc)
+        return True
+
+    if getattr(args, "backtest_report", False):
+        from src.services.backtest_service import BacktestService
+        svc = BacktestService()
+        try:
+            from src.core.backtest_report import BacktestReportGenerator
+            summary = svc.get_summary(scope="overall", code=getattr(args, "backtest_code", None) or None,
+                                       eval_window_days=getattr(args, "backtest_days", None))
+            if summary:
+                sc = getattr(args, "backtest_code", None) or None
+                BacktestReportGenerator().generate(summary, strategy_name=f"Stock {sc}" if sc else "Overall Backtest", stock_code=sc)
+        except Exception as exc:
+            logger.exception("生成回测报告失败: %s", exc)
+            return True
+        return True
+
+    if getattr(args, "realtime_monitor", False) or getattr(config, "realtime_monitor_enabled", False) or \
+       getattr(args, "realtime_monitor_daemon", False) or getattr(config, "realtime_monitor_daemon_enabled", False):
+        dm = getattr(args, "realtime_monitor_daemon", False) or getattr(config, "realtime_monitor_daemon_enabled", False)
+        logger.info("模式: %s", "盘中实时监控守护进程" if dm else "盘中实时监控")
+        from src.services.realtime_monitor import run_realtime_monitor
+        sc = [canonical_stock_code(c) for c in args.stocks.split(",") if (c or "").strip()] if args.stocks else None
+        run_realtime_monitor(stock_codes=sc, config=config, daemon_mode=dm)
+        return True
+
+    is_sched = getattr(args, "schedule", False) or getattr(config, "schedule_enabled", False)
+    em_flag = getattr(args, "event_monitor", False) or (getattr(config, "event_monitor_enabled", False) and not is_sched)
+    em_daemon = getattr(args, "event_monitor_daemon", False)
+    if em_flag or em_daemon:
+        logger.info("模式: %s", "事件驱动分析守护进程" if em_daemon else "事件驱动分析")
+        import asyncio
+        from src.services.event_monitor import run_event_monitor_cli
+        codes = (getattr(config, "event_monitor_stock_codes", []) or stock_codes or config.stock_list)
+        if args.stocks:
+            codes = [canonical_stock_code(c) for c in args.stocks.split(",") if (c or "").strip()]
+        asyncio.run(run_event_monitor_cli(stock_codes=codes, config=config, daemon=em_daemon or em_flag))
+        return True
+
+    if args.market_review:
+        effective = None
+        if not getattr(args, "force_run", False) and getattr(config, "trading_day_check_enabled", True):
+            from src.core.trading_calendar import compute_effective_region, get_open_markets_today
+            effective = compute_effective_region(getattr(config, "market_review_region", "cn"), get_open_markets_today())
+            if effective == "":
+                logger.info("今日大盘复盘相关市场均为非交易日，跳过执行。")
+                return True
+        logger.info("模式: 仅大盘复盘")
+        from src.core.market_review import run_market_review
+        from src.core.market_review_runtime import build_market_review_runtime
+        n, a, s = build_market_review_runtime(config)
+        _run_market_review_with_shared_lock(config, run_market_review, notifier=n, analyzer=a, search_service=s,
+                                             send_notification=not args.no_notify, override_region=effective)
+        return True
+
+    if getattr(args, "weekend_intel", False) or getattr(args, "weekend_refresh", False):
+        _run_weekend_intel(config, is_refresh=getattr(args, "weekend_refresh", False),
+                           no_push=getattr(args, "weekend_intel_no_push", False))
+        return True
+
+    if getattr(args, "daily_intel", False):
+        _run_daily_intel(config, getattr(args, "daily_intel_slot", "midday") or "midday")
+        return True
+
+    explicit_single = args.force_run or args.stocks is not None or args.dry_run or args.backtest or args.backtest_report
+    if (args.schedule or config.schedule_enabled) and not explicit_single:
+        _run_schedule_mode(config, args, stock_codes)
+        return True
+
+    if config.run_immediately:
+        run_full_analysis(config, args, stock_codes)
+    else:
+        logger.info("配置为不立即运行分析 (RUN_IMMEDIATELY=false)")
+    logger.info("\n程序执行完成")
+    if start_serve and not (args.schedule or config.schedule_enabled):
+        logger.info("API 服务运行中 (按 Ctrl+C 退出)...")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+    return True
+
+
+def main() -> int:
+    args = parse_arguments()
+    config = _init_main_environment(args)
+    if config is None:
+        return 1
+
+    if getattr(args, "check_notify", False):
+        from src.services.notification_diagnostics import format_notification_diagnostics, run_notification_diagnostics
+        result = run_notification_diagnostics(config)
+        print(format_notification_diagnostics(result))
+        return 0 if result.ok else 1
+
+    stock_codes = None
+    if args.stocks:
+        stock_codes = [canonical_stock_code(c) for c in args.stocks.split(",") if (c or "").strip()]
+        logger.info(f"使用命令行指定的股票列表: {stock_codes}")
+
+    start_serve = _start_web_if_enabled(config, args)
     if args.serve_only:
         logger.info("模式: 仅 Web 服务")
         logger.info(f"Web 服务运行中: http://{args.host}:{args.port}")
-        logger.info("通过 /api/v1/analysis/analyze 接口触发分析")
-        logger.info(f"API 文档: http://{args.host}:{args.port}/docs")
         logger.info("按 Ctrl+C 退出...")
         try:
             while True:
@@ -1424,428 +1631,11 @@ def main() -> int:
         return 0
 
     try:
-        # 模式0: 回测
-        if getattr(args, "backtest", False):
-            logger.info("模式: 回测")
-            from src.services.backtest_service import BacktestService
-
-            service = BacktestService()
-            stats = service.run_backtest(
-                code=getattr(args, "backtest_code", None),
-                force=getattr(args, "backtest_force", False),
-                eval_window_days=getattr(args, "backtest_days", None),
-            )
-            logger.info(
-                f"回测完成: processed={stats.get('processed')} saved={stats.get('saved')} "
-                f"completed={stats.get('completed')} insufficient={stats.get('insufficient')} errors={stats.get('errors')}"
-            )
-
-            # Auto-generate backtest report
-            if getattr(config, "backtest_report_enabled", True):
-                try:
-                    from src.core.backtest_report import BacktestReportGenerator
-
-                    gen = BacktestReportGenerator()
-                    summary = service.get_summary(
-                        scope="overall",
-                        code=None,
-                        eval_window_days=getattr(args, "backtest_days", None),
-                    )
-                    if summary:
-                        gen.generate(summary, strategy_name="Overall Backtest")
-                        logger.info("回测报告已生成")
-                    else:
-                        logger.warning("回测概要为空，跳过报告生成")
-                except Exception as exc:
-                    logger.warning("生成回测报告失败（已忽略）: %s", exc)
-
+        if _dispatch_mode(config, args, stock_codes, start_serve):
             return 0
-
-        # 模式0b: 直接生成回测报告（不重新回测）
-        if getattr(args, "backtest_report", False):
-            logger.info("模式: 回测报告生成")
-            from src.services.backtest_service import BacktestService
-
-            service = BacktestService()
-            try:
-                from src.core.backtest_report import BacktestReportGenerator
-
-                gen = BacktestReportGenerator()
-                summary = service.get_summary(
-                    scope="overall",
-                    code=getattr(args, "backtest_code", None) or None,
-                    eval_window_days=getattr(args, "backtest_days", None),
-                )
-                if summary:
-                    stock_code = getattr(args, "backtest_code", None) or None
-                    gen.generate(
-                        summary,
-                        strategy_name=f"Stock {stock_code}" if stock_code else "Overall Backtest",
-                        stock_code=stock_code,
-                    )
-                    logger.info("回测报告已生成")
-                else:
-                    logger.warning("回测概要为空，跳过报告生成")
-            except Exception as exc:
-                logger.exception("生成回测报告失败: %s", exc)
-                return 1
-            return 0
-
-        # 模式0c: 盘中实时监控
-        realtime_monitor_flag = getattr(args, "realtime_monitor", False) or getattr(
-            config, "realtime_monitor_enabled", False
-        )
-        realtime_monitor_daemon_flag = getattr(args, "realtime_monitor_daemon", False) or getattr(
-            config, "realtime_monitor_daemon_enabled", False
-        )
-
-        if realtime_monitor_flag or realtime_monitor_daemon_flag:
-            mode_label = "盘中实时监控守护进程" if realtime_monitor_daemon_flag else "盘中实时监控"
-            logger.info("模式: %s", mode_label)
-            stock_codes = None
-            if args.stocks:
-                stock_codes = [canonical_stock_code(c) for c in args.stocks.split(",") if (c or "").strip()]
-            from src.services.realtime_monitor import run_realtime_monitor
-
-            run_realtime_monitor(
-                stock_codes=stock_codes,
-                config=config,
-                daemon_mode=realtime_monitor_daemon_flag,
-            )
-            return 0
-
-        # 模式0d: 事件驱动分析服务
-        # 当 --schedule 时，event_monitor_enabled 注册为后台任务而非劫持模式
-        _is_schedule_mode = getattr(args, "schedule", False) or getattr(config, "schedule_enabled", False)
-        event_monitor_flag = getattr(args, "event_monitor", False) or (
-            getattr(config, "event_monitor_enabled", False) and not _is_schedule_mode
-        )
-        event_monitor_daemon_flag = getattr(args, "event_monitor_daemon", False)
-
-        if event_monitor_flag or event_monitor_daemon_flag:
-            mode_label = "事件驱动分析守护进程" if event_monitor_daemon_flag else "事件驱动分析"
-            logger.info("模式: %s", mode_label)
-
-            # 确定监控的股票列表
-            event_codes = getattr(config, "event_monitor_stock_codes", [])
-            if not event_codes:
-                event_codes = stock_codes or config.stock_list
-            if args.stocks:
-                event_codes = [canonical_stock_code(c) for c in args.stocks.split(",") if (c or "").strip()]
-
-            if not event_codes:
-                logger.warning("事件驱动分析: 未配置监控股票，使用默认股票列表")
-                event_codes = config.stock_list
-
-            import asyncio
-            from src.services.event_monitor import run_event_monitor_cli
-
-            asyncio.run(
-                run_event_monitor_cli(
-                    stock_codes=event_codes,
-                    config=config,
-                    daemon=event_monitor_daemon_flag or event_monitor_flag,
-                )
-            )
-            return 0
-
-        # 模式1: 仅大盘复盘
-        if args.market_review:
-            from src.core.market_review import run_market_review
-            from src.core.market_review_runtime import build_market_review_runtime
-
-            # Issue #373: Trading day check for market-review-only mode.
-            # Do NOT use _compute_trading_day_filter here: that helper checks
-            # config.market_review_enabled, which would wrongly block an
-            # explicit --market-review invocation when the flag is disabled.
-            effective_region = None
-            if not getattr(args, "force_run", False) and getattr(config, "trading_day_check_enabled", True):
-                from src.core.trading_calendar import compute_effective_region as _compute_region
-                from src.core.trading_calendar import get_open_markets_today
-
-                open_markets = get_open_markets_today()
-                effective_region = _compute_region(getattr(config, "market_review_region", "cn") or "cn", open_markets)
-                if effective_region == "":
-                    logger.info("今日大盘复盘相关市场均为非交易日，跳过执行。可使用 --force-run 强制执行。")
-                    return 0
-
-            logger.info("模式: 仅大盘复盘")
-            notifier, analyzer, search_service = build_market_review_runtime(config)
-
-            _run_market_review_with_shared_lock(
-                config,
-                run_market_review,
-                notifier=notifier,
-                analyzer=analyzer,
-                search_service=search_service,
-                send_notification=not args.no_notify,
-                override_region=effective_region,
-            )
-            return 0
-
-        # 模式: 周末情报搜集
-        if getattr(args, "weekend_intel", False) or getattr(args, "weekend_refresh", False):
-            return _run_weekend_intel(config, is_refresh=getattr(args, "weekend_refresh", False),
-                                      no_push=getattr(args, "weekend_intel_no_push", False))
-
-        # 模式: 每日情报（修复死代码：argparse 已定义但 main() 未分发）
-        if getattr(args, "daily_intel", False):
-            slot = getattr(args, "daily_intel_slot", "midday") or "midday"
-            return _run_daily_intel(config, slot)
-
-        # 模式2: 定时任务模式
-        explicit_single_run = (
-            args.force_run or args.stocks is not None or args.dry_run or args.backtest or args.backtest_report
-        )
-        if (args.schedule or config.schedule_enabled) and not explicit_single_run:
-            logger.info("模式: 定时任务")
-            logger.info(f"每日执行时间: {config.schedule_time}")
-
-            # Determine whether to run immediately:
-            # Command line arg --no-run-immediately overrides config if present.
-            # Otherwise use config (defaults to True).
-            should_run_immediately = False
-            logger.info("已禁用启动时立即执行")
-
-            from src.scheduler import run_with_schedule
-
-            scheduled_stock_codes = _resolve_scheduled_stock_codes(stock_codes)
-            schedule_time_provider = _build_schedule_time_provider(config.schedule_time)
-
-            def scheduled_task():
-                pass  # 主任务已废弃，全量分析由整点任务 10/11/14/15 负责
-
-            background_tasks = []
-            if getattr(config, "agent_event_monitor_enabled", False):
-                from src.services.event_monitor import (
-                    ThresholdEventMonitor,
-                    parse_threshold_alert_rules,
-                    TriggeredThresholdAlert,
-                )
-
-                interval_minutes = max(1, getattr(config, "agent_event_monitor_interval_minutes", 5))
-                raw_rules = getattr(config, "agent_event_alert_rules_json", "")
-                threshold_rules = parse_threshold_alert_rules(raw_rules)
-
-                if threshold_rules:
-                    threshold_monitor = ThresholdEventMonitor.from_dict_list(threshold_rules)
-                    from src.notification import NotificationBuilder, NotificationService
-
-                    notification_service = NotificationService()
-
-                    def _notify(triggered: TriggeredThresholdAlert) -> None:
-                        title = f"Event Alert | {triggered.rule.stock_code}"
-                        content = triggered.message or triggered.rule.description or "Alert triggered"
-                        alert_text = NotificationBuilder.build_simple_alert(
-                            title=title, content=content, alert_type="warning"
-                        )
-                        sent = notification_service.send(alert_text, route_type="alert")
-                        if not sent:
-                            logger.info("[ThresholdMonitor] No channel available for: %s", title)
-
-                    threshold_monitor.on_trigger(_notify)
-
-                    def threshold_monitor_task():
-                        import asyncio
-                        triggered = asyncio.run(threshold_monitor.check_all())
-                        if triggered:
-                            logger.info("[ThresholdMonitor] 本轮触发 %d 条提醒", len(triggered))
-
-                    background_tasks.append({
-                        "task": threshold_monitor_task,
-                        "interval_seconds": interval_minutes * 60,
-                        "run_immediately": True,
-                        "name": "threshold_event_monitor",
-                    })
-
-            # EventMonitor 作为后台任务（在 scheduler 内周期运行，不劫持模式）
-            if getattr(config, "event_monitor_enabled", False):
-                _em_interval = getattr(config, "event_monitor_check_interval", 300)
-                _em_codes = getattr(config, "event_monitor_stock_codes", [])
-                if not _em_codes:
-                    _em_codes = scheduled_stock_codes or config.stock_list
-
-                def _event_monitor_background():
-                    try:
-                        import asyncio
-                        from src.services.event_monitor import (
-                            create_event_monitor, run_event_monitor_cli,
-                        )
-                        _cfg = _reload_runtime_config()
-                        asyncio.run(run_event_monitor_cli(
-                            stock_codes=_em_codes,
-                            config=_cfg,
-                            daemon=False,  # 单次 check_once()
-                        ))
-                    except Exception as e:
-                        logger.exception("EventMonitor后台任务执行失败: %s", e)
-
-                background_tasks.append({
-                    "task": _event_monitor_background,
-                    "interval_seconds": _em_interval,
-                    "run_immediately": True,
-                    "name": "event_monitor",
-                })
-
-            # RSS intelligence fetch: pre-fetch RSS feeds before analysis cycles
-            if getattr(config, "rss_pipeline_enabled", False):
-                def _rss_fetch_background():
-                    try:
-                        from src.services.intelligence_service import IntelligenceService
-                        svc = IntelligenceService()
-                        results = svc.fetch_all_enabled()
-                        ok_count = sum(1 for r in results if r.get("status") == "ok")
-                        total_items = sum(r.get("items_fetched", 0) for r in results)
-                        if results:
-                            logger.info(
-                                "[RSS] Fetched %d/%d sources, %d new items",
-                                ok_count, len(results), total_items,
-                            )
-                    except Exception as e:
-                        logger.warning("RSS background fetch failed: %s", e)
-
-                background_tasks.append({
-                    "task": _rss_fetch_background,
-                    "interval_seconds": 3600,  # hourly
-                    "run_immediately": True,
-                    "name": "rss_fetch",
-                })
-
-            # DB maintenance: weekly TTL purge + VACUUM
-            def db_maintenance_task():
-                try:
-                    from scripts.db_maintenance import main as db_maint
-                    db_maint()
-                except Exception as e:
-                    logger.warning("DB maintenance failed: %s", e)
-
-            background_tasks.append({
-                "task": db_maintenance_task,
-                "interval_seconds": 7 * 24 * 3600,  # weekly
-                "run_immediately": False,
-                "name": "db_maintenance",
-            })
-
-            # ── 原生定时推送任务（大盘复盘 + 每日/周末情报）──
-
-            additional_daily_tasks = []
-            additional_weekly_tasks = []
-
-            # 大盘复盘 11:45/15:45（仅交易日运行）
-            def _sched_market_review():
-                try:
-                    # 周末跳过
-                    if datetime.now().isoweekday() >= 6:
-                        logger.info("大盘复盘: 今日周末，跳过")
-                        return
-                    from src.core.market_review import run_market_review
-                    from src.core.market_review_runtime import build_market_review_runtime
-                    _cfg = _reload_runtime_config()
-                    notifier, analyzer, search_service = build_market_review_runtime(_cfg)
-                    _run_market_review_with_shared_lock(
-                        _cfg, run_market_review,
-                        notifier=notifier, analyzer=analyzer, search_service=search_service,
-                        send_notification=True,
-                    )
-                except Exception as e:
-                    logger.exception("大盘复盘执行失败: %s", e)
-
-            for t in ("11:45", "15:45"):
-                additional_daily_tasks.append({
-                    "task": _sched_market_review, "time": t, "name": f"大盘复盘@{t}",
-                })
-
-            # 整点全量分析 11:00/14:00（午盘前+收盘前各一次，减少通知疲劳）
-            for t in ("11:00", "14:00"):
-                def _make_整点_analysis(time_slot: str = t):
-                    def _run():
-                        try:
-                            _cfg = _reload_runtime_config()
-                            _cfg.market_review_enabled = False
-                            run_full_analysis(_cfg, args, scheduled_stock_codes)
-                        except Exception as e:
-                            logger.exception("整点分析@%s 执行失败: %s", time_slot, e)
-                    return _run
-                additional_daily_tasks.append({
-                    "task": _make_整点_analysis(), "time": t, "name": f"整点分析@{t}",
-                })
-
-            # 日间情报（仅盘前一次，取消午间/晚间避免重复推送）
-            def _sched_daily_intel_preopen():
-                try:
-                    # 非交易日跳过
-                    from src.core.trading_calendar import get_open_markets_today
-                    if 'cn' not in get_open_markets_today():
-                        logger.info("日间情报(盘前): 今日非交易日，跳过")
-                        return
-                    _cfg = _reload_runtime_config()
-                    _run_daily_intel(_cfg, "preopen")
-                except Exception as e:
-                    logger.exception("日间情报(盘前)执行失败: %s", e)
-
-            additional_daily_tasks.append({
-                "task": _sched_daily_intel_preopen, "time": "08:30", "name": "日间情报(盘前)",
-            })
-
-            # 周末情报 周日 20:00
-            def _sched_weekend_intel():
-                try:
-                    _cfg = _reload_runtime_config()
-                    _run_weekend_intel(_cfg, is_refresh=False, no_push=False)
-                except Exception as e:
-                    logger.exception("周末情报执行失败: %s", e)
-
-            additional_weekly_tasks.append({
-                "task": _sched_weekend_intel, "time": "20:00", "day": "sunday", "name": "周末情报",
-            })
-
-            # 周末情报补量 周一 07:30
-            def _sched_weekend_refresh():
-                try:
-                    _cfg = _reload_runtime_config()
-                    _run_weekend_intel(_cfg, is_refresh=True, no_push=False)
-                except Exception as e:
-                    logger.exception("周末情报补量执行失败: %s", e)
-
-            additional_weekly_tasks.append({
-                "task": _sched_weekend_refresh, "time": "07:30", "day": "monday", "name": "周末情报补量",
-            })
-
-            run_with_schedule(
-                task=scheduled_task,
-                schedule_time=config.schedule_time,
-                run_immediately=should_run_immediately,
-                background_tasks=background_tasks,
-                schedule_time_provider=schedule_time_provider,
-                additional_daily_tasks=additional_daily_tasks,
-                additional_weekly_tasks=additional_weekly_tasks,
-            )
-            return 0
-
-        # 模式3: 正常单次运行
-        if config.run_immediately:
-            run_full_analysis(config, args, stock_codes)
-        else:
-            logger.info("配置为不立即运行分析 (RUN_IMMEDIATELY=false)")
-
-        logger.info("\n程序执行完成")
-
-        # 如果启用了服务且是非定时任务模式，保持程序运行
-        keep_running = start_serve and not (args.schedule or config.schedule_enabled)
-        if keep_running:
-            logger.info("API 服务运行中 (按 Ctrl+C 退出)...")
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                pass
-
-        return 0
-
     except KeyboardInterrupt:
         logger.info("\n用户中断，程序退出")
         return 130
-
     except Exception as e:
         logger.exception(f"程序执行失败: {e}")
         return 1
