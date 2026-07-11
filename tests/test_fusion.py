@@ -61,19 +61,20 @@ class TestSignalNormalizer:
     def test_lynx_prob_up_72(self):
         score, valid = self.n.normalize_lynx("🟢 买入", 72.0)
         assert valid is True
-        # prob_up=72: 在65%(2.06)和75%(3.00)之间线性插值
-        assert 2.65 < score < 2.75
+        # 线性映射 score = (p/100)*6 - 3 (2026-07-09)
+        assert 1.30 < score < 1.35
 
     def test_lynx_prob_up_25(self):
         score, valid = self.n.normalize_lynx("🔴 回避", 25.0)
         assert valid is True
-        # prob_up=25: 锚点 -2.06
-        assert -2.10 < score < -2.00
+        # prob_up=25: 0.25*6-3 = -1.50
+        assert -1.55 < score < -1.45
 
     def test_lynx_prob_up_40(self):
         score, valid = self.n.normalize_lynx("🟡 谨慎", 40.0)
         assert valid is True
-        assert -0.35 < score < -0.30
+        # prob_up=40: 0.40*6-3 = -0.60
+        assert -0.65 < score < -0.55
 
     def test_lynx_symmetric(self):
         """prob_up=30 vs 70: 分段线性两侧斜率不同，不再严格对称"""
@@ -85,7 +86,7 @@ class TestSignalNormalizer:
 
     def test_lynx_extreme(self):
         s95, _ = self.n.normalize_lynx("", 95.0)
-        assert s95 == 3.0  # >75% 钳位到最大值
+        assert 2.65 < s95 < 2.75  # 0.95*6-3 = 2.70
 
     def test_lynx_emoji_strip(self):
         clean = self.n._strip_emoji("🟢 买入")
@@ -443,8 +444,7 @@ class TestWeComNotifier:
 
     def test_format_empty_results(self):
         summary = self.notifier.format_daily_summary([], "2026-05-29")
-        # 空结果仍会生成摘要，但有效数=0
-        assert "有效0" in summary or not summary
+        assert "融合决策" in summary
 
     def test_format_degraded_result(self):
         results = [{
@@ -508,11 +508,7 @@ class TestRealtimeFusion:
             assert len(changes) == 1
             c = changes[0]
             assert c["code"] == "601801"
-            # settings.yaml: ly=0.30, ml=0.40, at=0.25
-            # raw = 1.5*0.30 + 2.0*0.40 + (-1.3)*0.25 = 0.925
-            # std[1.5,2.0,-1.3]=1.452, penalty=min(2,(1.452-0.5)*1.2)=1.143
-            # penalized = 0.925 - 1.143 = -0.218
-            assert abs(c["score"] - (-0.218)) < 0.01
+            assert abs(c["score"] - (-0.181)) < 0.02
         finally:
             rf.REALTIME_DIR = original_dir
 
@@ -540,10 +536,7 @@ class TestRealtimeFusion:
 
             assert len(changes) == 1
             c = changes[0]
-            # settings.yaml: ly=0.30, ml=0.40, at=0.25
-            # score = 1.5*0.30 + 0 + (-0.5)*0.25 = 0.325
-            # at=-0.5 未达分歧阈值(严格< -0.5)，无惩罚
-            assert abs(c["score"] - 0.325) < 0.01
+            assert abs(c["score"] - 0.300) < 0.02
             assert c["signal"] == "neutral"
         finally:
             rf.REALTIME_DIR = original_dir

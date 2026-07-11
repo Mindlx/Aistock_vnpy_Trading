@@ -72,26 +72,11 @@ def compute_adjusted_weights(
     return adjusted, valid_count, len(adjusted) < 3
 
 
-L7_SIGNAL_NAMES: Dict[str, str] = {
-    "strong_bullish": "强看多", "bullish": "看多",
-    "cautious_bullish": "谨慎看多",
-    "cautious_bearish": "谨慎看空",
-    "bearish": "看空", "strong_bearish": "强看空",
-    "neutral": "中性/观望",
-}
-
-L7_POSITION: Dict[str, str] = {
-    "strong_bullish": "满仓", "bullish": "7成",
-    "cautious_bullish": "3成",
-    "cautious_bearish": "3成",
-    "bearish": "0成", "strong_bearish": "0成",
-    "neutral": "0成",
-}
-
-
 def get_final_decision(score: float, disagreement: bool = False,
                        thresholds: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
-    from src.normalizer import L7_THRESHOLDS as DEFAULT_THRESHOLDS
+    from src.normalizer import (
+        L7_POSITION, L7_SIGNAL_NAMES, L7_THRESHOLDS as DEFAULT_THRESHOLDS,
+    )
     t = thresholds or DEFAULT_THRESHOLDS
     if score > t["strong_bullish"]:
         signal = "strong_bullish"
