@@ -158,82 +158,11 @@ class NotificationMixin:
                 wechat_success = False
                 if NotificationChannel.WECHAT in channels:
                     def _send_wechat_report() -> bool:
-                        from datetime import datetime as _dt
                         dc = (self.notifier.generate_brief_report(results) if report_type == ReportType.BRIEF
                               else self.notifier.generate_wechat_dashboard(results))
-                        if report_type != ReportType.BRIEF and len(dc) > 500:
-                            try:
-                                from src.md2img import markdown_to_pdf
-                                now = _dt.now().strftime("%Y-%m-%d %H:%M")
-                                lines = [f"# 整点分析报告", f"**{now}** | 共分析 {len(results)} 只股票\n", "---\n"]
-                                buy = [r for r in results if getattr(r, "sentiment_score", 50) >= 55]
-                                sell = [r for r in results if getattr(r, "sentiment_score", 50) <= 45]
-                                neutral = [r for r in results if 45 < getattr(r, "sentiment_score", 50) < 55]
-                                lines.append("## 综合建议")
-                                lines.append("| 建议 | 数量 | 股票 |\n|------|:----:|------|")
-                                if buy:
-                                    names = ", ".join(getattr(r, "name", r.code) for r in buy)
-                                    lines.append(f"| 🟢 买入 | {len(buy)} | {names} |")
-                                if neutral:
-                                    names = ", ".join(getattr(r, "name", r.code) for r in neutral[:5])
-                                    lines.append(f"| ➡️ 持有 | {len(neutral)} | {names} |")
-                                if sell:
-                                    names = ", ".join(getattr(r, "name", r.code) for r in sell)
-                                    lines.append(f"| 🔴 卖出 | {len(sell)} | {names} |")
-                                lines.append("")
-                                lines.append("## 个股详情\n")
-                                for r in results:
-                                    score = getattr(r, "sentiment_score", 50)
-                                    name = getattr(r, "name", r.code)
-                                    _op = getattr(r, "operation_advice", "") or ""
-                                    _trend = getattr(r, "trend_prediction", "") or ""
-                                    _s = "🟢" if _score >= 55 else ("🔴" if _score <= 45 else "➡️")
-                                    _dash = getattr(r, "dashboard", None) or {}
-                                    _buy_pt = _dash.get("execution_plan", {}).get("entry_price", "") if isinstance(_dash, dict) else ""
-                                    _stop = _dash.get("execution_plan", {}).get("stop_loss", "") if isinstance(_dash, dict) else ""
-                                    _target = _dash.get("execution_plan", {}).get("target", "") if isinstance(_dash, dict) else ""
-                                    _pdf_lines.append(f"### {_s} {_name} (评分{_score})")
-                                    _pdf_lines.append(f"- **操作建议**: {_op}")
-                                    _pdf_lines.append(f"- **趋势判断**: {_trend}")
-                                    if _buy_pt or _stop or _target:
-                                        _pts = []
-                                        if _buy_pt: _pts.append(f"建仓{_buy_pt}")
-                                        if _stop: _pts.append(f"止损{_stop}")
-                                        if _target: _pts.append(f"目标{_target}")
-                                        _pdf_lines.append(f"- **执行方案**: {' | '.join(_pts)}")
-                                    _pdf_lines.append("")
-                                pdf_data = markdown_to_pdf("\n".join(_pdf_lines), font_size="16pt")
-                                if pdf_data:
-                                    _date_str = _dt.now().strftime("%Y%m%d_%H%M")
-                                    _pdf_name = f"{_date_str}_整点分析报告.pdf"
-                                    # 提取简讯: 统计 + 建议买入 + 建议卖出
-                                    _lines = dashboard_content.split("\n")
-                                    _buy = [l for l in _lines if "🟢" in l and "买入" in l]
-                                    _sell = [l for l in _lines if "🔴" in l and "卖出" in l]
-                                    _total = next((l for l in _lines if "共分析" in l), "")
-                                    _buy_names = []
-                                    if _buy:
-                                        _buy_names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _buy[:5]]
-                                    _sell_names = []
-                                    if _sell:
-                                        _sell_names = [l.split("**")[1] if "**" in l else l.split()[1] for l in _sell[:5]]
-                                    _neutral = len(results) - len(_buy) - len(_sell)
-                                    _now_str = _dt.now().strftime("%H:%M")
-                                    _brief = (
-                                        f"👾 {_now_str} 整点分析\n"
-                                        f"本次共分析{len(results)}只自选股票，建议买入{len(_buy)}只-{', '.join(_buy_names)}；"
-                                        f"卖出{len(_sell)}只-{', '.join(_sell_names)}；"
-                                        f"中立持有{_neutral}只。\n"
-                                        f"完整报告见附件PDF"
-                                    )
-                                    if self.notifier.send_to_wechat(_brief):
-                                        return self.notifier.send_to_wechat_file(pdf_data, _pdf_name)
-                            except Exception as e:
-                                logger.warning(f"整点分析 PDF 生成失败, 回退到文本: {e}")
-
-                        logger.info(f"企业微信仪表盘长度: {len(dashboard_content)} 字符")
-                        logger.debug(f"企业微信推送内容:\n{dashboard_content}")
-                        return self.notifier.send_to_wechat(dashboard_content)
+                        logger.info(f"企业微信仪表盘长度: {len(dc)} 字符")
+                        logger.debug(f"企业微信推送内容:\n{dc}")
+                        return self.notifier.send_to_wechat(dc)
 
                     wechat_success = _send_channel_safely(
                         NotificationChannel.WECHAT.value,
