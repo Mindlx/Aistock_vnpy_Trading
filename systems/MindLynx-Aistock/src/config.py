@@ -28,6 +28,8 @@ from src.notification_noise import (
     parse_notification_quiet_hours,
     validate_notification_timezone,
 )
+DEFAULT_ALPHASIFT_INSTALL_SPEC = "git+https://github.com/ZhuLinsen/alphasift.git"
+
 from src.notification_routing import parse_notification_route_channels
 from src.report_language import (
     is_supported_report_language_value,
@@ -646,6 +648,8 @@ class Config(LLMConfig, NotificationConfig, DataConfig, AnalysisConfig):
 
     # RSS 情报管道开关：启用后在分析流水线中注入 RSS IntelligenceItem 数据
     rss_pipeline_enabled: bool = False
+    alphasift_enabled: bool = True
+    alphasift_install_spec: str = DEFAULT_ALPHASIFT_INSTALL_SPEC
 
     # === 数据库配置 ===
     database_path: str = "./data/stock_analysis.db"
