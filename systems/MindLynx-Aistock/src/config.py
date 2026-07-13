@@ -528,6 +528,12 @@ def setup_env(override: bool = False):
     if root_env.exists() and root_env.resolve() != env_path.resolve():
         load_dotenv(dotenv_path=root_env, override=False)
 
+    # 加载用户 secrets 文件 (~/.secrets) 作为最高优先级覆盖
+    # 这样 API Key 只需在 ~/.secrets 维护，无需每次手动更新 .env
+    user_secrets = Path.home() / ".secrets"
+    if user_secrets.exists():
+        load_dotenv(dotenv_path=user_secrets, override=True)
+
 
 @dataclass
 class Config(LLMConfig, NotificationConfig, DataConfig, AnalysisConfig):
