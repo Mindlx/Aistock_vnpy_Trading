@@ -19,6 +19,10 @@ from src.agent.events import (
     parse_event_alert_rules,
     validate_event_alert_rule,
 )
+from src.services.event_monitor import (
+    MarketIndicatorThresholdAlert,
+    PositionThresholdAlert,
+)
 from src.services.alert_service import AlertService
 
 logger = logging.getLogger(__name__)
@@ -30,6 +34,7 @@ ALERT_WORKER_FINGERPRINT_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_DB_ALERT_COOLDOWN_SECONDS = 24 * 60 * 60
 ALERT_WORKER_RULE_LIMIT = 1000
 WRITABLE_TRIGGER_STATUSES = frozenset({"triggered", "skipped", "degraded", "failed"})
+TRIGGER_DEDUP_TTL_SECONDS = 300  # 5 minutes between identical triggers
 
 
 @dataclass
@@ -67,6 +72,7 @@ class AlertWorker:
         self.fingerprint_ttl_seconds = max(1, int(fingerprint_ttl_seconds))
         self._trigger_fingerprints: dict[str, float] = {}
         self._trigger_fingerprint_ttls: dict[str, int] = {}
+        self._trigger_dedup: dict[str, float] = {}
 
     @staticmethod
     def _default_config_provider():
@@ -104,6 +110,7 @@ class AlertWorker:
             return stats
 
         self._prune_fingerprints()
+        self._prune_trigger_dedup()
         runtime_rules = self._load_runtime_rules(config)
         stats["loaded"] = len(runtime_rules)
         if not runtime_rules:
@@ -237,6 +244,21 @@ class AlertWorker:
                         multiplier=float(parameters["multiplier"]),
                         metadata=metadata,
                     )
+                elif alert_type == "position_change":
+                    rule = PositionThresholdAlert(
+                        stock_code=stock_code,
+                        direction=str(parameters["direction"]),
+                        change_threshold=float(parameters.get("change_threshold", 0)),
+                        metadata=metadata,
+                    )
+                elif alert_type == "market_indicator":
+                    rule = MarketIndicatorThresholdAlert(
+                        stock_code=stock_code,
+                        indicator=str(parameters["indicator"]),
+                        direction=str(parameters["direction"]),
+                        threshold=float(parameters["threshold"]),
+                        metadata=metadata,
+                    )
                 else:
                     raise ValueError(f"unsupported alert_type: {alert_type}")
                 legacy_rules.append((key, rule))
@@ -249,7 +271,32 @@ class AlertWorker:
         canonical_params = json.dumps(parameters or {}, ensure_ascii=False, sort_keys=True)
         return f"{target_scope}:{target}:{alert_type}:{canonical_params}"
 
+    def _trigger_dedup_key(self, result: dict[str, Any]) -> str:
+        rule_id = result.get("rule_id")
+        observed = result.get("observed_value")
+        status = result.get("record_status", "")
+        return f"{rule_id}:{observed}:{status}"
+
+    def _is_duplicate_trigger(self, result: dict[str, Any]) -> bool:
+        key = self._trigger_dedup_key(result)
+        now = self.now_provider()
+        last_seen = self._trigger_dedup.get(key)
+        if last_seen is not None and now - last_seen < TRIGGER_DEDUP_TTL_SECONDS:
+            return True
+        self._trigger_dedup[key] = now
+        return False
+
+    def _prune_trigger_dedup(self) -> None:
+        now = self.now_provider()
+        stale = [k for k, t in self._trigger_dedup.items() if now - t >= TRIGGER_DEDUP_TTL_SECONDS]
+        for k in stale:
+            self._trigger_dedup.pop(k, None)
+
     def _record_trigger(self, runtime_rule: RuntimeAlertRule, result: dict[str, Any], status: str) -> int | None:
+        if status == "triggered" and self._is_duplicate_trigger(result):
+            logger.debug("[AlertWorker] Duplicate trigger suppressed: %s", self._trigger_dedup_key(result))
+            return None
+
         try:
             rule_id = int(result.get("rule_id") or 0) or None
         except (TypeError, ValueError):

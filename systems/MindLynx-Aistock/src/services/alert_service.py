@@ -17,6 +17,10 @@ from src.agent.events import (
     _read_quote_float,
     validate_event_alert_rule,
 )
+from src.services.event_monitor import (
+    MarketIndicatorThresholdAlert,
+    PositionThresholdAlert,
+)
 from src.repositories.alert_repo import AlertRepository
 from src.storage import (
     AlertCooldownRecord,
@@ -27,7 +31,10 @@ from src.storage import (
 )
 from src.utils.sanitize import sanitize_diagnostic_text
 
-SUPPORTED_ALERT_TYPES = frozenset({"price_cross", "price_change_percent", "volume_spike"})
+SUPPORTED_ALERT_TYPES = frozenset({
+    "price_cross", "price_change_percent", "volume_spike",
+    "position_change", "market_indicator",
+})
 SUPPORTED_TARGET_SCOPES = frozenset({"single_symbol"})
 SUPPORTED_SEVERITIES = frozenset({"info", "warning", "critical"})
 NULLABLE_RULE_UPDATE_FIELDS = frozenset({"cooldown_policy", "notification_policy"})
@@ -153,6 +160,10 @@ class AlertService:
             return await self._evaluate_price_change(rule, monitor)
         if isinstance(rule, VolumeAlert):
             return await self._evaluate_volume(rule)
+        if isinstance(rule, PositionThresholdAlert):
+            return await self._evaluate_position(rule)
+        if isinstance(rule, MarketIndicatorThresholdAlert):
+            return await self._evaluate_market_indicator(rule)
         return self._evaluation_error(rule, f"unsupported runtime alert type: {rule.alert_type}")
 
     async def _evaluate_price(self, rule: PriceAlert, monitor: EventMonitor) -> dict[str, Any]:
@@ -366,6 +377,59 @@ class AlertService:
             data_timestamp=data_timestamp,
         )
 
+    async def _evaluate_position(self, rule: PositionThresholdAlert) -> dict[str, Any]:
+        try:
+            from src.services.position_service import get_position_service
+            svc = get_position_service()
+            positions = svc.get_positions(rule.stock_code)
+            if positions is None:
+                return self._not_triggered(rule, None, "No position data available", record_status="skipped")
+            current_qty = sum(p.get("quantity", 0) or 0 for p in positions if isinstance(p, dict))
+            last_qty = getattr(self, "_last_pos_qty", {}).get(rule.stock_code)
+            self._last_pos_qty = getattr(self, "_last_pos_qty", {})
+            self._last_pos_qty[rule.stock_code] = current_qty
+            if last_qty is None:
+                return self._not_triggered(rule, current_qty, f"Initial position snapshot: {current_qty}", record_status="skipped")
+            change = current_qty - last_qty
+            threshold = max(rule.change_threshold, 0)
+            triggered = (rule.direction == "any" and abs(change) > threshold) or \
+                        (rule.direction == "increase" and change > threshold) or \
+                        (rule.direction == "decrease" and change < -threshold)
+            if triggered:
+                return self._triggered(
+                    rule, current_qty,
+                    f"{rule.stock_code} position {last_qty} → {current_qty} (change={change:+d})",
+                    threshold=last_qty,
+                    data_source="position_service",
+                )
+            return self._not_triggered(rule, current_qty, f"No significant position change (Δ={change})")
+        except Exception as exc:
+            return self._evaluation_error(rule, exc, data_source="position_service")
+
+    async def _evaluate_market_indicator(self, rule: MarketIndicatorThresholdAlert) -> dict[str, Any]:
+        try:
+            from src.services.alert_indicators import compute_market_signal
+            from data_provider import DataFetcherManager
+            result = await asyncio.to_thread(
+                lambda: DataFetcherManager().get_daily_data(rule.stock_code, days=60)
+            )
+            if result is None:
+                return self._not_triggered(rule, None, "No market data available", record_status="skipped")
+            df, _source = result
+            if df is None or df.empty:
+                return self._not_triggered(rule, None, "Empty market data", record_status="skipped")
+            signal = compute_market_signal(df, indicator=rule.indicator, threshold=rule.threshold, direction=rule.direction)
+            if signal:
+                return self._triggered(
+                    rule, signal.get("value"),
+                    signal.get("message", f"Market {rule.indicator} triggered"),
+                    threshold=rule.threshold,
+                    data_source="daily_data",
+                )
+            return self._not_triggered(rule, None, f"Market {rule.indicator} not triggered")
+        except Exception as exc:
+            return self._evaluation_error(rule, exc, data_source="daily_data")
+
     def _triggered(
         self,
         rule,
@@ -448,6 +512,10 @@ class AlertService:
             return float(rule.price)
         if isinstance(rule, PriceChangeAlert):
             return abs(float(rule.change_pct))
+        if isinstance(rule, PositionThresholdAlert):
+            return float(rule.change_threshold)
+        if isinstance(rule, MarketIndicatorThresholdAlert):
+            return float(rule.threshold)
         return None
 
     @staticmethod
@@ -455,6 +523,10 @@ class AlertService:
         if isinstance(rule, (PriceAlert, PriceChangeAlert)):
             return "realtime_quote"
         if isinstance(rule, VolumeAlert):
+            return "daily_data"
+        if isinstance(rule, PositionThresholdAlert):
+            return "position_service"
+        if isinstance(rule, MarketIndicatorThresholdAlert):
             return "daily_data"
         return None
 
@@ -676,6 +748,28 @@ class AlertService:
         if alert_type == "volume_spike":
             return {"multiplier": self._positive_float(parameters.get("multiplier"), "multiplier")}
 
+        if alert_type == "position_change":
+            direction = str(parameters.get("direction") or "any").strip().lower()
+            if direction not in {"any", "increase", "decrease"}:
+                raise AlertServiceError(f"invalid position direction: {direction}")
+            return {
+                "direction": direction,
+                "change_threshold": self._nonnegative_float(parameters.get("change_threshold"), "change_threshold"),
+            }
+
+        if alert_type == "market_indicator":
+            indicator = str(parameters.get("indicator") or "index_change").strip().lower()
+            if not indicator:
+                raise AlertServiceError("indicator is required")
+            direction = str(parameters.get("direction") or "above").strip().lower()
+            if direction not in {"above", "below"}:
+                raise AlertServiceError(f"invalid direction for market_indicator: {direction}")
+            return {
+                "indicator": indicator,
+                "direction": direction,
+                "threshold": self._positive_float(parameters.get("threshold"), "threshold"),
+            }
+
         raise UnsupportedAlertTypeError(f"unsupported alert_type for P1 Alert API: {alert_type}")
 
     @staticmethod
@@ -686,6 +780,16 @@ class AlertService:
             raise AlertServiceError(f"invalid {field_name}: {value}") from exc
         if number <= 0:
             raise AlertServiceError(f"{field_name} must be > 0")
+        return number
+
+    @staticmethod
+    def _nonnegative_float(value: Any, field_name: str) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise AlertServiceError(f"invalid {field_name}: {value}") from exc
+        if number < 0:
+            raise AlertServiceError(f"{field_name} must be >= 0")
         return number
 
     def _to_runtime_rule(self, row: AlertRuleRecord, data: dict[str, Any] | None = None):
@@ -709,6 +813,21 @@ class AlertService:
             return VolumeAlert(
                 stock_code=data["target"],
                 multiplier=float(parameters["multiplier"]),
+                metadata={"persisted_rule_id": data["id"]},
+            )
+        if data["alert_type"] == "position_change":
+            return PositionThresholdAlert(
+                stock_code=data["target"],
+                direction=str(parameters["direction"]),
+                change_threshold=float(parameters.get("change_threshold", 0)),
+                metadata={"persisted_rule_id": data["id"]},
+            )
+        if data["alert_type"] == "market_indicator":
+            return MarketIndicatorThresholdAlert(
+                stock_code=data["target"],
+                indicator=str(parameters["indicator"]),
+                direction=str(parameters["direction"]),
+                threshold=float(parameters["threshold"]),
                 metadata={"persisted_rule_id": data["id"]},
             )
         raise UnsupportedAlertTypeError(f"unsupported alert_type for P1 Alert API: {data['alert_type']}")
@@ -808,6 +927,10 @@ class AlertService:
             return f"{target} change {parameters['direction']} {parameters['change_pct']}%"
         if alert_type == "volume_spike":
             return f"{target} volume spike {parameters['multiplier']}x"
+        if alert_type == "position_change":
+            return f"{target} position {parameters.get('direction', 'any')}"
+        if alert_type == "market_indicator":
+            return f"{target} {parameters.get('indicator', 'market')} {parameters.get('direction', 'above')} {parameters.get('threshold', 1)}"
         return f"{target} {alert_type}"
 
     @staticmethod

@@ -1251,6 +1251,8 @@ class ThresholdAlertType(str, Enum):
     PRICE_CROSS = "price_cross"
     PRICE_CHANGE_PERCENT = "price_change_percent"
     VOLUME_SPIKE = "volume_spike"
+    POSITION_CHANGE = "position_change"
+    MARKET_INDICATOR = "market_indicator"
     SENTIMENT_SHIFT = "sentiment_shift"
     RISK_FLAG = "risk_flag"
     CUSTOM = "custom"
@@ -1267,6 +1269,8 @@ _RUNTIME_SUPPORTED_THRESHOLD_TYPES = frozenset({
     ThresholdAlertType.PRICE_CROSS,
     ThresholdAlertType.PRICE_CHANGE_PERCENT,
     ThresholdAlertType.VOLUME_SPIKE,
+    ThresholdAlertType.POSITION_CHANGE,
+    ThresholdAlertType.MARKET_INDICATOR,
 })
 
 
@@ -1357,6 +1361,31 @@ class VolumeThresholdAlert(ThresholdAlertRule):
 
 
 @dataclass
+class PositionThresholdAlert(ThresholdAlertRule):
+    """持仓变动告警 (P6)。"""
+    alert_type: ThresholdAlertType = ThresholdAlertType.POSITION_CHANGE
+    direction: str = "any"
+    change_threshold: float = 0.0
+
+    def __post_init__(self):
+        if not self.description:
+            self.description = f"{self.stock_code} position change ({self.direction})"
+
+
+@dataclass
+class MarketIndicatorThresholdAlert(ThresholdAlertRule):
+    """市场轻量告警 (P7)。"""
+    alert_type: ThresholdAlertType = ThresholdAlertType.MARKET_INDICATOR
+    indicator: str = "index_change"
+    threshold: float = 1.0
+    direction: str = "above"
+
+    def __post_init__(self):
+        if not self.description:
+            self.description = f"market {self.indicator} {self.direction} {self.threshold}"
+
+
+@dataclass
 class TriggeredThresholdAlert:
     """已触发的告警结果。"""
     rule: ThresholdAlertRule
@@ -1424,6 +1453,10 @@ class ThresholdEventMonitor:
             return await self._check_price_change(rule)
         elif isinstance(rule, VolumeThresholdAlert):
             return await self._check_volume(rule)
+        elif isinstance(rule, PositionThresholdAlert):
+            return await self._check_position(rule)
+        elif isinstance(rule, MarketIndicatorThresholdAlert):
+            return await self._check_market_indicator(rule)
         return None
 
     def _fetch_realtime_quote(self, stock_code: str) -> Any:
@@ -1495,6 +1528,64 @@ class ThresholdEventMonitor:
             logger.debug("[ThresholdMonitor] _check_volume error: %s", exc)
         return None
 
+    async def _check_position(self, rule: PositionThresholdAlert) -> TriggeredThresholdAlert | None:
+        try:
+            from src.services.position_service import get_position_service
+            svc = get_position_service()
+            positions = svc.get_positions(rule.stock_code)
+            if positions is None:
+                return None
+            current_qty = sum(p.get("quantity", 0) or 0 for p in positions if isinstance(p, dict))
+            last_qty = getattr(rule, "_last_position_qty", None)
+            rule._last_position_qty = current_qty
+            if last_qty is None:
+                return None
+            change = current_qty - last_qty
+            if rule.direction == "any" and change != 0:
+                return TriggeredThresholdAlert(
+                    rule=rule, current_value=current_qty,
+                    message=f"📋 {rule.stock_code} position changed: {last_qty} → {current_qty} ({change:+d})",
+                )
+            if rule.direction == "increase" and change > max(rule.change_threshold, 0):
+                return TriggeredThresholdAlert(
+                    rule=rule, current_value=current_qty,
+                    message=f"📋 {rule.stock_code} position increased: {last_qty} → {current_qty} (+{change})",
+                )
+            if rule.direction == "decrease" and abs(change) > max(rule.change_threshold, 0):
+                return TriggeredThresholdAlert(
+                    rule=rule, current_value=current_qty,
+                    message=f"📋 {rule.stock_code} position decreased: {last_qty} → {current_qty} ({change:+d})",
+                )
+        except Exception as exc:
+            logger.debug("[ThresholdMonitor] _check_position error: %s", exc)
+        return None
+
+    async def _check_market_indicator(self, rule: MarketIndicatorThresholdAlert) -> TriggeredThresholdAlert | None:
+        try:
+            from src.services.alert_indicators import compute_market_signal
+            df = await self._get_market_daily_data(rule.stock_code)
+            if df is None or df.empty:
+                return None
+            signal = compute_market_signal(df, indicator=rule.indicator, threshold=rule.threshold, direction=rule.direction)
+            if signal:
+                return TriggeredThresholdAlert(
+                    rule=rule, current_value=signal.get("value"),
+                    message=f"📈 market {rule.indicator}: {signal.get('message', 'triggered')}",
+                )
+        except Exception as exc:
+            logger.debug("[ThresholdMonitor] _check_market_indicator error: %s", exc)
+        return None
+
+    def _get_market_daily_data(self, code: str) -> Any:
+        try:
+            from data_provider import DataFetcherManager
+            result = DataFetcherManager().get_daily_data(code, days=60)
+            if result:
+                df, _source = result
+                return df
+        except Exception:
+            return None
+
     def to_dict_list(self) -> list[dict[str, Any]]:
         results = []
         for rule in self.rules:
@@ -1514,6 +1605,13 @@ class ThresholdEventMonitor:
                 entry["change_pct"] = rule.change_pct
             elif isinstance(rule, VolumeThresholdAlert):
                 entry["multiplier"] = rule.multiplier
+            elif isinstance(rule, PositionThresholdAlert):
+                entry["direction"] = rule.direction
+                entry["change_threshold"] = rule.change_threshold
+            elif isinstance(rule, MarketIndicatorThresholdAlert):
+                entry["indicator"] = rule.indicator
+                entry["threshold"] = rule.threshold
+                entry["direction"] = rule.direction
             results.append(entry)
         return results
 
@@ -1531,6 +1629,10 @@ class ThresholdEventMonitor:
                     rule = PriceChangeThresholdAlert(stock_code=stock_code, direction=entry.get("direction", "up").lower(), change_pct=float(entry["change_pct"]))
                 elif alert_type == ThresholdAlertType.VOLUME_SPIKE.value:
                     rule = VolumeThresholdAlert(stock_code=stock_code, multiplier=float(entry.get("multiplier", 2.0)))
+                elif alert_type == ThresholdAlertType.POSITION_CHANGE.value:
+                    rule = PositionThresholdAlert(stock_code=stock_code, direction=entry.get("direction", "any").lower(), change_threshold=float(entry.get("change_threshold", 0)))
+                elif alert_type == ThresholdAlertType.MARKET_INDICATOR.value:
+                    rule = MarketIndicatorThresholdAlert(stock_code=stock_code, indicator=str(entry.get("indicator", "index_change")), threshold=float(entry.get("threshold", 1.0)), direction=entry.get("direction", "above").lower())
                 else:
                     raise ValueError(f"unsupported alert_type: {alert_type}")
                 rule.status = ThresholdAlertStatus(entry.get("status", "active"))
@@ -1621,3 +1723,24 @@ def validate_threshold_alert_rule(rule: dict[str, Any]) -> None:
             raise ValueError(f"invalid multiplier: {rule.get('multiplier')}") from exc
         if multiplier <= 0:
             raise ValueError("multiplier must be > 0")
+    elif alert_type == ThresholdAlertType.POSITION_CHANGE:
+        direction = str(rule.get("direction", "any")).lower()
+        if direction not in {"any", "increase", "decrease"}:
+            raise ValueError(f"invalid position direction: {direction}")
+        try:
+            change_threshold = float(rule.get("change_threshold", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid change_threshold: {rule.get('change_threshold')}") from exc
+        if change_threshold < 0:
+            raise ValueError("change_threshold must be >= 0")
+    elif alert_type == ThresholdAlertType.MARKET_INDICATOR:
+        indicator = str(rule.get("indicator", "index_change")).strip().lower()
+        if not indicator:
+            raise ValueError("indicator is required for market_indicator alerts")
+        direction = str(rule.get("direction", "above")).lower()
+        if direction not in {"above", "below"}:
+            raise ValueError(f"invalid direction for market_indicator: {direction}")
+        try:
+            threshold = float(rule.get("threshold", 1.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid threshold: {rule.get('threshold')}") from exc

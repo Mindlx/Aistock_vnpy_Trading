@@ -446,6 +446,114 @@ def _require_column(df: pd.DataFrame, col: str) -> None:
         )
 
 
+def compute_market_signal(
+    df: pd.DataFrame,
+    *,
+    indicator: str = "index_change",
+    threshold: float = 1.0,
+    direction: str = "above",
+) -> dict[str, Any] | None:
+    """Compute market-level indicator signals for P7 alert rules.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with at minimum ``close`` column.
+    indicator : str
+        Indicator name. Supported: ``"index_change"``, ``"ma_cross"``,
+        ``"volume_surge"``, ``"volatility"``, ``"breadth"``.
+    threshold : float
+        Threshold value for the indicator.
+    direction : str
+        ``"above"`` or ``"below"``.
+
+    Returns
+    -------
+    dict or None
+        ``{"value": ..., "message": ...}`` if triggered, else ``None``.
+    """
+    _require_column(df, "close")
+
+    if indicator == "index_change":
+        if len(df) < 2:
+            return None
+        prev_close = float(df["close"].iloc[-2])
+        curr_close = float(df["close"].iloc[-1])
+        if prev_close <= 0:
+            return None
+        change_pct = (curr_close - prev_close) / prev_close * 100
+        triggered = (direction == "above" and change_pct >= threshold) or \
+                    (direction == "below" and change_pct <= -threshold)
+        if triggered:
+            return {
+                "value": change_pct,
+                "message": f"Index change {change_pct:+.2f}% ({direction} {threshold}%)",
+            }
+        return None
+
+    if indicator == "ma_cross":
+        signal = calc_ma_cross_signal(df)
+        if signal:
+            return {
+                "value": 1.0 if signal == "golden_cross" else -1.0,
+                "message": f"MA cross: {signal}",
+            }
+        return None
+
+    if indicator == "volume_surge":
+        if "volume" not in df.columns or len(df) < 20:
+            return None
+        avg_vol = float(df["volume"].iloc[-20:].mean())
+        latest_vol = float(df["volume"].iloc[-1])
+        if avg_vol <= 0:
+            return None
+        ratio = latest_vol / avg_vol
+        triggered = (direction == "above" and ratio >= threshold) or \
+                    (direction == "below" and ratio <= threshold)
+        if triggered:
+            return {
+                "value": ratio,
+                "message": f"Volume surge: {ratio:.1f}x average ({direction} {threshold}x)",
+            }
+        return None
+
+    if indicator == "volatility":
+        if len(df) < 20:
+            return None
+        returns = df["close"].pct_change().dropna()
+        if len(returns) < 20:
+            return None
+        current_vol = float(returns.iloc[-20:].std()) * 100
+        triggered = (direction == "above" and current_vol >= threshold) or \
+                    (direction == "below" and current_vol <= threshold)
+        if triggered:
+            return {
+                "value": current_vol,
+                "message": f"Volatility {current_vol:.2f}% ({direction} {threshold}%)",
+            }
+        return None
+
+    if indicator == "breadth":
+        # Simplified breadth: close vs SMA(20) percentage
+        if len(df) < 20:
+            return None
+        sma20 = float(df["close"].iloc[-20:].mean())
+        curr = float(df["close"].iloc[-1])
+        if sma20 <= 0:
+            return None
+        ratio = (curr / sma20 - 1) * 100
+        triggered = (direction == "above" and ratio >= threshold) or \
+                    (direction == "below" and ratio <= -threshold)
+        if triggered:
+            return {
+                "value": ratio,
+                "message": f"Breadth: price vs SMA20 = {ratio:+.2f}% ({direction} {threshold}%)",
+            }
+        return None
+
+    return None
+
+
 def compute_all_signals(df: pd.DataFrame, **kwargs: Any) -> dict[str, str | None]:
     """Run all indicator signal functions and return a dict of results.
 
