@@ -1692,6 +1692,11 @@ class Config(LLMConfig, NotificationConfig, DataConfig, AnalysisConfig):
                 single_key = os.getenv(f"LLM_{ch_upper}_API_KEY", "").strip()
                 if single_key:
                     api_keys = [single_key]
+            # Fallback: LLM_DEEPSEEK_API_KEY not set → try DEEPSEEK_API_KEY
+            if not api_keys and ch_lower == "deepseek":
+                fallback = os.getenv("DEEPSEEK_API_KEY", "").strip()
+                if fallback:
+                    api_keys = [fallback]
             if not api_keys and ch_lower == "anspire":
                 anspire_keys_raw = os.getenv("ANSPIRE_API_KEYS", "")
                 api_keys = [k.strip() for k in anspire_keys_raw.split(",") if k.strip()]
