@@ -196,7 +196,14 @@ def _reload_env_file_values_preserving_overrides() -> None:
     if latest_values is None:
         return
 
-    managed_keys = {key for key in latest_values if key not in _INITIAL_PROCESS_ENV}
+    # API Key/Token/Secret 类变量不受 _INITIAL_PROCESS_ENV 保护，
+    # 允许 ~/.secrets 更新后覆盖进程启动时的旧值
+    _FORCE_RELOAD_PATTERNS = ("API_KEY", "_TOKEN", "_SECRET", "API_KEYS")
+    managed_keys = {
+        key for key in latest_values
+        if key not in _INITIAL_PROCESS_ENV
+        or any(p in key.upper() for p in _FORCE_RELOAD_PATTERNS)
+    }
 
     for key in _RUNTIME_ENV_FILE_KEYS - managed_keys:
         os.environ.pop(key, None)
