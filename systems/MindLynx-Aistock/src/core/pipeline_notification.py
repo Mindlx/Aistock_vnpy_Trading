@@ -24,6 +24,18 @@ logger = logging.getLogger(__name__)
 _SINGLE_STOCK_NOTIFY_LOCK_INIT_GUARD = threading.Lock()
 
 
+def _send_channel_safely(channel_label: str, send_func: Callable[[], bool]) -> bool:
+    try:
+        return bool(send_func())
+    except Exception as e:
+        logger.exception(
+            "通知渠道 %s 推送异常，继续尝试其他渠道: %s",
+            channel_label,
+            e,
+        )
+        return False
+
+
 class NotificationMixin:
     """通知相关方法 mixin，由 StockAnalysisPipeline 多重继承。"""
 
