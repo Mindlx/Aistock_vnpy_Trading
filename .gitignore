@@ -60,3 +60,4 @@ config/logs/fusion_history.csv
 
 # Backup files
 *.bak
+.env.secrets
