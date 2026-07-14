@@ -299,26 +299,40 @@ class SignalNormalizer:
     @classmethod
     def normalize_tradingagent(cls, rating: str, debate_state: Optional[Dict[str, Any]] = None) -> float:
         """
-        at 归一化: 直接 L7 映射（v3.1）。
+        at 归一化: 5 级分类 → 连续 L7 映射（v3.2）。
 
-        at 无数值输出，仅 5 级分类，直接映射到 L7:
+        基础映射:
           Buy → +3.0 (L7=+3 强烈看多)
           Overweight → +2.06 (L7=+2 看多)
           Hold → 0.0 (L7=0 中性)
           Underweight → -1.13 (L7=-1 谨慎看空)
           Sell → -3.0 (L7=-3 强烈看空)
 
-        Underweight 升级 (填补 L7=-2 看空缺口):
-          当 debate_state 显示强看空共识 (investment_agreement>0.7) 时，
-          将 Underweight 升级至 -2.06 (L7=-2 看空)。
+        辩论共识对分数做平滑拉伸:
+          共识越强(agreement→1.0)信号越接近极端值,
+          共识越弱(agreement→0.5)信号越接近基础值。
+          分析师分歧(analyst_variance)越高, 拉伸幅度越小。
         """
         normalized = rating.strip().capitalize()
         base = cls.TRADINGAGENT_L7_MAP.get(normalized, 0.0)
-        # 辩论强看空共识时升级 Underweight → L7=-2
-        if normalized == "Underweight" and debate_state:
-            if debate_state.get("investment_agreement", 0.5) > 0.7:
-                base = -2.06
-        return base
+        if debate_state and debate_state.get("debate_available"):
+            agreement = debate_state.get("investment_agreement", 0.5)
+            variance = debate_state.get("analyst_variance", 0.5)
+            # 共识偏离中性的程度(0.5~1.0→0.0~1.0)
+            boost = max(0.0, (agreement - 0.5) * 2.0)
+            # 分歧衰减: 高分歧时拉伸幅度折半
+            decay = 1.0 - min(variance, 0.5) * 0.5
+            effective = boost * decay
+            # 目标值(基础值与更极端值之间做插值)
+            if normalized == "Underweight":
+                base = -1.13 + (-2.06 + 1.13) * effective  # -1.13 → -2.06
+            elif normalized == "Overweight":
+                base = 2.06 + (3.0 - 2.06) * effective      # +2.06 → +3.0
+            elif normalized == "Buy":
+                base = 2.5 + (3.0 - 2.5) * effective        # +2.5 → +3.0
+            elif normalized == "Sell":
+                base = -2.5 + (-3.0 + 2.5) * effective      # -2.5 → -3.0
+        return round(base, 4)
 
     # ────────── 原始信号解析辅助 ──────────
 
