@@ -1,0 +1,20 @@
+[Unit]
+Description=Aistock_vnpy_Trading — ML WebUI 前端 (8000)
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading/systems/MindLynx-Aistock
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python3 webui.py
+Restart=on-failure
+RestartSec=10
+Environment=WEBUI_HOST=0.0.0.0
+Environment=WEBUI_PORT=8000
+Environment=PYTHONPATH=/home/bluekuma/workspace/MindLynx-Aistock
+StandardOutput=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/webui.log
+StandardError=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/webui.log
+
+[Install]
+WantedBy=default.target
