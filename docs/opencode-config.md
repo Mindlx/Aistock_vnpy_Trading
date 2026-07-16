@@ -22,10 +22,10 @@
 
 | Provider | 模型 | 接入方式 | 速度 | 适合任务 |
 |:---------|:-----|:---------|:----:|:---------|
-| `deepseek-flash` | v4-flash | API (api.deepseek.com) | ~100-200 tok/s | 🔵 **主会话调度**、快速响应 |
-| `lla-selode` | Qwen3.6-35B-MoE (SGLang) | Docker (port 15433), 65536 ctx | **~121 tok/s** | 🟢 代码补全、代码审查、通用任务 |
-| `lla-qwen27B` | Qwen3.6-27B-Dense (llama.cpp) | Docker (port 11434), 65536 ctx, 投机解码 | **~30-50 tok/s** | 🟡 探索代理、标题生成 |
+| `deepseek` | v4-flash | API (api.deepseek.com) | ~100-200 tok/s | 🔵 **主会话调度**、快速响应 |
 | `deepseek-pro` | v4-pro | API (api.deepseek.com) | ~50-100 tok/s | 🔴 高难度推理、长上下文 |
+| `gpu0-qwen` | Qwen3.6-27B Dense (GPU0, port 11434) | llama.cpp | **~143 tok/s** | 🟢 文档分析、策略讨论、通用任务 |
+| `gpu1-sgl` | Qwen3.6-35B MoE (GPU1, port 15433) | SGLang | **~147 tok/s** | 🟢 AT 辩论推理、代码审查 |
 
 ## 系统指令
 
