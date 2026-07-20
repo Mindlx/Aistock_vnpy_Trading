@@ -448,31 +448,40 @@ class NewsFetcher:
     @_get_limiter().retry("eastmoney")
     def fetch_stock_news(self, code: str, days: int = 7) -> list[dict]:
         """个股新闻"""
+        import warnings
+        warnings.filterwarnings("ignore", category=SyntaxWarning, module="akshare")
         import akshare as ak
-        df = ak.stock_news_em(symbol=code)
+        try:
+            df = ak.stock_news_em(symbol=code)
+        except Exception as exc:
+            logger.debug("[NewsFetcher] EM 新闻获取失败 %s: %s", code, exc)
+            return []
         if df is None or df.empty:
             return []
         rows = []
         from datetime import datetime, timedelta
         cutoff = datetime.now() - timedelta(days=days)
-        for _, r in df.iterrows():
-            date_str = str(r.get("发布时间", r.get("date", "")))[:10]
-            try:
-                pub = datetime.strptime(date_str, "%Y-%m-%d")
-                if pub < cutoff:
-                    continue
-            except ValueError:
-                pass
-            rows.append({
-                "stock_code": code,
-                "title": str(r.get("新闻标题", r.get("title", "")))[:200],
-                "url": str(r.get("新闻链接", r.get("url", ""))),
-                "summary": str(r.get("新闻内容", r.get("content", "")))[:200],
-                "source": "东方财富",
-                "category": "新闻",
-                "importance": 1,
-                "published_at": date_str,
-            })
+        try:
+            for _, r in df.iterrows():
+                date_str = str(r.get("发布时间", r.get("date", "")))[:10]
+                try:
+                    pub = datetime.strptime(date_str, "%Y-%m-%d")
+                    if pub < cutoff:
+                        continue
+                except ValueError:
+                    pass
+                rows.append({
+                    "stock_code": code,
+                    "title": str(r.get("新闻标题", r.get("title", "")))[:200],
+                    "url": str(r.get("新闻链接", r.get("url", ""))),
+                    "summary": str(r.get("新闻内容", r.get("content", "")))[:200],
+                    "source": "东方财富",
+                    "category": "新闻",
+                    "importance": 1,
+                    "published_at": date_str,
+                })
+        except Exception as exc:
+            logger.debug("[NewsFetcher] EM 新闻解析失败 %s: %s", code, exc)
         return rows
 
     @_get_limiter().retry("cninfo")
