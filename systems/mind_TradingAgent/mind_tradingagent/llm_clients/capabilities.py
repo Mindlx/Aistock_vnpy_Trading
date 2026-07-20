@@ -135,6 +135,6 @@ def get_capabilities(model_name: str) -> ModelCapabilities:
     if model_name in _BY_ID:
         return _BY_ID[model_name]
     for pattern, caps in _BY_PATTERN:
-        if pattern.match(model_name):
+        if pattern.search(model_name):
             return caps
     return _DEFAULT
