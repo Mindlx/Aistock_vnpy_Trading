@@ -4,7 +4,5 @@ Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
 
 [Service]
 Type=oneshot
-ExecStartPre=/bin/sleep 30
 ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/warmup_warehouse.py --type daily --force
-ExecStartPost=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/warmup_warehouse.py --type financial
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
