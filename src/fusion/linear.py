@@ -67,8 +67,8 @@ class LinearFusionStrategy:
             self.logger.info(f"[{stock_code}] TA 数据为昨日结果，权重降低 {ta_stale_penalty*100:.0f}%")
 
         has_disagreement, disagreement_score, ml_minority = detect_disagreement(
-            lynx_normalized, mindlynx_normalized, tradingagent_normalized,
-            lynx_valid, mindlynx_valid, tradingagent_valid,
+            0, mindlynx_normalized, tradingagent_normalized,
+            False, mindlynx_valid, tradingagent_valid,
         )
         uncertainty_penalty = compute_uncertainty_penalty(disagreement_score)
 
