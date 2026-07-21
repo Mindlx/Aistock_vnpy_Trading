@@ -1,7 +1,8 @@
 # context-preparation Specification
 
 ## Purpose
-TBD - created by archiving change refactor-mind-agent-wrapper. Update Purpose after archive.
+ContextPreparer 从多个数据源（LY 信号、ML 因子、行情、新闻、基本面）组装 LLM 注入上下文。SignalLoader 提供 LY/ML 信号字符串，本地方法提供行情/技术/新闻/基本面 Markdown。`prepare_all` 返回统一 context dict，`build_injection_payload` 格式化为单条 LLM 注入字符串。
+
 ## Requirements
 ### Requirement: ContextPreparer assembles multi-source context for injection
 
@@ -19,11 +20,10 @@ The system SHALL tolerate individual data source failures without crashing the e
 - **WHEN** the news data source raises an exception during `prepare_news_context`
 - **THEN** `news_context` is set to a fallback string and other contexts remain populated
 
-### Requirement: ContextPreparer builds injection payload for LLM
+### Requirement: ContextPreparer builds injection payload as single string
 
-The system SHALL provide a `build_injection_payload` method that formats the assembled context into the system message and AIMessage structure expected by the LLM debate flow.
+The system SHALL provide a `build_injection_payload` method that formats the assembled context into a single markdown string injected into the LLM's human message.
 
 #### Scenario: Injection payload generated
 - **WHEN** `ContextPreparer.build_injection_payload(context_dict)` is called
-- **THEN** it returns a tuple of (system_message_text, ai_message_text) matching the existing `_injected_create` format
-
+- **THEN** it returns a single formatted string containing all context sections with `[系统注入]` prefix
