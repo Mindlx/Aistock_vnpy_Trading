@@ -382,8 +382,7 @@ def main():
     if not result:
         sys.exit(1)
 
-    if not args.no_push:
-        push_brief(result, _session_label())
+    # EM 数据仅用于 ML prompt 注入, 不做独立推送
 
     for code, data in sorted(result["stocks"].items()):
         logger.info("  %s(%s)  desire=%s  focus=%s", data["name"], code,
