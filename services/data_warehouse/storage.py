@@ -112,6 +112,31 @@ CREATE TABLE IF NOT EXISTS fundamentals (
     source      TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS chip_distribution (
+    stock_code  TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    profit_ratio REAL DEFAULT 0.0,
+    avg_cost    REAL DEFAULT 0.0,
+    concentration REAL DEFAULT 0.0,
+    source      TEXT DEFAULT '',
+    fetched_at  REAL NOT NULL,
+    PRIMARY KEY (stock_code, date)
+);
+CREATE INDEX IF NOT EXISTS idx_chip_code ON chip_distribution(stock_code);
+
+CREATE TABLE IF NOT EXISTS index_ohlcv (
+    index_code  TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    open        REAL, high   REAL, low    REAL,
+    close       REAL, volume REAL, amount REAL DEFAULT 0.0,
+    pct_chg     REAL DEFAULT 0.0,
+    source      TEXT DEFAULT '',
+    fetched_at  REAL NOT NULL,
+    PRIMARY KEY (index_code, date)
+);
+CREATE INDEX IF NOT EXISTS idx_idx_code ON index_ohlcv(index_code);
+CREATE INDEX IF NOT EXISTS idx_idx_date ON index_ohlcv(date);
+
 CREATE TABLE IF NOT EXISTS cache_meta (
     stock_code   TEXT NOT NULL,
     data_type    TEXT NOT NULL,
@@ -416,6 +441,67 @@ class DataLake:
                 os.path.getsize(self._db_path) / (1024 * 1024), 2
             ) if os.path.exists(self._db_path) else 0
             return result
+        finally:
+            conn.close()
+
+    # ── chip_distribution ──
+
+    def upsert_chip_distribution(self, code: str, date: str, data: dict) -> None:
+        conn = self._get_conn()
+        try:
+            conn.execute("""INSERT OR REPLACE INTO chip_distribution
+                (stock_code, date, profit_ratio, avg_cost, concentration, source, fetched_at)
+                VALUES (?,?,?,?,?,?,?)""", (
+                code, date,
+                data.get("profit_ratio", 0), data.get("avg_cost", 0),
+                data.get("concentration", 0), data.get("source", "akshare"), time.time(),
+            ))
+            conn.commit()
+            self._touch_meta(code, "chip_distribution", 1, data.get("source", "akshare"), 86400)
+        finally:
+            conn.close()
+
+    def query_chip_distribution(self, code: str) -> dict | None:
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT * FROM chip_distribution WHERE stock_code=? ORDER BY date DESC LIMIT 1",
+                (code,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    # ── index_ohlcv ──
+
+    def upsert_index_ohlcv(self, index_code: str, rows: list[dict]) -> int:
+        conn = self._get_conn()
+        inserted = 0
+        try:
+            for row in rows:
+                conn.execute("""INSERT OR REPLACE INTO index_ohlcv
+                    (index_code, date, open, high, low, close, volume, amount, pct_chg, source, fetched_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (
+                    index_code, row.get("date", ""),
+                    row.get("open", 0), row.get("high", 0), row.get("low", 0),
+                    row.get("close", 0), row.get("volume", 0), row.get("amount", 0),
+                    row.get("pct_chg", 0), row.get("source", "akshare"), time.time(),
+                ))
+                inserted += 1
+            conn.commit()
+            self._touch_meta(index_code, "index_ohlcv", inserted, "akshare", 86400)
+        finally:
+            conn.close()
+        return inserted
+
+    def query_index_ohlcv(self, index_code: str, days: int = 60) -> list[dict]:
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM index_ohlcv WHERE index_code=? ORDER BY date DESC LIMIT ?",
+                (index_code, days),
+            ).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 

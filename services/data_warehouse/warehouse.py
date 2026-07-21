@@ -231,6 +231,38 @@ class WarehouseReader:
             logger.warning("[Warehouse] 基本面获取失败 %s: %s", code, exc)
         return None
 
+    def get_chip_distribution(self, code: str) -> dict | None:
+        """获取筹码分布 (获利比例/平均成本/集中度)"""
+        cached = self._lake.query_chip_distribution(code)
+        if cached:
+            return cached
+        from services.data_warehouse.fetchers import ChipFetcher
+        try:
+            data = ChipFetcher().fetch(code)
+            if data:
+                self._lake.upsert_chip_distribution(code, "", data)
+                return data
+        except Exception as exc:
+            logger.debug("[Warehouse] 筹码分布获取失败 %s: %s", code, exc)
+        return None
+
+    def get_index_ohlcv(self, index_code: str, days: int = 60) -> list[dict]:
+        """获取指数日K线"""
+        cached = self._lake.query_index_ohlcv(index_code, days)
+        if len(cached) >= 2:
+            return cached
+        from services.data_warehouse.fetchers import IndexFetcher
+        try:
+            all_data = IndexFetcher().fetch_all()
+            if all_data:
+                code_data = [r for r in all_data if r["index_code"] == index_code]
+                if code_data:
+                    self._lake.upsert_index_ohlcv(index_code, code_data)
+                    return code_data[:days]
+        except Exception as exc:
+            logger.debug("[Warehouse] 指数获取失败 %s: %s", index_code, exc)
+        return cached
+
     # ═══════════════════════════════════════
     # 工具
     # ═══════════════════════════════════════

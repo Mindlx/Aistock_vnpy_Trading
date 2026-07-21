@@ -198,11 +198,78 @@ class DailyFetcher:
                 if rows:
                     logger.info("[DailyFetcher] %s ← %s: %d rows", code, name, len(rows))
                     return rows
-            except Exception as exc:
-                logger.warning("[DailyFetcher] %s ← %s 失败: %s", code, name, exc)
-                time.sleep(2)
-        logger.error("[DailyFetcher] %s: 所有数据源均失败", code)
+            except Exception:
+                continue
         return []
+
+
+# ═══════════════════════════════════════════
+# 筹码分布获取器
+# ═══════════════════════════════════════════
+
+class ChipFetcher:
+    """筹码分布 (获利比例/平均成本/集中度), 来源: akshare EM"""
+
+    @_get_limiter().retry("eastmoney")
+    def fetch(self, code: str) -> dict | None:
+        """akshare stock_cyq_em — 筹码分布"""
+        try:
+            import akshare as ak
+            df = ak.stock_cyq_em(symbol=code, adjust="")
+            if df is not None and not df.empty:
+                last = df.iloc[-1]
+                return {
+                    "profit_ratio": float(last.get("获利比例", 0) or 0),
+                    "avg_cost": float(last.get("平均成本", 0) or 0),
+                    "concentration": float(last.get("筹码集中度", 0) or 0),
+                    "source": "akshare",
+                }
+        except Exception as exc:
+            logger.debug("[ChipFetcher] 筹码分布获取失败 %s: %s", code, exc)
+        return None
+
+
+# ═══════════════════════════════════════════
+# 指数行情获取器
+# ═══════════════════════════════════════════
+
+INDEX_MAP = {
+    "000001": "上证指数", "399001": "深证成指",
+    "399006": "创业板指", "000688": "科创50",
+    "000300": "沪深300", "000016": "上证50",
+    "000905": "中证500", "399852": "中证1000",
+}
+
+class IndexFetcher:
+    """指数日K线, 降级链: akshare EM → akshare Sina"""
+
+    @_get_limiter().retry("eastmoney")
+    def fetch_all(self) -> list[dict]:
+        """批量获取全部指数日K线"""
+        import akshare as ak
+        rows = []
+        for code, _name in INDEX_MAP.items():
+            try:
+                market = "sh" if code.startswith(("0", "6")) else "sz"
+                symbol = f"{market}{code}"
+                df = ak.stock_zh_index_daily_em(symbol=symbol)
+                if df is not None and not df.empty:
+                    for _, r in df.iterrows():
+                        rows.append({
+                            "index_code": code,
+                            "date": str(r.iloc[0])[:10],
+                            "open": float(r.iloc[1]) if len(r) > 1 else 0,
+                            "close": float(r.iloc[2]) if len(r) > 2 else 0,
+                            "high": float(r.iloc[3]) if len(r) > 3 else 0,
+                            "low": float(r.iloc[4]) if len(r) > 4 else 0,
+                            "volume": float(r.iloc[5]) if len(r) > 5 else 0,
+                            "amount": float(r.iloc[6]) if len(r) > 6 else 0,
+                            "pct_chg": float(r.iloc[7]) if len(r) > 7 else 0,
+                            "source": "akshare",
+                        })
+            except Exception as exc:
+                logger.debug("[IndexFetcher] %s 获取失败: %s", code, exc)
+        return rows
 
     @staticmethod
     def _df_to_rows(df, code: str, source: str) -> list[dict]:
