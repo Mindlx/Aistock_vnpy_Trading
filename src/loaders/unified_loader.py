@@ -14,22 +14,18 @@
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
-import re
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from src.loaders.lynx_loader import LynxDataLoader
 from src.loaders.mindlynx_loader import MindLynxDataLoader
 from src.loaders.tradingagent_loader import TradingAgentDataLoader
 from src.loaders.ml_factor_loader import MLFactorLoader
 from src.loaders.alpha158_loader import Alpha158Loader
-from src.unified_cache import UnifiedCache, get_cache
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +83,29 @@ class UnifiedDataLoader:
                     stocks.append({"code": code, "name": name})
         return stocks
 
+    def _fetch_market_data(self, code: str) -> dict:
+        """通过数据仓库获取行情"""
+        data = {"price": 0.0, "pct_chg": 0.0, "volume_ratio": 0.0, "ma5": 0.0, "ma10": 0.0, "ma20": 0.0}
+        try:
+            from services.data_warehouse import WarehouseReader
+            reader = WarehouseReader()
+            hf = reader.get_daily_df(code, days=120)
+            if hf is not None and not hf.empty and len(hf) >= 2:
+                hl, hp = hf.iloc[-1], hf.iloc[-2]
+                data["price"] = float(hl.get("close", hl.get("收盘", 0)))
+                prev_close = float(hp.get("close", hp.get("收盘", 0)))
+                if prev_close > 0:
+                    data["pct_chg"] = round((data["price"] - prev_close) / prev_close * 100, 2)
+                for col in ("volume_ratio", "ma5", "ma10", "ma20"):
+                    if col in hf.columns:
+                        data[col] = round(float(hf[col].iloc[-1]), 2)
+        except Exception:
+            logger.debug("数据仓库读取失败: %s", code)
+        return data
+
     def load_all(self, date_str: str) -> List[Dict[str, Any]]:
         """
         加载三系统的所有信号，按股票池组织。
-
-        每个系统独立加载：
-        - 如果一个系统暂时不可用（文件不存在/导入失败），自动跳过
-        - 融合引擎的 _compute_adjusted_weights 会处理缺失
-
         返回: fusion_engine.fuse_stock_pool() 可直接接收的格式
         """
         logger.info(f"UnifiedDataLoader: 加载 {date_str} 数据...")
@@ -111,102 +122,40 @@ class UnifiedDataLoader:
             f"tradingagent={len(ta_signals)} ml_factor={len(ml_factor_signals)} alpha158={len(alpha158_signals)}"
         )
 
-        # 按股票池组织
         stock_signals = []
         for stock in self.stock_pool:
             code = stock["code"]
-            lynx = lynx_signals.get(code, {})
-            mindlynx = mindlynx_signals.get(code, {})
+            ly = lynx_signals.get(code, {})
+            ml = mindlynx_signals.get(code, {})
             ta = ta_signals.get(code.upper(), {})
+            mf = ml_factor_signals.get(code, {})
+            a158 = alpha158_signals.get(code, {})
 
-            # lynx: signal 可能含 emoji 如 "🟢 买入"
-            lynx_signal_raw = lynx.get("signal", "")
-            lynx_prob_up = lynx.get("prob_up", 50.0)
+            has_data = bool(ly.get("signal")) or bool(ml.get("score")) or \
+                       bool(ta.get("rating")) or mf.get("ml_factor_l7") is not None or \
+                       a158.get("alpha158_l7") is not None
+            if not has_data:
+                continue
 
-            # MindLynx: signal/score 来自报告解析
-            mindlynx_advice = mindlynx.get("signal", "")
-            mindlynx_score = mindlynx.get("score", 50)
-            mindlynx_has_data = bool(mindlynx)  # 子系统是否真正有数据（非空dict）
-
-            # TradingAgent: rating 来自日志
-            ta_rating = ta.get("rating", "")
-            ta_has_data = bool(ta)  # 子系统是否真正有数据（非空dict）
-
-            # ml_factor 因子层信号
-            ml_factor = ml_factor_signals.get(code, {})
-            ml_factor_l7 = ml_factor.get("ml_factor_l7")
-            ml_factor_has_data = ml_factor_l7 is not None
-
-            # alpha158 因子层信号
-            alpha158 = alpha158_signals.get(code, {})
-            alpha158_l7 = alpha158.get("alpha158_l7")
-            alpha158_has_data = alpha158_l7 is not None
-
-            # 至少有一个系统有真实数据才加入
-            has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating) or ml_factor_has_data or alpha158_has_data
-
-            price = 0.0
-            pct_chg = 0.0
-            volume_ratio = 0.0
-            ma5 = ma10 = ma20 = 0.0
-
-            # 通过数据仓库获取行情和技术指标（缓存优先，5层降级链）
-            try:
-                from services.data_warehouse import WarehouseReader
-                reader = WarehouseReader()
-                hf = reader.get_daily_df(code, days=120)
-                if hf is not None and not hf.empty and len(hf) >= 2:
-                    hl = hf.iloc[-1]
-                    hp = hf.iloc[-2]
-                    price = float(hl.get("close", hl.get("收盘", 0)))
-                    prev_close = float(hp.get("close", hp.get("收盘", 0)))
-                    if prev_close > 0:
-                        pct_chg = round((price - prev_close) / prev_close * 100, 2)
-                    if "volume_ratio" in hf.columns:
-                        volume_ratio = round(float(hf["volume_ratio"].iloc[-1]), 2)
-                    if "ma5" in hf.columns:
-                        ma5 = round(float(hf["ma5"].iloc[-1]), 2)
-                    if "ma10" in hf.columns:
-                        ma10 = round(float(hf["ma10"].iloc[-1]), 2)
-                    if "ma20" in hf.columns:
-                        ma20 = round(float(hf["ma20"].iloc[-1]), 2)
-            except Exception:
-                logger.debug("数据仓库读取失败: %s", code)
-
-            if has_data:
-                stock_signals.append({
-                    "code": code,
-                    "name": stock["name"],
-                    "price": price,
-                    "pct_chg": pct_chg,
-                    "volume_ratio": volume_ratio,
-                    "ma5": ma5,
-                    "ma10": ma10,
-                    "ma20": ma20,
-                    "lynx_signal": lynx_signal_raw if lynx_signal_raw else "观望",
-                    "lynx_prob_up": float(lynx_prob_up) if lynx_prob_up is not None else 50.0,
-                    "mindlynx_advice": mindlynx_advice if mindlynx_advice else "观望",
-                    "mindlynx_score": int(mindlynx_score) if mindlynx_score is not None else 50,
-                    "mindlynx_valid": mindlynx_has_data,
-                    "mindlynx_trend": mindlynx.get("trend", ""),
-                    "mindlynx_sentiment": mindlynx.get("sentiment_score"),
-                    "mindlynx_factor_baseline": mindlynx.get("factor_baseline"),
-                    "mindlynx_operation": mindlynx.get("operation_advice", mindlynx_advice),
-                    "mindlynx_analysis": mindlynx.get("analysis_summary", ""),
-                    "mindlynx_ideal_buy": mindlynx.get("ideal_buy"),
-                    "mindlynx_stop_loss": mindlynx.get("stop_loss"),
-                    "mindlynx_take_profit": mindlynx.get("take_profit"),
-                    "tradingagent_rating": ta_rating if ta_rating else "Hold",
-                    "tradingagent_valid": ta_has_data,
-                    "ta_debate_state": ta.get("debate_state", {}),
-                    # ml_factor 因子层信号
-                    "ml_factor_l7": ml_factor_l7,
-                    "ml_factor_valid": ml_factor_has_data,
-                    "ml_factor_label": ml_factor.get("ml_factor_label", ""),
-                    # alpha158 因子信号
-                    "alpha158_l7": alpha158_l7,
-                    "alpha158_valid": alpha158_has_data,
-                })
+            md = self._fetch_market_data(code)
+            stock_signals.append({
+                "code": code, "name": stock["name"], **md,
+                "lynx_signal": ly.get("signal", "观望"),
+                "lynx_prob_up": float(ly.get("prob_up", 50.0)),
+                **{f"mindlynx_{k}": ml.get(k, "") for k in ("trend", "sentiment_score", "factor_baseline",
+                     "operation_advice", "analysis_summary", "ideal_buy", "stop_loss", "take_profit")},
+                "mindlynx_advice": ml.get("signal", "观望"),
+                "mindlynx_score": int(ml.get("score", 50)),
+                "mindlynx_valid": bool(ml),
+                "tradingagent_rating": ta.get("rating", "Hold"),
+                "tradingagent_valid": bool(ta),
+                "ta_debate_state": ta.get("debate_state", {}),
+                "ml_factor_l7": mf.get("ml_factor_l7"),
+                "ml_factor_valid": mf.get("ml_factor_l7") is not None,
+                "ml_factor_label": mf.get("ml_factor_label", ""),
+                "alpha158_l7": a158.get("alpha158_l7"),
+                "alpha158_valid": a158.get("alpha158_l7") is not None,
+            })
 
         logger.info(f"UnifiedDataLoader: 组织完成 {len(stock_signals)} 只股票")
         return stock_signals
