@@ -119,7 +119,8 @@ class MindTradingAgentWrapper:
             return False
 
     def analyze_single(
-        self, stock_code: str, trade_date: str, stock_name: str = ""
+        self, stock_code: str, trade_date: str, stock_name: str = "",
+        timeout: int = 600,
     ) -> Dict[str, Any]:
         """
         分析单只股票。
@@ -128,11 +129,13 @@ class MindTradingAgentWrapper:
             stock_code: A 股 6 位代码，如 "601801"
             trade_date: 交易日，如 "2026-05-29"
             stock_name: 股票中文名（可选）
+            timeout: 单只超时秒数 (默认600s=10min, 防挂死)
 
         返回:
             {"code": str, "name": str, "rating": str, "signal": float,
              "raw_decision": str, "success": bool, ...}
         """
+        import signal as _signal
         from src.mind_stock_config import get_yfinance_ticker, get_stock_name, A_SHARE_MARKET_MAP
 
         if not self._ensure_imported():
@@ -179,7 +182,9 @@ class MindTradingAgentWrapper:
         if should_inject:
             logger.info(f"TradingAgent [{stock_code}]: 尝试数据注入 (LY信号 + ML因子 + 缓存数据)")
 
-        try:
+        import concurrent.futures as _futures
+
+        def _run():
             if should_inject:
                 preloaded = self._cp.prepare_all(stock_code)
                 payload = self._cp.build_injection_payload(preloaded)
@@ -197,34 +202,41 @@ class MindTradingAgentWrapper:
 
                 self._ta.propagator.create_initial_state = _injected_create
                 try:
-                    final_state, signal = self._ta.propagate(stock_code, trade_date)
+                    return self._ta.propagate(stock_code, trade_date)
                 finally:
                     self._ta.propagator.create_initial_state = orig_create
             else:
-                final_state, signal = self._ta.propagate(stock_code, trade_date)
+                return self._ta.propagate(stock_code, trade_date)
 
-            rating = signal if isinstance(signal, str) else "Hold"
-            final_decision = final_state.get("final_trade_decision", "")
+        with _futures.ThreadPoolExecutor(max_workers=1) as executor:
+            fut = executor.submit(_run)
+            try:
+                final_state, signal = fut.result(timeout=timeout)
+            except _futures.TimeoutError:
+                logger.warning(f"TradingAgent [{stock_code}]: 超时({timeout}s), 走降级")
+                return self._sa.fallback_analysis(stock_code, trade_date, resolved_name, error=f"超时{timeout}s")
+            except Exception as e:
+                logger.error(f"TradingAgent [{stock_code}] 分析失败: {e}" +
+                             (" (已尝试数据注入)" if should_inject else ""))
+                return self._sa.fallback_analysis(stock_code, trade_date, resolved_name, error=str(e))
 
-            result = {
-                "code": stock_code,
-                "name": resolved_name,
-                "yf_ticker": yf_ticker,
-                "rating": rating,
-                "final_decision": final_decision,
-                "trade_date": trade_date,
-                "success": True,
-                "error": None,
-                "_injected": True,
-            }
-            logger.info(f"TradingAgent [{stock_code}]: {rating}" +
-                        (" (数据注入)" if should_inject else ""))
-            return result
+        rating = signal if isinstance(signal, str) else "Hold"
+        final_decision = final_state.get("final_trade_decision", "")
 
-        except Exception as e:
-            logger.error(f"TradingAgent [{stock_code}] 分析失败: {e}" +
-                         (" (已尝试数据注入)" if should_inject else ""))
-            return self._sa.fallback_analysis(stock_code, trade_date, resolved_name, error=str(e))
+        result = {
+            "code": stock_code,
+            "name": resolved_name,
+            "yf_ticker": yf_ticker,
+            "rating": rating,
+            "final_decision": final_decision,
+            "trade_date": trade_date,
+            "success": True,
+            "error": None,
+            "_injected": True,
+        }
+        logger.info(f"TradingAgent [{stock_code}]: {rating}" +
+                    (" (数据注入)" if should_inject else ""))
+        return result
 
     def run_batch(
         self, stock_codes: List[str], trade_date: str,
@@ -255,7 +267,7 @@ class MindTradingAgentWrapper:
 
         for i, code in enumerate(stock_codes, 1):
             logger.info(f"[{i}/{total}] 分析 {code}...")
-            result = self.analyze_single(code, trade_date)
+            result = self.analyze_single(code, trade_date, timeout=600)
             results.append(result)
 
             # 间隔保护（避免 API 限流）
