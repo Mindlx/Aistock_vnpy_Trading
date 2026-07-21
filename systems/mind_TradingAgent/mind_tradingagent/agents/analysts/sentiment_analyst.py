@@ -69,7 +69,7 @@ def create_sentiment_analyst(llm):
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
         stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+        reddit_block = ""  # Reddit RSS 429 rate-limited for A-share stocks; zero signal value
 
         system_message = _build_system_message(
             ticker=ticker,
