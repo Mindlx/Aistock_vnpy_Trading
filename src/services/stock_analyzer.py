@@ -93,13 +93,25 @@ class StockAnalyzer:
         result = self._empty_result(stock_code, stock_name, error)
 
         try:
-            import yfinance as yf
-            from src.mind_stock_config import is_shanghai
+            # 仓库优先 (本地SQLite, 微秒级)
+            from services.data_warehouse import WarehouseReader
+            reader = WarehouseReader()
+            hist = reader.get_daily_df(stock_code, days=90)
+            if hist is not None and not hist.empty and len(hist) >= 20:
+                hist = hist.rename(columns={
+                    "open": "Open", "high": "High", "low": "Low",
+                    "close": "Close", "volume": "Volume",
+                })
+                using_warehouse = True
+            else:
+                import yfinance as yf
+                from src.mind_stock_config import is_shanghai
+                suffix = ".SS" if is_shanghai(stock_code) else ".SZ"
+                yf_ticker = f"{stock_code}{suffix}"
+                ticker = yf.Ticker(yf_ticker)
+                hist = ticker.history(period="3mo")
+                using_warehouse = False
 
-            suffix = ".SS" if is_shanghai(stock_code) else ".SZ"
-            yf_ticker = f"{stock_code}{suffix}"
-            ticker = yf.Ticker(yf_ticker)
-            hist = ticker.history(period="3mo")
             if hist is not None and not hist.empty:
                 latest = hist.iloc[-1]
                 if len(hist) >= 2:
@@ -109,6 +121,7 @@ class StockAnalyzer:
                     change_pct = 0.0
 
                 rating = self.technical_rating(hist)
+                yf_ticker = f"{stock_code}.{'SS' if stock_code.startswith(('6','5','9')) else 'SZ'}"
                 result.update({
                     "code": stock_code,
                     "name": stock_name or stock_code,
@@ -119,7 +132,8 @@ class StockAnalyzer:
                     "trade_date": trade_date,
                     "success": True,
                     "error": None,
-                    "_fallback_data": True,
+                    "_fallback_data": not using_warehouse,
+                    "_data_source": "warehouse" if using_warehouse else "yfinance",
                 })
         except Exception as e:
             logger.error(f"降级分析失败 [{stock_code}]: {e}")
