@@ -613,3 +613,223 @@ class FundamentalsFetcher:
             pass
         result.setdefault("source", "akshare")
         return result
+
+
+# ═══════════════════════════════════════════
+# 三大报表获取器 (利润表/资产负债表/现金流)
+# ═══════════════════════════════════════════
+
+class FinancialStatementFetcher:
+    """三大财务报表, 降级链: Tushare → EM(akshare THS)"""
+
+    @_get_limiter().retry("tushare")
+    def _fetch_tushare_income(self, code: str) -> dict:
+        """Tushare income — 利润表"""
+        ts_code = f"{code}.SZ" if code.startswith(("0", "3")) else f"{code}.SH"
+        _, items = _ts_post("income", {"ts_code": ts_code, "limit": "1"})
+        if not items or len(items[0]) < 15:
+            return {}
+        row = items[0]
+        return {
+            "revenue": float(row[2] or 0) if len(row) > 2 else 0,       # 营业收入
+            "operating_profit": float(row[7] or 0) if len(row) > 7 else 0,  # 营业利润
+            "net_profit": float(row[13] or 0) if len(row) > 13 else 0,     # 净利润
+            "source": "tushare",
+        }
+
+    @_get_limiter().retry("tushare")
+    def _fetch_tushare_balance(self, code: str) -> dict:
+        """Tushare balancesheet — 资产负债表"""
+        ts_code = f"{code}.SZ" if code.startswith(("0", "3")) else f"{code}.SH"
+        _, items = _ts_post("balancesheet", {"ts_code": ts_code, "limit": "1"})
+        if not items or len(items[0]) < 10:
+            return {}
+        row = items[0]
+        return {
+            "total_assets": float(row[4] or 0) if len(row) > 4 else 0,   # 总资产
+            "total_liab": float(row[10] or 0) if len(row) > 10 else 0,   # 总负债
+            "equity": float(row[16] or 0) if len(row) > 16 else 0,       # 归属母公司权益
+            "source": "tushare",
+        }
+
+    @_get_limiter().retry("tushare")
+    def _fetch_tushare_cashflow(self, code: str) -> dict:
+        """Tushare cashflow — 现金流"""
+        ts_code = f"{code}.SZ" if code.startswith(("0", "3")) else f"{code}.SH"
+        _, items = _ts_post("cashflow", {"ts_code": ts_code, "limit": "1"})
+        if not items or len(items[0]) < 10:
+            return {}
+        row = items[0]
+        return {
+            "operate_cashflow": float(row[4] or 0) if len(row) > 4 else 0,   # 经营活动现金流
+            "invest_cashflow": float(row[10] or 0) if len(row) > 10 else 0,  # 投资活动现金流
+            "finance_cashflow": float(row[16] or 0) if len(row) > 16 else 0, # 筹资活动现金流
+            "source": "tushare",
+        }
+
+    @_get_limiter().retry("eastmoney")
+    def fetch(self, code: str) -> dict:
+        """降级链: Tushare → akshare THS"""
+        result = {}
+        for method in [self._fetch_tushare_income, self._fetch_tushare_balance, self._fetch_tushare_cashflow]:
+            try:
+                r = method(code)
+                if r:
+                    result.update(r)
+            except Exception:
+                pass
+        if result:
+            return result
+        try:
+            import akshare as ak
+            for ak_func, label in [
+                (ak.stock_financial_benefit_ths, "profit"),
+                (ak.stock_financial_debt_ths, "debt"),
+                (ak.stock_financial_cash_ths, "cash"),
+            ]:
+                try:
+                    df = ak_func(symbol=code)
+                    if df is not None and not df.empty:
+                        last = df.iloc[-1]
+                        result[f"{label}_publish_date"] = str(last.iloc[0])[:10] if df.columns[0] else ""
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return result
+
+
+# ═══════════════════════════════════════════
+# 股东变动获取器
+# ═══════════════════════════════════════════
+
+class ShareholderFetcher:
+    """股东变动, 降级链: Tushare → EM(akshare)"""
+
+    @_get_limiter().retry("tushare")
+    def _fetch_tushare(self, code: str) -> list[dict]:
+        """Tushare stk_holdernumber — 股东人数变化"""
+        ts_code = f"{code}.SZ" if code.startswith(("0", "3")) else f"{code}.SH"
+        _, items = _ts_post("stk_holdernumber", {"ts_code": ts_code, "limit": "5"})
+        if not items:
+            return []
+        rows = []
+        for item in items:
+            if len(item) < 4:
+                continue
+            rows.append({
+                "date": str(item[2] or "")[:10] if len(item) > 2 else "",
+                "holder_count": int(item[3] or 0) if len(item) > 3 else 0,
+                "source": "tushare",
+            })
+        return rows
+
+    @_get_limiter().retry("eastmoney")
+    def fetch(self, code: str) -> list[dict]:
+        """降级链: Tushare → akshare"""
+        rows = self._fetch_tushare(code)
+        if rows:
+            return rows
+        try:
+            import akshare as ak
+            df = ak.stock_share_hold_change(symbol=code)
+            if df is not None and not df.empty:
+                for _, r in df.iterrows():
+                    rows.append({
+                        "date": str(r.iloc[0])[:10] if len(df.columns) > 0 else "",
+                        "holder_count": int(r.iloc[1]) if len(df.columns) > 1 and r.iloc[1] else 0,
+                        "source": "akshare",
+                    })
+        except Exception:
+            pass
+        return rows
+
+
+# ═══════════════════════════════════════════
+# 大宗交易获取器
+# ═══════════════════════════════════════════
+
+class BlockTradeFetcher:
+    """大宗交易, 降级链: Tushare → EM(akshare)"""
+
+    @_get_limiter().retry("tushare")
+    def _fetch_tushare(self, code: str, days: int = 30) -> list[dict]:
+        """Tushare block_trade — 大宗交易"""
+        ts_code = f"{code}.SZ" if code.startswith(("0", "3")) else f"{code}.SH"
+        _, items = _ts_post("block_trade", {"ts_code": ts_code, "limit": str(days)})
+        if not items:
+            return []
+        rows = []
+        for item in items:
+            if len(item) < 6:
+                continue
+            rows.append({
+                "date": str(item[1] or "")[:10] if len(item) > 1 else "",
+                "price": float(item[3] or 0) if len(item) > 3 else 0,
+                "volume": float(item[4] or 0) if len(item) > 4 else 0,
+                "amount": float(item[5] or 0) if len(item) > 5 else 0,
+                "source": "tushare",
+            })
+        return rows
+
+    @_get_limiter().retry("eastmoney")
+    def fetch(self, code: str, days: int = 30) -> list[dict]:
+        """降级链: Tushare → akshare"""
+        rows = self._fetch_tushare(code, days)
+        if rows:
+            return rows
+        try:
+            import akshare as ak
+            df = ak.stock_dzjy_mrmx(symbol=code)
+            if df is not None and not df.empty:
+                date_col = next((c for c in ["交易日期", "date"] if c in df.columns), None)
+                price_col = next((c for c in ["成交价", "price"] if c in df.columns), None)
+                vol_col = next((c for c in ["成交量", "volume", "vol"] if c in df.columns), None)
+                amt_col = next((c for c in ["成交额", "amount", "amt"] if c in df.columns), None)
+                for _, r in df.tail(days).iterrows():
+                    rows.append({
+                        "date": str(r[date_col])[:10] if date_col else "",
+                        "price": float(r[price_col]) if price_col and r[price_col] else 0,
+                        "volume": float(r[vol_col]) if vol_col and r[vol_col] else 0,
+                        "amount": float(r[amt_col]) if amt_col and r[amt_col] else 0,
+                        "source": "akshare",
+                    })
+        except Exception:
+            pass
+        return rows
+
+
+# ═══════════════════════════════════════════
+# 个股公告获取器 (Tushare 补充源)
+# ═══════════════════════════════════════════
+
+class NoticeFetcher:
+    """个股公告, 补充源: Tushare (CNINFO已有但Tushare补充覆盖面)"""
+
+    @_get_limiter().retry("tushare")
+    def fetch(self, code: str, days: int = 7) -> list[dict]:
+        """Tushare notice_report — 个股公告"""
+        ts_code = f"{code}.SZ" if code.startswith(("0", "3")) else f"{code}.SH"
+        fields, items = _ts_post("notice_report", {"ts_code": ts_code, "limit": str(days * 3)})
+        if not items:
+            return []
+        from datetime import datetime, timedelta
+        cutoff = datetime.now() - timedelta(days=days)
+        rows = []
+        for item in items:
+            date_str = str(item[2] or "")[:10] if len(item) > 2 else ""
+            try:
+                pub = datetime.strptime(date_str, "%Y-%m-%d")
+                if pub < cutoff:
+                    continue
+            except ValueError:
+                pass
+            rows.append({
+                "stock_code": code,
+                "title": str(item[0] or "")[:200],
+                "date": date_str,
+                "source": "tushare",
+                "category": "公告",
+                "importance": 2,
+            })
+        return rows
