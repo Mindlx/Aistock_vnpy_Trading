@@ -171,7 +171,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 ### 3.3 定时触发时间线（标准交易日）
 
 ```
-08:30 ─ scheduler ─── 日间情报(盘前)推送
+09:00 ─ scheduler ─── 日间情报(盘前)推送
 09:31 ─ TA.timer ──── mind_TradingAgent 深度分析 (LLM, ~30min)
 09:33 ─ realtime-fusion.timer ─── 启动准实时 daemon (每300s扫描文件交换区)
 10:00 ─ scheduler ─── 整点全量分析

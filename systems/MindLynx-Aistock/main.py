@@ -306,7 +306,7 @@ def parse_arguments() -> argparse.Namespace:
     # === 每日情报搜集（三时段） ===
     parser.add_argument("--daily-intel", action="store_true", help="每日情报搜集（午间/晚间/盘前，搜索+存储+高重要推送）")
     parser.add_argument("--daily-intel-slot", choices=["midday", "evening", "preopen"], default="midday",
-                       help="每日情报时段: midday(午间12:00), evening(晚间17:00), preopen(盘前08:30)")
+                       help="每日情报时段: midday(午间12:00), evening(晚间17:00), preopen(盘前09:00)")
 
     return parser.parse_args()
 
@@ -643,7 +643,7 @@ def _push_weekend_highlights(config: Config, highlights: list[dict], mode_label:
 def _run_daily_intel(config: Config, slot: str = "midday") -> int:
     """Daily intelligence gathering: search news → score → store → optionally push.
 
-    Only runs at 08:30 preopen once per trading day (midday/evening removed 2026-05-28).
+    Only runs at 09:00 preopen once per trading day (midday/evening removed 2026-05-28).
     days_lookback=2 covers overnight + previous day news.
     Midday/evening cancelled due to triple push duplication.
     Daytime news is handled by hourlies (10/11/14/15) which have built-in news search.
@@ -1485,7 +1485,7 @@ def _run_schedule_mode(config, args, stock_codes):
             _run_daily_intel(_reload_runtime_config(), "preopen")
         except Exception as e:
             logger.exception("日间情报失败: %s", e)
-    additional_daily.append({"task": _sched_daily_intel, "time": "08:30", "name": "日间情报(盘前)"})
+    additional_daily.append({"task": _sched_daily_intel, "time": "09:00", "name": "日间情报(盘前)"})
 
     def _sched_weekend_intel():
         try:
