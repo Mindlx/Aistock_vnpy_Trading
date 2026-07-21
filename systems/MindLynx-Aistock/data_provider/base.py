@@ -1313,6 +1313,17 @@ class DataFetcherManager:
         cached = self._read_daily_cache(stock_code, days)
         cache_fresh = cached is not None
 
+        # 仓库优先: A股本地SQLite缓存, 微秒级
+        if not is_us_stock_code(stock_code) and not _is_hk_market(stock_code) and not is_us_index_code(stock_code):
+            try:
+                from services.data_warehouse.warehouse import WarehouseReader
+                wr = WarehouseReader()
+                wdf = wr.get_daily_df(stock_code, days=days)
+                if wdf is not None and not wdf.empty and len(wdf) >= 2:
+                    return wdf, "warehouse"
+            except Exception:
+                pass
+
         # 快速路径：美股使用专用数据源路由；港股先过滤不支持港股日线的数据源
         #   - 配置长桥凭据后: Longbridge 为首选, YFinance/AkShare 兜底
         #   - 未配置长桥:     YFinance 为首选（美股）, 通用 fetcher 循环（港股）
