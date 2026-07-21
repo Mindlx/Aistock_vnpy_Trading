@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, StateGraph, Send
 from langgraph.prebuilt import ToolNode
 
 from mind_tradingagent.agents import (
@@ -101,28 +101,30 @@ class GraphSetup:
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
         # Define edges
-        # Start with the first analyst
-        workflow.add_edge(START, plan.specs[0].agent_node)
+        # Fan-out: all analysts run in parallel (no data dependency between them)
+        def _route_to_all_analysts(state):
+            return [Send(spec.agent_node, state) for spec in plan.specs]
 
-        # Connect analysts in sequence
-        for i, spec in enumerate(plan.specs):
-            current_analyst = spec.agent_node
-            current_tools = spec.tool_node
-            current_clear = spec.clear_node
+        workflow.add_conditional_edges(START, _route_to_all_analysts, [spec.agent_node for spec in plan.specs])
 
-            # Add conditional edges for current analyst
+        # Each analyst: analyst → tool (optional) → analyst → clear
+        for spec in plan.specs:
             workflow.add_conditional_edges(
-                current_analyst,
+                spec.agent_node,
                 getattr(self.conditional_logic, f"should_continue_{spec.key}"),
-                [current_tools, current_clear],
+                [spec.tool_node, spec.clear_node],
             )
-            workflow.add_edge(current_tools, current_analyst)
+            workflow.add_edge(spec.tool_node, spec.agent_node)
 
-            # Connect to next analyst or to Bull Researcher if this is the last analyst
-            if i < len(plan.specs) - 1:
-                workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
-            else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+        # Fan-in: all analysts finish → aggregate → Bull Researcher
+        def _aggregate_analysts(state):
+            """Collect all analyst reports and pass to debate stage."""
+            return state
+
+        workflow.add_node("aggregate_analysts", _aggregate_analysts)
+        for spec in plan.specs:
+            workflow.add_edge(spec.clear_node, "aggregate_analysts")
+        workflow.add_edge("aggregate_analysts", "Bull Researcher")
 
         # Add remaining edges
         workflow.add_conditional_edges(
