@@ -37,15 +37,11 @@ class BayesianFusionStrategy:
         ta_debate_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
-            lynx_signal, lynx_prob_up
+            lynx_prob_up
         )
-        mindlynx_normalized = self.normalizer.normalize_mindlynx(
-            mindlynx_advice, mindlynx_score, mindlynx_trend
-        )
-        mindlynx_score_normalized = self.normalizer.normalize_mindlynx_score(
+        mindlynx_normalized = self.normalizer.normalize_mindlynx_score(
             mindlynx_score,
         )
-        mindlynx_normalized = mindlynx_score_normalized * 0.8 + mindlynx_normalized * 0.2
         tradingagent_normalized = self.normalizer.normalize_tradingagent(
             tradingagent_rating, debate_state=ta_debate_state
         )

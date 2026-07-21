@@ -2,9 +2,10 @@
 # ⚠️ 本系统仅供学习和研究目的，不构成任何投资建议
 
 weights:
-  lynx_vnpy: 0.20          # ly: 纯量价因子模型, raw OOS 51.8%, 降权至 0.20 保留多样性
-  mindlynx: 0.55           # ml: 因子+LLM+新闻, 63.2%, 提权至 0.55 作为主力信号
-  tradingagent: 0.30       # at: 多智能体辩论, 53.9%, 权重扫一扫后确认为最优值
+  lynx_vnpy: 0.0           # ly: 2026-07-21 经 c1skill 论证, LGB 53.5% 被 ML 61.7% 完全覆盖,
+                            #     融合贡献边际为负, 移出投票保留分歧检测角色
+  mindlynx: 0.65           # ml: 唯一统计显著系统, 提权至 0.65
+  tradingagent: 0.35       # at: 多智能体辩论, 保留对冲
 
 # 7 级 L7 阈值已内置于 normalizer.py 的 L7_THRESHOLDS 中
 # 如需自定义，取消注释并在 fusion_engine.py 中改为从 config 读取

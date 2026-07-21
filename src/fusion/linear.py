@@ -37,7 +37,7 @@ class LinearFusionStrategy:
         alpha158_l7: Optional[float] = None,
     ) -> Dict[str, Any]:
         lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
-            lynx_signal, lynx_prob_up
+            lynx_prob_up
         )
 
         if alpha158_l7 is not None and lynx_valid:
@@ -47,17 +47,12 @@ class LinearFusionStrategy:
 
         if not mindlynx_valid:
             mindlynx_normalized = 0.0
-            mindlynx_score_normalized = 0.0
         else:
-            mindlynx_normalized = self.normalizer.normalize_mindlynx(
-                mindlynx_advice, mindlynx_score, mindlynx_trend
-            )
-            mindlynx_score_normalized = self.normalizer.normalize_mindlynx_score(
+            mindlynx_normalized = self.normalizer.normalize_mindlynx_score(
                 mindlynx_score,
                 threshold_bull=self.sentiment_threshold_bull,
                 threshold_bear=self.sentiment_threshold_bear,
             )
-            mindlynx_normalized = mindlynx_score_normalized * 0.8 + mindlynx_normalized * 0.2
 
         if not tradingagent_valid:
             tradingagent_normalized = 0.0

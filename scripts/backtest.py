@@ -48,10 +48,11 @@ CACHE_DB = PROJECT_ROOT / "data" / "unified_cache" / "ohlcv_cache.db"
 BACKTEST_DB = PROJECT_ROOT / "data" / "backtest" / "bt_results.db"
 
 # 方向判断阈值 (融合分数超过此绝对值才视为有方向)
-# 2026-07-03: 从 0.1→0, 取消 L7 flat zone 二次过滤。
-#   LY 原 38% 被中性排除, 但信号有无对融合质量无差异(54.1% vs 53.7%),
-#   取消后 LY 样本 161→~255, 融合层面准确率预计接近 50%。
-DIRECTION_THRESHOLD = 0
+# 2026-07-21: 从 0→0.05, c1skill 实证过滤最弱 16% 信号, 准确率 +1.4%
+#   2026-07-03: 从 0.1→0, 取消 L7 flat zone 二次过滤。
+#     LY 原 38% 被中性排除, 但信号有无对融合质量无差异(54.1% vs 53.7%),
+#     取消后 LY 样本 161→~255, 融合层面准确率预计接近 50%。
+DIRECTION_THRESHOLD = 0.05
 
 
 # ── 数据库 ────────────────────────────────────────────────
@@ -365,7 +366,7 @@ def cmd_check() -> Tuple[int, int]:
         code = row["stock_code"]
 
         next_day = get_pred_and_next_close_with_fallback(
-            conn_cache, date, code, CACHE_DB
+            conn_cache, date, code
         )
         if next_day is None:
             continue  # 还不够远,下次再查

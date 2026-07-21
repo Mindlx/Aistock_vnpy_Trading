@@ -133,7 +133,6 @@ class FusionEngine:
         return self._bayesian.fuse(**kwargs)
 
     @staticmethod
-    @staticmethod
     def _apply_bayesian_override(*args, **kwargs) -> float:
         return apply_bayesian_override(*args, **kwargs)
 

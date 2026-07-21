@@ -66,6 +66,9 @@ def compute_adjusted_weights(
         return {}, 0, True
 
     total = sum(adjusted.values())
+    if total == 0:
+        return adjusted, valid_count, True
+
     for k in adjusted:
         adjusted[k] /= total
 
