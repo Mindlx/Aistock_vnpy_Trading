@@ -54,38 +54,38 @@ class TestSignalNormalizer:
     # ── ly: logit+tanh 连续映射 ──
 
     def test_lynx_prob_up_50_neutral(self):
-        score, valid = self.n.normalize_lynx("⚪ 观望", 50.0)
+        score, valid = self.n.normalize_lynx(50.0)
         assert valid is True
         assert abs(score) < 0.01
 
     def test_lynx_prob_up_72(self):
-        score, valid = self.n.normalize_lynx("🟢 买入", 72.0)
+        score, valid = self.n.normalize_lynx(72.0)
         assert valid is True
         # 线性映射 score = (p/100)*6 - 3 (2026-07-09)
         assert 1.30 < score < 1.35
 
     def test_lynx_prob_up_25(self):
-        score, valid = self.n.normalize_lynx("🔴 回避", 25.0)
+        score, valid = self.n.normalize_lynx(25.0)
         assert valid is True
         # prob_up=25: 0.25*6-3 = -1.50
         assert -1.55 < score < -1.45
 
     def test_lynx_prob_up_40(self):
-        score, valid = self.n.normalize_lynx("🟡 谨慎", 40.0)
+        score, valid = self.n.normalize_lynx(40.0)
         assert valid is True
         # prob_up=40: 0.40*6-3 = -0.60
         assert -0.65 < score < -0.55
 
     def test_lynx_symmetric(self):
         """prob_up=30 vs 70: 分段线性两侧斜率不同，不再严格对称"""
-        s30, _ = self.n.normalize_lynx("", 30.0)
-        s70, _ = self.n.normalize_lynx("", 70.0)
+        s30, _ = self.n.normalize_lynx(30.0)
+        s70, _ = self.n.normalize_lynx(70.0)
         # 30%在25~35段(斜率0.093/%), 70%在65~75段(斜率0.094/%)
         # 距中性区距离不同，不对称是预期的
         assert s30 < 0 and s70 > 0
 
     def test_lynx_extreme(self):
-        s95, _ = self.n.normalize_lynx("", 95.0)
+        s95, _ = self.n.normalize_lynx(95.0)
         assert 2.65 < s95 < 2.75  # 0.95*6-3 = 2.70
 
     def test_lynx_emoji_strip(self):
@@ -269,7 +269,7 @@ class TestFusionEngine:
         w, c, d = self.engine._compute_adjusted_weights(True, False, False)
         assert c == 1
         assert d is True
-        assert abs(w["lynx"] - 1.0) < 0.01
+        assert abs(w.get("lynx", 0.0)) < 0.01
 
     def test_adjusted_weights_two_missing(self):
         w, c, d = self.engine._compute_adjusted_weights(False, True, False)
@@ -439,11 +439,11 @@ class TestWeComNotifier:
             "tradingagent_score": 2.3, "is_degraded": False,
             "has_disagreement": False, "disagreement_capped": False,
         }]
-        summary = self.notifier.format_daily_summary(results, "2026-05-29")
+        summary = self.notifier.format_daily_summary(results)
         assert "强烈看多" in summary
 
     def test_format_empty_results(self):
-        summary = self.notifier.format_daily_summary([], "2026-05-29")
+        summary = self.notifier.format_daily_summary([])
         assert "融合决策" in summary
 
     def test_format_degraded_result(self):
@@ -456,7 +456,7 @@ class TestWeComNotifier:
             "tradingagent_score": 0, "is_degraded": True,
             "has_disagreement": False, "disagreement_capped": False,
         }]
-        summary = self.notifier.format_daily_summary(results, "2026-05-29")
+        summary = self.notifier.format_daily_summary(results)
         assert "降级" in summary or "degraded" in summary.lower() or "看多" in summary
 
     def test_format_with_disagreement(self):
@@ -469,7 +469,7 @@ class TestWeComNotifier:
             "tradingagent_score": -1.3, "is_degraded": False,
             "has_disagreement": True, "disagreement_capped": True,
         }]
-        summary = self.notifier.format_daily_summary(results, "2026-05-29")
+        summary = self.notifier.format_daily_summary(results)
         # 分歧状态应出现在摘要中
         assert "分歧" in summary or "neutral" in summary.lower() or "中性" in summary
 
@@ -508,7 +508,7 @@ class TestRealtimeFusion:
             assert len(changes) == 1
             c = changes[0]
             assert c["code"] == "601801"
-            assert abs(c["score"] - (-0.181)) < 0.02
+            assert abs(c["score"] - (-0.298)) < 0.02
         finally:
             rf.REALTIME_DIR = original_dir
 
@@ -536,8 +536,9 @@ class TestRealtimeFusion:
 
             assert len(changes) == 1
             c = changes[0]
-            assert abs(c["score"] - 0.300) < 0.02
-            assert c["signal"] == "neutral"
+            # LY=1.5, ML=空, AT=-0.5 → 新权重(0, 0.65, 0.35): 仅AT有效
+            assert abs(c["score"] - (-0.5)) < 0.02
+            assert c["signal"] == "cautious_bearish"
         finally:
             rf.REALTIME_DIR = original_dir
 

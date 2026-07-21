@@ -24,13 +24,12 @@ class TestContextPreparer:
             "sentiment_context": "**ML分析:** 建议=buy",
             "news_context": "**近期新闻:** 利好",
         }
-        sys_msg, ai_msg = self.cp.build_injection_payload(context)
-        assert "[系统注入]" in sys_msg
-        assert "LY" in sys_msg
-        assert "ML" in sys_msg
-        assert "[预加载数据]" in ai_msg
-        assert "65.0" in ai_msg
-        assert "72" in ai_msg
+        payload = self.cp.build_injection_payload(context)
+        assert "[系统注入]" in payload
+        assert "LY" in payload
+        assert "ML" in payload
+        assert "65.0" in payload
+        assert "72" in payload
 
     def test_build_injection_empty_signals(self):
         context: Dict[str, str] = {
@@ -41,10 +40,10 @@ class TestContextPreparer:
             "sentiment_context": "**ML分析:** 无数据",
             "news_context": "**新闻公告:** 无",
         }
-        sys_msg, ai_msg = self.cp.build_injection_payload(context)
-        assert "--- LY" not in sys_msg
-        assert "--- ML" not in sys_msg
-        assert "OHLCV" in sys_msg
+        payload = self.cp.build_injection_payload(context)
+        assert "--- LY" not in payload
+        assert "--- ML" not in payload
+        assert "OHLCV" in payload
 
     def test_build_injection_all_empty(self):
         context: Dict[str, str] = {
@@ -55,6 +54,5 @@ class TestContextPreparer:
             "sentiment_context": "",
             "news_context": "",
         }
-        sys_msg, ai_msg = self.cp.build_injection_payload(context)
-        assert isinstance(sys_msg, str)
-        assert isinstance(ai_msg, str)
+        payload = self.cp.build_injection_payload(context)
+        assert isinstance(payload, str)

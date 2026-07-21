@@ -65,7 +65,7 @@ test_cases = [
     (5, -2.5, "强烈看空"),
 ]
 for prob_up, expected_direction, label in test_cases:
-    score, valid = SignalNormalizer.normalize_lynx("观望", prob_up)
+    score, valid = SignalNormalizer.normalize_lynx(prob_up)
     if not valid:
         print(f"❌ normalize_lynx({prob_up}): valid=False")
         errors += 1

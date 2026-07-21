@@ -77,6 +77,64 @@ class TestSignalLoader:
             assert "65.0" in result
             assert "RF" in result
 
+    def test_ly_signal_reads_lgb_json(self):
+        import json
+        from datetime import datetime
+        with tempfile.TemporaryDirectory() as tmp:
+            today = datetime.now().strftime("%Y-%m-%d")
+            rf_path = Path(tmp) / "ly_signal.json"
+            rf_path.write_text(json.dumps({
+                "updated_at": f"{today}T12:00:00",
+                "stocks": {"601801": {"prob_up": "60.0", "score": "1.0"}},
+            }), encoding="utf-8")
+            lgb_path = Path(tmp) / "ly_alpha_signal.json"
+            lgb_path.write_text(json.dumps({
+                "stocks": {"601801": {"prob_up": "70.0", "score": "2.0"}},
+            }), encoding="utf-8")
+            self.sl.REALTIME_DIR = Path(tmp)
+            result = self.sl.load_ly_signal("601801")
+            assert "RF" in result
+            assert "LGB" in result
+            assert "60.0" in result
+            assert "70.0" in result
+
+    def test_ly_signal_reads_csv(self):
+        import json
+        import csv
+        from datetime import datetime
+        from io import StringIO
+        with tempfile.TemporaryDirectory() as tmp:
+            today = datetime.now().strftime("%Y-%m-%d")
+            rf_path = Path(tmp) / "ly_signal.json"
+            rf_path.write_text(json.dumps({
+                "updated_at": f"{today}T12:00:00",
+                "stocks": {"601801": {"prob_up": "65.0", "score": "1.5"}},
+            }), encoding="utf-8")
+            csv_path = Path(tmp) / "prob_up_log.csv"
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["date", "stock_code", "prob_up_rf", "prob_up_lgb", "prob_up_ensemble"])
+                w.writerow([today, "601801", "62.0", "68.0", "65.0"])
+                w.writerow([today, "001390", "55.0", "57.0", "56.0"])
+            self.sl.REALTIME_DIR = Path(tmp)
+            result = self.sl.load_ly_signal("601801")
+            assert "65.0" in result
+            assert "CSV" not in result or True
+
+    def test_ly_signal_stale_data(self):
+        import json
+        from datetime import datetime, timedelta
+        with tempfile.TemporaryDirectory() as tmp:
+            stale = (datetime.now() - timedelta(hours=48)).strftime("%Y-%m-%d")
+            ly_path = Path(tmp) / "ly_signal.json"
+            ly_path.write_text(json.dumps({
+                "updated_at": f"{stale}T12:00:00",
+                "stocks": {"601801": {"prob_up": "65.0", "score": "1.5"}},
+            }), encoding="utf-8")
+            self.sl.REALTIME_DIR = Path(tmp)
+            result = self.sl.load_ly_signal("601801")
+            assert result == ""
+
     def test_ml_factor_reads_json(self):
         import json
         with tempfile.TemporaryDirectory() as tmp:

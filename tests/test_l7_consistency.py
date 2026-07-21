@@ -11,7 +11,7 @@ errors = 0
 
 for p in TEST_POINTS:
     s1 = _l7_score(p)
-    s2, _ = SignalNormalizer.normalize_lynx("", p * 100)
+    s2, _ = SignalNormalizer.normalize_lynx(p * 100)
     if abs(s1 - s2) > 0.01:
         print(f"❌ _l7_score({p}): ly={s1:.2f} normalizer={s2:.2f}")
         errors += 1
