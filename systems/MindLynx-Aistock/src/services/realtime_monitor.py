@@ -5,7 +5,7 @@
 
 基于 WebSocket 实时行情的盘中监控服务，覆盖 3 个阶段：
 
-Phase 1: 每15分钟盘中简报
+Phase 1: 每29分钟盘中简报（1740s, 避开整点分析/大盘复盘）
 Phase 2: ATR止损实时监控
 Phase 3: 量价异动 + 均线突破告警
 
@@ -357,8 +357,7 @@ def _build_volume_alert_text(
     tip = tips.get(alert_type, "")
 
     now_str = datetime.now().strftime("%H:%M")
-    score_str = f"｜评分{score}" if score > 0 else ""
-    return f"{emoji} {now_str} 异动预警{score_str}\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
+    return f"{emoji} {now_str} 异动预警\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
 
 
 def _build_ma_cross_alert_text(
