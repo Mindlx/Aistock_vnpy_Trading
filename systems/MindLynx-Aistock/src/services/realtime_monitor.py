@@ -357,7 +357,8 @@ def _build_volume_alert_text(
     tip = tips.get(alert_type, "")
 
     now_str = datetime.now().strftime("%H:%M")
-    return f"{emoji} {now_str} 异动预警\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
+    score_str = f"｜评分{score}" if score > 0 else ""
+    return f"{emoji} {now_str} 异动预警{score_str}\n**{name}**｜¥{price:.2f} {change_sign}{change_pct:.1f}% 量比 {volume_ratio:.2f} 换手率 {turnover_rate:.1f}%"
 
 
 def _build_ma_cross_alert_text(
