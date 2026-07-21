@@ -249,19 +249,23 @@ class WeComNotifier:
 
         summary = self.format_daily_summary(results)
 
-        # 尝试从 bt_results.db 获取当日融合趋势
+        # 从 bt_results.db 获取当日三批次融合趋势
         try:
             import sqlite3
             db = sqlite3.connect("data/backtest/bt_results.db")
-            row = db.execute(
-                "SELECT AVG(fusion_score) FROM bt_predictions WHERE date=? AND fusion_correct IS NOT NULL",
+            rows = db.execute(
+                "SELECT eval_batch, AVG(fusion_score) FROM bt_predictions "
+                "WHERE date=? AND fusion_correct IS NOT NULL GROUP BY eval_batch ORDER BY eval_batch",
                 (date,),
-            ).fetchone()
+            ).fetchall()
             db.close()
-            if row and row[0] is not None:
-                avg = round(row[0], 2)
-                direction = "📈" if avg > 0.3 else ("📉" if avg < -0.3 else "➡️")
-                summary += f"\n{direction} 今日融合强度: {avg:+.2f} (得分均值, 正值偏多)"
+            if rows:
+                parts = []
+                for batch, avg in rows:
+                    avg = round(avg, 2)
+                    icon = "📈" if avg > 0.3 else ("📉" if avg < -0.3 else "➡️")
+                    parts.append(f"{batch}={icon}{avg:+.2f}")
+                summary += "\n🔄 今日融合: " + " | ".join(parts)
         except Exception:
             pass
 

@@ -489,8 +489,10 @@ def main():
     if not args.dry_run:
         try:
             import subprocess
+            now = datetime.now()
+            batch = "12:12" if now.hour < 13 else ("14:41" if now.hour < 16 else "18:00")
             bt_result = subprocess.run(
-                [sys.executable, "scripts/backtest.py", "update", "--date", today],
+                [sys.executable, "scripts/backtest.py", "update", "--date", today, "--batch", batch],
                 capture_output=True, text=True, timeout=30,
             )
             if bt_result.returncode == 0:

@@ -57,6 +57,46 @@ DIRECTION_THRESHOLD = 0.05
 
 # ── 数据库 ────────────────────────────────────────────────
 
+def _migrate_schema():
+    """迁移: 添加 eval_batch 字段 + 重建 UNIQUE(date,stock_code,eval_batch)"""
+    conn = _get_db()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(bt_predictions)").fetchall()]
+    if "eval_batch" not in cols:
+        logger.info("[Schema] 迁移: 添加 eval_batch + 重建UNIQUE约束")
+        conn.executescript("""
+            PRAGMA foreign_keys=OFF;
+            BEGIN TRANSACTION;
+            CREATE TABLE bt_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL, stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL DEFAULT '',
+                eval_batch TEXT NOT NULL DEFAULT '18:00',
+                fusion_score REAL, ly_score REAL, ml_score REAL, at_score REAL,
+                ly_valid INTEGER DEFAULT 1, ml_valid INTEGER DEFAULT 1,
+                at_valid INTEGER DEFAULT 1, ta_is_stale INTEGER DEFAULT 0,
+                ml_sentiment INTEGER, ml_trend TEXT, ml_operation TEXT,
+                ml_trend_score INTEGER, ml_risk_alert_count INTEGER DEFAULT 0,
+                signal TEXT, has_disagreement INTEGER DEFAULT 0,
+                is_degraded INTEGER DEFAULT 0,
+                next_date TEXT, next_pct_chg REAL, next_close REAL,
+                days_offset INTEGER,
+                fusion_dir INTEGER, ly_dir INTEGER, ml_dir INTEGER, at_dir INTEGER,
+                fusion_correct INTEGER, ly_correct INTEGER,
+                ml_correct INTEGER, at_correct INTEGER,
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                updated_at TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(date, stock_code, eval_batch)
+            );
+            INSERT INTO bt_new SELECT *, '18:00' FROM bt_predictions;
+            DROP TABLE bt_predictions;
+            ALTER TABLE bt_new RENAME TO bt_predictions;
+            CREATE INDEX IF NOT EXISTS idx_bt_date ON bt_predictions(date);
+            CREATE INDEX IF NOT EXISTS idx_bt_code ON bt_predictions(stock_code);
+            COMMIT;
+        """)
+        logger.info("[Schema] 迁移完成")
+    conn.close()
+
 def _get_db() -> sqlite3.Connection:
     """获取回测数据库连接(自动创建目录)."""
     BACKTEST_DB.parent.mkdir(parents=True, exist_ok=True)
@@ -72,6 +112,7 @@ CREATE TABLE IF NOT EXISTS bt_predictions (
     date        TEXT NOT NULL,          -- 预测日期 (交易日) "2026-05-30"
     stock_code  TEXT NOT NULL,
     stock_name  TEXT NOT NULL DEFAULT '',
+    eval_batch  TEXT NOT NULL DEFAULT '18:00',  -- 评估批次 "12:12"/"14:41"/"18:00"
     fusion_score REAL,
     ly_score    REAL,
     ml_score    REAL,
@@ -107,7 +148,7 @@ CREATE TABLE IF NOT EXISTS bt_predictions (
 
     created_at  TEXT DEFAULT (datetime('now','localtime')),
     updated_at  TEXT DEFAULT (datetime('now','localtime')),
-    UNIQUE(date, stock_code)
+    UNIQUE(date, stock_code, eval_batch)
 );
 
 CREATE TABLE IF NOT EXISTS bt_meta (
@@ -147,11 +188,12 @@ def _sign(score: float, threshold: float = DIRECTION_THRESHOLD) -> int:
 
 # ── Record ────────────────────────────────────────────────
 
-def cmd_record(target_date: Optional[str] = None) -> int:
+def cmd_record(target_date: Optional[str] = None, eval_batch: str = "18:00") -> int:
     """
     从融合CSV读取预测并写入回测DB.
     返回写入的记录数.
     """
+    _migrate_schema()
     date = target_date or datetime.now().strftime("%Y-%m-%d")
     csv_path = FUSION_OUTPUT_DIR / f"fusion_{date}.csv"
 
@@ -210,16 +252,16 @@ def cmd_record(target_date: Optional[str] = None) -> int:
         try:
             conn.execute("""
                 INSERT OR REPLACE INTO bt_predictions
-                (date, stock_code, stock_name,
+                (date, stock_code, stock_name, eval_batch,
                  fusion_score, ly_score, ml_score, at_score,
                  ly_valid, ml_valid, at_valid, ta_is_stale,
                  ml_sentiment, ml_trend, ml_operation,
                  ml_trend_score, ml_risk_alert_count,
                  signal, has_disagreement, is_degraded,
                  fusion_dir, ly_dir, ml_dir, at_dir)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                rec["date"], rec["stock_code"], rec["stock_name"],
+                rec["date"], rec["stock_code"], rec["stock_name"], eval_batch,
                 rec["fusion_score"], rec["ly_score"], rec["ml_score"], rec["at_score"],
                 rec["ly_valid"], rec["ml_valid"], rec["at_valid"], rec["ta_is_stale"],
                 rec["ml_sentiment"], rec["ml_trend"], rec["ml_operation"],
@@ -496,14 +538,14 @@ def _print_accuracy_summary(correct: Dict[str, int], total: Dict[str, int]) -> N
 
 # ── Update (record + check 合并) ─────────────────────────
 
-def cmd_update(target_date: Optional[str] = None) -> None:
+def cmd_update(target_date: Optional[str] = None, eval_batch: str = "18:00") -> None:
     """record + check = 每日一次."""
     date = target_date or datetime.now().strftime("%Y-%m-%d")
     print(f"\n{'='*50}")
     print(f"  回测更新 [{date}]")
     print(f"{'='*50}")
 
-    n_recorded = cmd_record(date)
+    n_recorded = cmd_record(date, eval_batch)
     n_matched, _ = cmd_check()
 
     # 输出摘要
@@ -1326,10 +1368,14 @@ def main() -> None:
     p_record = sub.add_parser("record", help="记录当日融合预测到回测DB")
     p_record.add_argument("--date", type=str, default=None,
                           help="指定日期 (YYYY-MM-DD), 默认今天")
+    p_record.add_argument("--batch", type=str, default="18:00",
+                          help="评估批次 12:12/14:41/18:00 (默认18:00)")
     p_check = sub.add_parser("check", help="匹配已记录预测与次日实际行情")
     p_update = sub.add_parser("update", help="record + check (每日一次)")
     p_update.add_argument("--date", type=str, default=None,
                           help="指定日期 (YYYY-MM-DD), 默认今天")
+    p_update.add_argument("--batch", type=str, default="18:00",
+                          help="评估批次 12:12/14:41/18:00 (默认18:00)")
     p_report = sub.add_parser("report", help="生成累计回测报告")
     p_report.add_argument("--detail", action="store_true",
                           help="显示个股明细")
@@ -1348,11 +1394,11 @@ def main() -> None:
     if args.command == "init":
         cmd_init()
     elif args.command == "record":
-        cmd_record(args.date)
+        cmd_record(args.date, args.batch)
     elif args.command == "check":
         cmd_check()
     elif args.command == "update":
-        cmd_update(args.date)
+        cmd_update(args.date, args.batch)
     elif args.command == "report":
         cmd_report(detail=args.detail)
     elif args.command == "backfill":
