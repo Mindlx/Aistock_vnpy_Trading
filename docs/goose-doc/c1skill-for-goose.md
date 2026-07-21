@@ -1,6 +1,6 @@
 # c1skill for Goose
 
-> 改编自 `.opencode/skills/c1skill.md`（原 c1skill 方法论）
+> 改编自 `~/.agents/skills/c1skill/SKILL.md`（原 c1skill 方法论）
 > 适配 Goose 的工具能力（shell/rg/analyze/tree/git log）
 
 ---

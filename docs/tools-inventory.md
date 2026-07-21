@@ -27,8 +27,8 @@
 
 | 工具 | 用途 | 安装 | 使用频率 |
 |------|------|------|:--------:|
-| **gitnexus-impact-analysis** | 修改前评估波及范围 | 已内置 | 每次修改前 |
-| **gitnexus-debugging** | 追踪 bug 调用链 | 已内置 | 按需 |
+| **c1check** | 功能完整性审查（四阶段） | skill | 每次修改前 |
+| **codebase-memory MCP** | 调用链追踪、影响分析 | MCP | 每次修改前 |
 | **git log / git blame** | 追溯代码历史 | git 自带 | 每日 |
 | **python -m py_compile** | 语法检查 | 已安装 | 每次修改后 |
 
@@ -65,9 +65,9 @@
   │
   ├─ 合入后深度审查？ → review-work 5 Agent（5分钟）
   │
-  ├─ 改代码前评估影响范围？ → gitnexus-impact-analysis
+  ├─ 改代码前评估影响范围？ → codebase-memory MCP (trace_path)
   │
-  ├─ 查 bug 调用链？ → gitnexus-debugging
+  ├─ 查 bug 调用链？ → systematic-debugging
   │
   ├─ 验证回测数据完整性？ → scripts/backtest.py check
   │

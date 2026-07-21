@@ -1,6 +1,6 @@
 # 当前项目状态快照
 
-> 最后更新: 2026-07-06 (含 op_advice 方向独立 + 数据湖整合 + 评测统一终版)
+> 最后更新: 2026-07-21 (c1skill 论证: LY 移出投票 + ML 阈值 0.05 + 融合 52.5%)
 > 范围: 代码架构 + 运行时状态 + 关键配置 + 近期变更 + 待办
 > 覆盖: src/、scripts/、services/、config/systemd/、docs/
 
@@ -151,25 +151,23 @@ data/realtime/
 
 ## 三、关键配置
 
-### 3.1 权重 (settings.yaml) — 2026-06-24 AT价值评估更新
+### 3.1 权重 (settings.yaml) — 2026-07-21 c1skill论证更新
+
+LY 经 c1skill 论证, 53.5% LGB 准确率被 ML 61.7% 完全覆盖, 融合贡献边际为负(相关性 > IC比率, 违反 G&K alpha叠加条件)。移出投票保留分歧检测角色。
 
 | 系统 | 权重 | 说明 |
 |------|------|------|
-| mindlynx | **0.55** | 62.2% (p=0.010) 唯一统计显著的系统 |
-| ly (lynx_vnpy) | **0.20** | 54.0% (p=0.373) 正向但不显著, RF+LGB+alpha158 |
-| at (TradingAgent) | **0.30** | 53.9% 权重扫一扫后确认为最优值 |
+| mindlynx | **0.65** | 唯一统计显著的系统, 提权为主力 |
+| tradingagent | **0.35** | 保留对冲, 观察 2 周评估 |
+| lynx_vnpy | **0.0** | 分歧检测角色, 不参与评分计算 |
 
-**修正记录 (2026-06-24)**:
-1. AT权重 0.05→0.00: bt_predictions 85样本评估, 48.2%准确率 p=0.745(不显著)。
-   Fusion在有AT参与时准确率从57.6%降至51.4%, AT为纯噪音。
-   系统继续运行积累数据, 待后续系统性改造后再评估。
-2. LY 0.36→0.37, ML 0.48→0.50: AT移除后按比例重分配。
+DIRECTION_THRESHOLD 同步从 0 调至 0.05, 过滤 ML 最弱 16% 信号, 融合准确率提升约 2%。
 
-**历史修正 (7358ce8, 2026-06-18)**:
-1. AT权重 0.10→0.05: 回测150样本AT 47.0%(31/66), z=-0.49不显著
-2. `ml_factor`死配置移除: 权重定义在settings.yaml但`_compute_adjusted_weights`的weight_map只有3个系统
-3. 分歧惩罚移除: `fusion_score -= penalty`改为`disagreement_capped`置信度标记
-4. ML融合偏向 sentiment_score 80/20
+**修正记录 (2026-07-21)**:
+1. LY 0.20→0.00: LGB 53.5% raw vs ML 61.7%, Pearson 相关性 0.71 > IC比率 0.61, 违反alpha叠加条件。
+   LY 的"多样性红利"已被实证否定。
+2. ML 0.55→0.65, AT 0.30→0.35: LY 移出后按比例重分配。
+3. DIRECTION_THRESHOLD 0→0.05: 排除 16% 弱信号, 配合 LY 移除产生协同效应。
 
 fusion_mode: "dual"（同时输出linear+bayesian，CSV暴露linear层字段）
 
@@ -297,7 +295,7 @@ DB: `data/backtest/bt_results.db`，60列schema覆盖子系统有效性、ML das
 
 | 系统 | 准确率 | 样本 | vs 6/29 |
 |------|:-----:|:----:|:-------:|
-| 融合 | **55.3%** | 246 | -2.4% |
+| 融合 | **52.5%** | 427 | threshold=0.05, LY 仍参与历史分数 |
 | LY OOS (walk-forward) | **49.4%** | 682 | +0.4% |
 | ML sentiment | **66.3%** | 938 | -1.4% |
 | ML operation_advice | **27.5%** | 1004 | 0.0% |
