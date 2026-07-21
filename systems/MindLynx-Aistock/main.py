@@ -369,17 +369,12 @@ def _run_weekend_intel(config: Config, is_refresh: bool = False, no_push: bool =
         try:
             df_breakfast = ak.stock_info_cjzc_em()
             if df_breakfast is not None and not df_breakfast.empty:
-                from src.services.cjzc_service import CjzcExtractor
-                extractor = CjzcExtractor()
                 for _, row in df_breakfast.head(5).iterrows():
                     title = str(row.get("标题", ""))
-                    url = str(row.get("链接", ""))
-                    full_text = extractor.extract(url, max_chars=1500)
-                    snippet = full_text if full_text else str(row.get("摘要", ""))[:200]
                     collected.append({
                         "code": "__market__", "title": title,
-                        "url": url,
-                        "snippet": snippet,
+                        "url": str(row.get("链接", "")),
+                        "snippet": str(row.get("摘要", ""))[:200],
                         "importance": 7,
                         "source": "财经早餐",
                     })
@@ -562,14 +557,9 @@ def _push_highlights(
             grouped[code] = {"name": name, "items": []}
 
         source = h.get("source", "")
-        snippet = h.get("snippet", "")
         if url and url.startswith("http") and source != "公告":
             clean_url = url.split("&")[0] if "?" in url else url
             item_text = f"[{title}]({clean_url}){sentiment_tag}"
-            # 如果 snippet 有实质内容（非默认摘要），嵌入消息体
-            if len(snippet) > 100 and code == "__market__":
-                text_body = snippet[:600].replace("\n", " ")
-                item_text += f"\n  > {text_body}{'……' if len(snippet) > 600 else ''}"
         else:
             item_text = f"{title}{sentiment_tag}"
         grouped[code]["items"].append(item_text)
@@ -769,17 +759,12 @@ def _run_daily_intel(config: Config, slot: str = "midday") -> int:
         try:
             df_breakfast = ak.stock_info_cjzc_em()
             if df_breakfast is not None and not df_breakfast.empty:
-                from src.services.cjzc_service import CjzcExtractor
-                extractor = CjzcExtractor()
                 for _, row in df_breakfast.head(5).iterrows():
                     title = str(row.get("标题", ""))
-                    url = str(row.get("链接", ""))
-                    full_text = extractor.extract(url, max_chars=1500)
-                    snippet = full_text if full_text else str(row.get("摘要", ""))[:200]
                     collected.append({
                         "code": "__market__", "title": title,
-                        "url": url,
-                        "snippet": snippet,
+                        "url": str(row.get("链接", "")),
+                        "snippet": str(row.get("摘要", ""))[:200],
                         "importance": 7,
                         "source": "财经早餐",
                     })
