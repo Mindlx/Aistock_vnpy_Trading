@@ -293,6 +293,15 @@ class WarehouseReader:
             logger.debug("[Warehouse] 指数获取失败 %s: %s", index_code, exc)
         return cached
 
+    def get_market_breadth(self) -> dict | None:
+        """获取市场广度 (涨停/跌停家数)"""
+        from services.data_warehouse.fetchers import MarketBreadthFetcher
+        try:
+            return MarketBreadthFetcher().fetch()
+        except Exception as exc:
+            logger.debug("[Warehouse] 市场广度获取失败: %s", exc)
+        return None
+
     # ═══════════════════════════════════════
     # 工具
     # ═══════════════════════════════════════

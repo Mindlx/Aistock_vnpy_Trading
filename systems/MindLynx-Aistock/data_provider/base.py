@@ -1906,6 +1906,22 @@ class DataFetcherManager:
             logger.debug(f"[筹码分布] 功能已禁用，跳过 {stock_code}")
             return None
 
+        # 仓库优先
+        try:
+            from services.data_warehouse.warehouse import WarehouseReader
+            wr = WarehouseReader()
+            chip_data = wr.get_chip_distribution(stock_code)
+            if chip_data:
+                from .realtime_types import ChipDistribution
+                logger.info(f"[筹码分布] {stock_code} 成功获取 (来源: warehouse)")
+                return ChipDistribution(
+                    profit_ratio=chip_data.get("profit_ratio", 0) / 100,
+                    avg_cost=chip_data.get("avg_cost", 0),
+                    concentration_90=chip_data.get("concentration", 0) / 100,
+                )
+        except Exception:
+            pass
+
         circuit_breaker = get_chip_circuit_breaker()
 
         # 直接遍历管理器已经按 priority 排好序的数据源列表
@@ -2220,6 +2236,18 @@ class DataFetcherManager:
         if "value" in error_holder:
             return None, str(error_holder["value"]), int((time.time() - start) * 1000)
         return result_holder.get("value"), None, int((time.time() - start) * 1000)
+
+    def _get_capital_flow_with_warehouse(self, stock_code: str):
+        """资金流获取: 仓库优先 → akshare降级"""
+        try:
+            from services.data_warehouse.warehouse import WarehouseReader
+            wr = WarehouseReader()
+            rows = wr.get_capital_flows(stock_code, days=5)
+            if rows:
+                return {"capital_flow": rows, "provider": "warehouse"}
+        except Exception:
+            pass
+        return self._fundamental_adapter.get_capital_flow(stock_code)
 
     def _run_with_retry(
         self,
@@ -2824,7 +2852,7 @@ class DataFetcherManager:
                 ["fundamental stage timeout"],
             )
         payload, err, cost_ms = self._run_with_retry(
-            lambda: self._fundamental_adapter.get_capital_flow(stock_code),
+            lambda: self._get_capital_flow_with_warehouse(stock_code),
             timeout,
             "capital_flow",
         )

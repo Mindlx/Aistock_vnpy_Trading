@@ -955,3 +955,29 @@ class GlobalFetcher:
         except Exception as exc:
             logger.debug("[GlobalFetcher] %s/%s 基本面获取失败: %s", market, code, exc)
         return None
+
+
+# ═══════════════════════════════════════════
+# 市场广度获取器
+# ═══════════════════════════════════════════
+
+class MarketBreadthFetcher:
+    """市场广度 (涨跌家数/涨停/跌停), 来源: akshare"""
+
+    @_get_limiter().retry("eastmoney")
+    def fetch(self) -> dict[str, Any]:
+        try:
+            import akshare as ak
+            from datetime import date
+            today = date.today().strftime("%Y-%m-%d")
+            zt = ak.stock_zt_pool_em(date=today)
+            dt = ak.stock_zt_pool_dtgc_em(date=today)
+            return {
+                "limit_up": len(zt) if zt is not None else 0,
+                "limit_down": len(dt) if dt is not None else 0,
+                "date": today,
+                "source": "akshare",
+            }
+        except Exception as exc:
+            logger.debug("[MarketBreadthFetcher] 获取失败: %s", exc)
+            return {"limit_up": 0, "limit_down": 0, "date": "", "source": "error"}
