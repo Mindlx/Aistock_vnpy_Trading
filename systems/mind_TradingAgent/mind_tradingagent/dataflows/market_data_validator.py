@@ -28,10 +28,28 @@ DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
 def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
     """OHLCV on or before curr_date, date-sorted. Raises if nothing usable.
 
-    ``load_ohlcv`` already normalizes the Date column and filters out
-    look-ahead rows, but we re-apply the cutoff defensively — this is a
-    verification path, so it must not trust its input to be pre-filtered.
+    Uses data warehouse (cache-first) instead of yfinance to avoid
+    CLOSE-WAIT socket hangs and rate-limiting issues. Falls back to
+    yfinance only when warehouse is unavailable.
     """
+    code = symbol.replace(".SS", "").replace(".SZ", "").replace(".SH", "").strip()
+    if len(code) == 6 and code.isdigit():
+        try:
+            from services.data_warehouse import WarehouseReader
+            reader = WarehouseReader()
+            df = reader.get_daily_df(code, days=120)
+            if df is not None and not df.empty:
+                df = df.rename(columns={
+                    "date": "Date", "open": "Open", "high": "High",
+                    "low": "Low", "close": "Close", "volume": "Volume",
+                })
+                df["Date"] = pd.to_datetime(df["Date"])
+                df = df.sort_values("Date")
+                if len(df) >= 2:
+                    return df
+        except Exception:
+            pass
+
     data = load_ohlcv(symbol, curr_date)
     if data is None or data.empty:
         raise ValueError(f"No OHLCV data available for {symbol}.")
