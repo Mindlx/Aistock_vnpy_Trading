@@ -1,0 +1,13 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 东方财富评级PDF推送（18:01, 融合后1分钟）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+After=Aistock_vnpy_Trading-fusion.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading/systems/MindLynx-Aistock
+ExecStartPre=/bin/sleep 60
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/systems/MindLynx-Aistock/.venv/bin/python scripts/generate_rating_report.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=120

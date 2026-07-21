@@ -1,0 +1,10 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 东方财富评级PDF推送定时器（18:00触发, 60s延时）
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=Mon..Fri 18:00:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
