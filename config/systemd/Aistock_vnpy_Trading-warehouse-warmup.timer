@@ -1,0 +1,10 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 数据仓库预热定时器 (09:00 / 13:00 / 21:00)
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=Mon-Fri 09:00:00; Mon-Fri 13:00:00; Mon-Fri 21:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

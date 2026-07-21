@@ -330,35 +330,85 @@ class WarehouseReader:
         codes = codes or self._cfg.stock_pool
         if data_types is None:
             data_types = ["daily_ohlcv", "financial_indicators",
-                          "capital_flows", "news_events", "fundamentals"]
+                          "capital_flows", "news_events", "fundamentals",
+                          "chip_distribution", "financial_statements",
+                          "shareholder", "block_trade", "index_ohlcv",
+                          "global_ohlcv", "global_fundamentals"]
 
         result: dict[str, dict[str, int]] = {}
         for code in codes:
             result[code] = {}
             for dtype in data_types:
-                if force or not self.is_fresh(code, dtype):
-                    count = 0
-                    try:
-                        if dtype == "daily_ohlcv":
-                            rows = self.get_daily(code, days=365)
-                            count = len(rows) if rows else 0
-                        elif dtype == "financial_indicators":
-                            data = self.get_financial(code)
-                            count = sum(len(v) for v in data.values()) if data else 0
-                        elif dtype == "capital_flows":
-                            rows = self.get_capital_flows(code)
-                            count = len(rows) if rows else 0
-                        elif dtype == "news_events":
-                            items = self.get_news(code)
-                            count = len(items) if items else 0
-                        elif dtype == "fundamentals":
-                            data = self.get_fundamentals(code)
-                            count = 1 if data else 0
-                    except Exception as exc:
-                        logger.warning("[Warehouse] 预热 %s %s 失败: %s", code, dtype, exc)
-                    result[code][dtype] = count
-                else:
+                if not force and self.is_fresh(code, dtype):
                     result[code][dtype] = -1  # 已有缓存
+                    continue
+                count = 0
+                try:
+                    if dtype == "daily_ohlcv":
+                        rows = self.get_daily(code, days=365)
+                        count = len(rows) if rows else 0
+                    elif dtype == "financial_indicators":
+                        data = self.get_financial(code)
+                        count = sum(len(v) for v in data.values()) if data else 0
+                    elif dtype == "capital_flows":
+                        rows = self.get_capital_flows(code)
+                        count = len(rows) if rows else 0
+                    elif dtype == "news_events":
+                        items = self.get_news(code)
+                        count = len(items) if items else 0
+                    elif dtype == "fundamentals":
+                        data = self.get_fundamentals(code)
+                        count = 1 if data else 0
+                    elif dtype == "chip_distribution":
+                        data = self.get_chip_distribution(code)
+                        count = 1 if data else 0
+                    elif dtype == "financial_statements":
+                        from services.data_warehouse.fetchers import FinancialStatementFetcher
+                        data = FinancialStatementFetcher().fetch(code)
+                        count = len(data) if data else 0
+                    elif dtype == "shareholder":
+                        from services.data_warehouse.fetchers import ShareholderFetcher
+                        rows = ShareholderFetcher().fetch(code)
+                        count = len(rows) if rows else 0
+                    elif dtype == "block_trade":
+                        from services.data_warehouse.fetchers import BlockTradeFetcher
+                        rows = BlockTradeFetcher().fetch(code)
+                        count = len(rows) if rows else 0
+                except Exception as exc:
+                    logger.warning("[Warehouse] 预热 %s %s 失败: %s", code, dtype, exc)
+                result[code][dtype] = count
+
+        # 指数(全局一次, 非per-stock)
+        if "index_ohlcv" in data_types:
+            try:
+                from services.data_warehouse.fetchers import IndexFetcher
+                all_data = IndexFetcher().fetch_all()
+                if all_data:
+                    code_set = {r["index_code"] for r in all_data}
+                    for ic in code_set:
+                        ic_data = [r for r in all_data if r["index_code"] == ic]
+                        self._lake.upsert_index_ohlcv(ic, ic_data)
+                result["__index__"] = {"index_ohlcv": len(all_data) if all_data else 0}
+            except Exception as exc:
+                logger.warning("[Warehouse] 预热指数失败: %s", exc)
+
+        # 全球行情(美股指数, 一次性)
+        if "global_ohlcv" in data_types or "global_fundamentals" in data_types:
+            from services.data_warehouse.fetchers import GlobalFetcher
+            gf = GlobalFetcher()
+            for market, codes_list in [("us", ["SPY", "QQQ", "DIA", "IWM"]), ("hk", ["^HSI"])]:
+                for gcode in codes_list:
+                    try:
+                        if "global_ohlcv" in data_types:
+                            odata = gf.fetch_ohlcv(market, gcode)
+                            if odata:
+                                self._lake.upsert_global_ohlcv(market, gcode, odata)
+                        if "global_fundamentals" in data_types:
+                            fdata = gf.fetch_fundamentals(market, gcode)
+                            if fdata:
+                                self._lake.upsert_global_fundamentals(market, gcode, fdata)
+                    except Exception as exc:
+                        logger.warning("[Warehouse] 预热全球 %s/%s 失败: %s", market, gcode, exc)
 
         return result
 
