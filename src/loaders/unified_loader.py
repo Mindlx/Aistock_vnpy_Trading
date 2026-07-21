@@ -145,6 +145,11 @@ class UnifiedDataLoader:
             # 至少有一个系统有真实数据才加入
             has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating) or ml_factor_has_data or alpha158_has_data
 
+            price = 0.0
+            pct_chg = 0.0
+            volume_ratio = 0.0
+            ma5 = ma10 = ma20 = 0.0
+
             # 通过数据仓库获取行情和技术指标（缓存优先，5层降级链）
             try:
                 from services.data_warehouse import WarehouseReader
