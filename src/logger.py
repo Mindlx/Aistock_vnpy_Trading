@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 class FusionLogger:
     """融合系统日志记录器"""
 
-    def __init__(self, log_dir: str = "config/logs", retention_days: int = 90):
+    def __init__(self, log_dir: str = "config/logs", retention_days: int = 90) -> None:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.retention_days = retention_days
@@ -42,13 +42,13 @@ class FusionLogger:
             ))
             self.logger.addHandler(ch)
 
-    def info(self, msg: str):
+    def info(self, msg: str) -> None:
         self.logger.info(msg)
 
-    def warning(self, msg: str):
+    def warning(self, msg: str) -> None:
         self.logger.warning(msg)
 
-    def error(self, msg: str):
+    def error(self, msg: str) -> None:
         self.logger.error(msg)
 
     def record_decision(
@@ -67,8 +67,7 @@ class FusionLogger:
         is_degraded: bool = False,
         has_disagreement: bool = False,
         fusion_mode: str = "linear",
-        fusion_output_dir: Optional[str] = None,
-    ):
+    ) -> None:
         """记录单次融合决策到 CSV"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -113,7 +112,7 @@ class FusionLogger:
         date: str,
         results: List[Dict[str, Any]],
         fusion_output_dir: Optional[str] = None,
-    ):
+    ) -> None:
         """记录每日融合结果摘要（JSON）"""
         if fusion_output_dir is None:
             fusion_output_dir = str(self.log_dir)
@@ -135,7 +134,7 @@ class FusionLogger:
 
         self.logger.info(f"每日摘要已保存: {json_path} ({len(results)} 只股票)")
 
-    def _cleanup_old_logs(self):
+    def _cleanup_old_logs(self) -> None:
         """删除过期日志文件"""
         cutoff = datetime.now() - timedelta(days=self.retention_days)
         for f in self.log_dir.glob("fusion_*.log"):

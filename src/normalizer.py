@@ -165,7 +165,7 @@ class SignalNormalizer:
     # ────────── ly: 连续概率归一化 ──────────
 
     @classmethod
-    def normalize_lynx(cls, signal: str, prob_up: float) -> Tuple[float, bool]:
+    def normalize_lynx(cls, prob_up: float) -> Tuple[float, bool]:
         """
         ly 归一化: raw prob_up → L7 score (线性缩放)。
 
@@ -179,7 +179,6 @@ class SignalNormalizer:
           prob_up=100 → +3.00
 
         参数:
-            signal: 原始信号（兼容旧格式，当前仅用于有效性判断）
             prob_up: 上涨概率 0-100
         返回:
             (L7 得分, 是否有效)

@@ -161,7 +161,7 @@ class WeComNotifier:
             f"｜{pos}"
         )
 
-    def format_daily_summary(self, results: List[Dict[str, Any]], date: str) -> str:
+    def format_daily_summary(self, results: List[Dict[str, Any]]) -> str:
         """
         格式化每日融合结果摘要 — 一行式，适合微信阅读。
         """
@@ -247,7 +247,7 @@ class WeComNotifier:
         if date is None:
             date = self._tz_cn_now().strftime("%Y-%m-%d")
 
-        summary = self.format_daily_summary(results, date)
+        summary = self.format_daily_summary(results)
         result = self.send_markdown(summary)
 
         if result and result.get("errcode") == 0:

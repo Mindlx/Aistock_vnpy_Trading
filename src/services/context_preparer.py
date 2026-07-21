@@ -4,7 +4,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import numpy as np
 
@@ -39,34 +39,28 @@ class ContextPreparer:
             "news_context": news_md,
         }
 
-    def build_injection_payload(self, context: Dict[str, str]) -> Tuple[str, str]:
+    def build_injection_payload(self, context: Dict[str, str]) -> str:
         ly_md = context.get("ly_signals_context", "")
         ml_factor_md = context.get("ml_factor_context", "")
-        sys_inject = (
+        payload = (
             "\n\n[系统注入] 以下数据来自本平台量化模型(LY)和AI分析(ML)系统，"
             "权威性高于原始行情数据。请首先参考以下预加载数据进行判断:\n\n"
         )
         if ly_md:
-            sys_inject += f"--- LY 量化信号 ---\n{ly_md}\n\n"
+            payload += f"--- LY 量化信号 ---\n{ly_md}\n\n"
         if ml_factor_md:
-            sys_inject += f"--- ML 因子信号 ---\n{ml_factor_md}\n\n"
-        sys_inject += (
+            payload += f"--- ML 因子信号 ---\n{ml_factor_md}\n\n"
+        payload += (
             "--- 行情与技术指标 ---\n"
             f"{context.get('market_context', '')}\n\n"
             "--- 基本面 ---\n"
-            f"{context.get('fundamentals_context', '')}\n"
+            f"{context.get('fundamentals_context', '')}\n\n"
+            "--- 情绪 ---\n"
+            f"{context.get('sentiment_context', '')}\n\n"
+            "--- 新闻 ---\n"
+            f"{context['news_context']}\n"
         )
-        aiml = (
-            f"[预加载数据] 以下数据从外部缓存获取，可直接用于分析。\n\n"
-            f"=== LY 量化信号 ===\n{ly_md}\n\n"
-            f"=== ML 因子信号 ===\n{ml_factor_md}\n\n"
-            f"=== 行情与技术指标 ===\n{context.get('market_context', '')}\n\n"
-            f"=== 基本面 ===\n{context.get('fundamentals_context', '')}\n\n"
-            f"=== 情绪 ===\n{context['sentiment_context']}\n\n"
-            f"=== 新闻 ===\n{context['news_context']}\n\n"
-            f"(数据来源: LY UnifiedCache + ML stock_analysis.db)"
-        )
-        return sys_inject, aiml
+        return payload
 
     def _prepare_market_context(self, stock_code: str) -> str:
         try:
@@ -78,20 +72,15 @@ class ContextPreparer:
                 return "**行情数据:** 缓存数据不可用"
 
             recent = df.tail(5)
-            lines = ["日期|开盘|最高|最低|收盘|成交量(股)"]
-            lines.append("---|---|---|---|---|---")
+            parts = []
             for _, r in recent.iterrows():
                 try:
-                    date = str(r.get("date", r.name))[:10]
-                    o = f"{float(r['open']):.2f}" if "open" in r else "-"
-                    h = f"{float(r['high']):.2f}" if "high" in r else "-"
-                    l_ = f"{float(r['low']):.2f}" if "low" in r else "-"
+                    d = str(r.get("date", r.name))
                     c = f"{float(r['close']):.2f}" if "close" in r else "-"
-                    v = f"{int(r['volume']):,}" if "volume" in r else "-"
-                    lines.append(f"{date}|{o}|{h}|{l_}|{c}|{v}")
+                    parts.append(f"{d[-5:]}={c}")
                 except Exception:
                     continue
-            return "**OHLCV (最近5天):**\n" + "\n".join(lines)
+            return f"OHLCV(5d): {' '.join(parts)}"
         except Exception as e:
             logger.debug(f"[preload] UnifiedCache 读取失败({stock_code}): {e}")
             return "**行情数据:** 缓存数据不可用"
@@ -146,14 +135,14 @@ class ContextPreparer:
 
             parts = [
                 f"MA5={ma5:.2f}", f"MA10={ma10:.2f}", f"MA20={ma20:.2f}",
-                f"RSI(14)={rsi:.1f}",
-                f"MACD柱={macd_hist:.4f}",
-                f"布林带={bb_mid:.2f}(±{bb_std:.2f})", f"BB位置={bb_pos:.0%}",
-                f"ATR(14)={atr:.4f}",
+                f"RSI={rsi:.0f}",
+                f"MACD={macd_hist:.3f}",
+                f"布林={bb_mid:.2f}±{bb_std:.2f}", f"BB={bb_pos:.0%}",
+                f"ATR={atr:.3f}",
             ]
             if vol_ratio is not None:
                 parts.append(f"量比={vol_ratio:.2f}")
-            return "**技术指标:** " + " | ".join(parts)
+            return "|".join(parts)
         except Exception as e:
             logger.debug(f"[preload] 技术指标计算失败({stock_code}): {e}")
             return "**技术指标:** 计算失败"

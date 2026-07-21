@@ -58,7 +58,7 @@ class MindTradingAgentWrapper:
         tradingagent_root: str = "systems/mind_TradingAgent",
         config_override: Optional[Dict[str, Any]] = None,
         debug: bool = False,
-    ):
+    ) -> None:
         """
         参数:
             tradingagent_root: mind_TradingAgent 项目根路径
@@ -79,7 +79,7 @@ class MindTradingAgentWrapper:
         if str(self.ta_root) not in sys.path:
             sys.path.insert(0, str(self.ta_root))
 
-    def _ensure_imported(self):
+    def _ensure_imported(self) -> bool:
         """确保 mind_TradingAgent 模块已加载（只导入一次）"""
         if self._imported:
             return True
@@ -182,14 +182,17 @@ class MindTradingAgentWrapper:
         try:
             if should_inject:
                 preloaded = self._cp.prepare_all(stock_code)
-                sys_inject, aiml = self._cp.build_injection_payload(preloaded)
+                payload = self._cp.build_injection_payload(preloaded)
                 orig_create = self._ta.propagator.create_initial_state
 
                 def _injected_create(company_name, trade_date, asset_type="stock", past_context="", instrument_context=""):
                     state = orig_create(company_name, trade_date, asset_type, past_context, instrument_context)
-                    from langchain_core.messages import AIMessage, SystemMessage
-                    state["messages"].insert(0, SystemMessage(content=sys_inject))
-                    state["messages"].append(AIMessage(content=aiml))
+                    enriched = (
+                        f"[系统注入 - LY量化信号 + ML因子分析 + 多源缓存数据]\n\n"
+                        f"{payload}\n\n"
+                        f"---\n请求分析: {company_name} ({trade_date})"
+                    )
+                    state["messages"] = [("human", enriched)]
                     return state
 
                 self._ta.propagator.create_initial_state = _injected_create
@@ -225,18 +228,17 @@ class MindTradingAgentWrapper:
 
     def run_batch(
         self, stock_codes: List[str], trade_date: str,
-        concurrency: int = 1, delay_between: int = 5,
+        delay_between: int = 5,
     ) -> List[Dict[str, Any]]:
         """
         批量分析多只股票。
 
         注意: mind_TradingAgent 使用 LLM，每只股票需 1-5 分钟。
-        当前仅支持串行执行（concurrency=1）。
+        当前仅支持串行执行。
 
         参数:
             stock_codes: A 股代码列表
             trade_date: 交易日
-            concurrency: 并发数（保留，暂未实现）
             delay_between: 间隔秒数
 
         返回:

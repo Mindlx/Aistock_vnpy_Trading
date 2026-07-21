@@ -21,7 +21,7 @@ import numpy as np
 from vnpy_bridge.alpha_predictor import _compute_alpha_factors, _normalize
 
 # 使用 unified_cache 获取行情数据（避免 EastMoney API 不稳定）
-from services.data_warehouse.reader import WarehouseReader
+from services.data_warehouse.warehouse import WarehouseReader
 
 STOCK_CODES = ['001390', '300652', '600372', '605368', '000592',
                '603189', '603557', '688202', '601801', '300676',
@@ -35,14 +35,13 @@ def load_historical(code: str, days: int = 400) -> pd.DataFrame | None:
     """从 unified_cache 加载日K线。"""
     try:
         reader = WarehouseReader()
-        df = reader.get_daily_bars(code, count=days)
-        if df is None or len(df) < MIN_TRAIN + 20:
+        df = reader.get_daily_df(code, days=days)
+        if df is None or df.empty or len(df) < MIN_TRAIN + 20:
             return None
-        df = df.rename(columns={
-            "open": "开盘", "high": "最高", "low": "最低",
-            "close": "收盘", "volume": "成交量",
-        })
-        df["日期"] = pd.to_datetime(df.index) if isinstance(df.index, pd.DatetimeIndex) else df["日期"]
+        if "date" in df.columns:
+            df["日期"] = pd.to_datetime(df["date"])
+        else:
+            df["日期"] = pd.to_datetime(df.index)
         df = df.sort_values("日期")
         return df
     except Exception as e:
@@ -72,7 +71,6 @@ def walkforward(code: str, df: pd.DataFrame) -> dict:
 
     for i in range(MIN_TRAIN, len(df)):
         train_df = df.iloc[:i]
-        test_row = df.iloc[i]
 
         # 计算因子
         train_factors = compute_factors_safe(train_df)
@@ -104,13 +102,13 @@ def main():
     print()
 
     # 直接使用训练好的 LGB 模型做回测预测
-    import joblib
+    import lightgbm as lgb
     model_path = _PROJ / "systems/lynx_vnpy/models/alpha_lgb_model.txt"
     if not model_path.exists():
         print(f"❌ 模型文件不存在: {model_path}，请先运行 retrain_lgb.py")
         sys.exit(1)
     try:
-        model = joblib.load(str(model_path))
+        model = lgb.Booster(model_file=str(model_path))
     except Exception as e:
         print(f"❌ 模型加载失败: {e}")
         sys.exit(1)
@@ -136,8 +134,8 @@ def main():
 
         for i in range(MIN_TRAIN, len(df) - 1):
             train_df = df.iloc[:i]
-            test_close = df.iloc[i]["收盘"]
-            next_close = df.iloc[i + 1]["收盘"]
+            test_close = df.iloc[i]["close"]
+            next_close = df.iloc[i + 1]["close"]
             actual_dir = 1 if next_close > test_close else -1
             if next_close == test_close:
                 continue

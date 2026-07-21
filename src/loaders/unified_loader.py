@@ -58,7 +58,7 @@ class UnifiedDataLoader:
         mindlynx_reports: str = "systems/MindLynx-Aistock/reports/",
         tradingagent_logs: str = "~/.mind_tradingagent/logs/",
         stock_pool_path: str = "config/stock_pool.csv",
-    ):
+    ) -> None:
         self.lynx = LynxDataLoader(lynx_root)
         self.mindlynx = MindLynxDataLoader(mindlynx_reports)
         self.tradingagent = TradingAgentDataLoader(tradingagent_logs)
@@ -206,7 +206,7 @@ class UnifiedDataLoader:
                 finally:
                     db.close()
             except Exception:
-                pass
+                logger.debug("stock_daily DB 查询失败: %s", code)
 
             if has_data:
                 stock_signals.append({

@@ -9,7 +9,7 @@ Tries, in priority order:
 Usage:
     from src.market_data_fallback import get_pred_and_next_close_with_fallback
     result = get_pred_and_next_close_with_fallback(
-        conn_cache, date, stock_code, CACHE_DB
+        conn_cache, date, stock_code
     )
 """
 from __future__ import annotations
@@ -43,7 +43,6 @@ def get_pred_and_next_close_with_fallback(
     conn_cache: sqlite3.Connection,
     date: str,
     stock_code: str,
-    cache_db_path: Path,
 ) -> Optional[Dict]:
     """
     Multi-source T+1 market data query with automatic fallback.
@@ -78,7 +77,7 @@ def get_pred_and_next_close_with_fallback(
             if result is not None:
                 FALLBACK_STATS["warehouse_hits"] += 1
                 # Write back to unified_cache for future use
-                _sync_to_unified_cache(conn_cache, stock_code, data, cache_db_path)
+                _sync_to_unified_cache(conn_cache, stock_code, data)
                 logger.info(
                     "[Fallback] warehouse hit for %s %s: next_date=%s",
                     stock_code, date, result["next_date"],
@@ -323,7 +322,6 @@ def _sync_to_unified_cache(
     conn_cache: sqlite3.Connection,
     stock_code: str,
     rows: list[Dict[str, Any]],
-    cache_db_path: Path,
 ) -> int:
     """
     Write warehouse data rows back into unified_cache's daily_ohlcv table.
