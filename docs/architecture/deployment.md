@@ -62,7 +62,7 @@ bash scripts/deploy-systemd.sh
 | `Aistock_vnpy_Trading-realtime-fusion.service` | `simple` | 准实时融合（文件交换驱动） | 手动启动，daemon |
 | `Aistock_vnpy_Trading-lynx-signal.service` | `oneshot` | lynx 量化信号推送 | timer → 工作日 15:15 |
 | `Aistock_vnpy_Trading-fusion.service` | `oneshot` | 融合引擎日终分析（含TA） | timer → 工作日 19:00 |
-| `Aistock_vnpy_Trading-TA.service` | `oneshot` | TradingAgent 深度论证 | timer → 工作日 09:00/13:00 |
+| `Aistock_vnpy_Trading-TA.service` | `oneshot` | TradingAgent 深度论证 | timer → 工作日 10:10/13:30 |
 
 ### 启用全部服务
 
@@ -112,8 +112,19 @@ tail -f config/logs/realtime-fusion.log    # 实时融合日志
 ## 交易日自动运行流程
 
 ```
-09:00  TA.timer    → TA 分析 + 融合推送（盘中参考）
-13:00  TA.timer    → TA 分析 + 融合推送（午盘更新）
+08:30  warehouse-warmup.timer → 数据仓库预热（日K线）
+09:20  warehouse-warmup.timer → 数据仓库预热（AT用数据）
+10:10  TA.timer    → TA 分析（积累40min行情数据后辩论）
+10:43  realtime-fusion.service → 准实时融合 daemon 启动
+10:50  warehouse-warmup.timer → 数据仓库预热（ML用数据）
+11:00  ML 整点分析
+12:55  warehouse-warmup.timer → 数据仓库预热（AT用数据）
+13:30  TA.timer    → TA 分析（午盘）
+13:50  warehouse-warmup.timer → 数据仓库预热（ML用数据）
+14:00  ML 整点分析
+15:15  LY 信号
+19:00  日终融合
+21:00  warehouse-warmup.timer → 仓库全量预热（含美股/指数）
 15:15  lynx-signal → ly RF 量化信号推送 + 写 ly_signal.json
 15:00~ scheduler   → ML 整点分析（含因子计算）
        realtime    → 实时融合 300s 扫描 exchange area（有变化才推）
