@@ -248,6 +248,23 @@ class WeComNotifier:
             date = self._tz_cn_now().strftime("%Y-%m-%d")
 
         summary = self.format_daily_summary(results)
+
+        # 尝试从 bt_results.db 获取当日融合趋势
+        try:
+            import sqlite3
+            db = sqlite3.connect("data/backtest/bt_results.db")
+            row = db.execute(
+                "SELECT AVG(fusion_score) FROM bt_predictions WHERE date=? AND fusion_correct IS NOT NULL",
+                (date,),
+            ).fetchone()
+            db.close()
+            if row and row[0] is not None:
+                avg = round(row[0], 2)
+                direction = "📈" if avg > 0.3 else ("📉" if avg < -0.3 else "➡️")
+                summary += f"\n{direction} 今日融合强度: {avg:+.2f} (得分均值, 正值偏多)"
+        except Exception:
+            pass
+
         result = self.send_markdown(summary)
 
         if result and result.get("errcode") == 0:
