@@ -246,6 +246,36 @@ class WarehouseReader:
             logger.debug("[Warehouse] 筹码分布获取失败 %s: %s", code, exc)
         return None
 
+    def get_global_ohlcv(self, market: str, code: str, days: int = 120) -> list[dict]:
+        """获取美股/港股日K线"""
+        cached = self._lake.query_global_ohlcv(market, code, days)
+        if len(cached) >= 2:
+            return cached
+        from services.data_warehouse.fetchers import GlobalFetcher
+        try:
+            data = GlobalFetcher().fetch_ohlcv(market, code, days)
+            if data:
+                self._lake.upsert_global_ohlcv(market, code, data)
+                return data
+        except Exception as exc:
+            logger.debug("[Warehouse] 全球行情获取失败 %s/%s: %s", market, code, exc)
+        return cached
+
+    def get_global_fundamentals(self, market: str, code: str) -> dict | None:
+        """获取美股/港股基本面"""
+        cached = self._lake.query_global_fundamentals(market, code)
+        if cached:
+            return cached
+        from services.data_warehouse.fetchers import GlobalFetcher
+        try:
+            data = GlobalFetcher().fetch_fundamentals(market, code)
+            if data:
+                self._lake.upsert_global_fundamentals(market, code, data)
+                return data
+        except Exception as exc:
+            logger.debug("[Warehouse] 全球基本面获取失败 %s/%s: %s", market, code, exc)
+        return None
+
     def get_index_ohlcv(self, index_code: str, days: int = 60) -> list[dict]:
         """获取指数日K线"""
         cached = self._lake.query_index_ohlcv(index_code, days)

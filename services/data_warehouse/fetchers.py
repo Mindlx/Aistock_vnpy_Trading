@@ -900,3 +900,58 @@ class NoticeFetcher:
                 "importance": 2,
             })
         return rows
+
+
+# ═══════════════════════════════════════════
+# 全球行情获取器 (美股/港股)
+# ═══════════════════════════════════════════
+
+class GlobalFetcher:
+    """美股/港股 OHLCV + 基本面, 来源: yfinance"""
+
+    MARKET_MAP = {"us": "US", "hk": "HK"}
+
+    @_get_limiter().retry("yfinance")
+    def fetch_ohlcv(self, market: str, code: str, days: int = 120) -> list[dict]:
+        import yfinance as yf
+        suffix = "" if market == "us" else ".HK"
+        ticker = yf.Ticker(f"{code}{suffix}")
+        df = ticker.history(period="6mo")
+        if df is None or df.empty:
+            return []
+        df = df.tail(days)
+        rows = []
+        for _, r in df.iterrows():
+            pct = ((r["Close"] - r["Open"]) / r["Open"] * 100) if r["Open"] else 0
+            rows.append({
+                "date": str(r.name)[:10] if hasattr(r.name, "strftime") else str(r.name)[:10],
+                "open": float(r["Open"]), "high": float(r["High"]),
+                "low": float(r["Low"]), "close": float(r["Close"]),
+                "volume": float(r["Volume"]), "amount": 0,
+                "pct_chg": round(pct, 2),
+                "source": "yfinance",
+            })
+        return rows
+
+    @_get_limiter().retry("yfinance")
+    def fetch_fundamentals(self, market: str, code: str) -> dict | None:
+        import yfinance as yf
+        suffix = "" if market == "us" else ".HK"
+        try:
+            ticker = yf.Ticker(f"{code}{suffix}")
+            info = ticker.info
+            if info:
+                return {
+                    "name": info.get("longName", info.get("shortName", "")),
+                    "sector": info.get("sector", ""),
+                    "industry": info.get("industry", ""),
+                    "pe_ttm": float(info["trailingPE"]) if info.get("trailingPE") else 0,
+                    "pb": float(info["priceToBook"]) if info.get("priceToBook") else 0,
+                    "market_cap": float(info["marketCap"]) if info.get("marketCap") else 0,
+                    "dividend_yield": float(info["dividendYield"]) if info.get("dividendYield") else 0,
+                    "beta": float(info["beta"]) if info.get("beta") else 0,
+                    "source": "yfinance",
+                }
+        except Exception as exc:
+            logger.debug("[GlobalFetcher] %s/%s 基本面获取失败: %s", market, code, exc)
+        return None

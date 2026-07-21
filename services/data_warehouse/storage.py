@@ -124,6 +124,36 @@ CREATE TABLE IF NOT EXISTS chip_distribution (
 );
 CREATE INDEX IF NOT EXISTS idx_chip_code ON chip_distribution(stock_code);
 
+CREATE TABLE IF NOT EXISTS global_ohlcv (
+    market      TEXT NOT NULL,
+    code        TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    open        REAL, high   REAL, low    REAL,
+    close       REAL, volume REAL, amount REAL DEFAULT 0.0,
+    pct_chg     REAL DEFAULT 0.0,
+    source      TEXT DEFAULT '',
+    fetched_at  REAL NOT NULL,
+    PRIMARY KEY (market, code, date)
+);
+CREATE INDEX IF NOT EXISTS idx_gl_code ON global_ohlcv(market, code);
+CREATE INDEX IF NOT EXISTS idx_gl_date ON global_ohlcv(date);
+
+CREATE TABLE IF NOT EXISTS global_fundamentals (
+    market      TEXT NOT NULL,
+    code        TEXT NOT NULL,
+    name        TEXT DEFAULT '',
+    sector      TEXT DEFAULT '',
+    industry   TEXT DEFAULT '',
+    pe_ttm      REAL DEFAULT 0.0,
+    pb          REAL DEFAULT 0.0,
+    market_cap  REAL DEFAULT 0.0,
+    dividend_yield REAL DEFAULT 0.0,
+    beta        REAL DEFAULT 0.0,
+    source      TEXT DEFAULT '',
+    fetched_at  REAL NOT NULL,
+    PRIMARY KEY (market, code)
+);
+
 CREATE TABLE IF NOT EXISTS index_ohlcv (
     index_code  TEXT NOT NULL,
     date        TEXT NOT NULL,
@@ -502,6 +532,69 @@ class DataLake:
                 (index_code, days),
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ── global_ohlcv (美股/港股) ──
+
+    def upsert_global_ohlcv(self, market: str, code: str, rows: list[dict]) -> int:
+        conn = self._get_conn()
+        inserted = 0
+        try:
+            for row in rows:
+                conn.execute("""INSERT OR REPLACE INTO global_ohlcv
+                    (market, code, date, open, high, low, close, volume, amount, pct_chg, source, fetched_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                    market, code, row.get("date", ""),
+                    row.get("open", 0), row.get("high", 0), row.get("low", 0),
+                    row.get("close", 0), row.get("volume", 0), row.get("amount", 0),
+                    row.get("pct_chg", 0), row.get("source", "yfinance"), time.time(),
+                ))
+                inserted += 1
+            conn.commit()
+            self._touch_meta(f"{market}:{code}", "global_ohlcv", inserted, "yfinance", 86400)
+        finally:
+            conn.close()
+        return inserted
+
+    def query_global_ohlcv(self, market: str, code: str, days: int = 60) -> list[dict]:
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM global_ohlcv WHERE market=? AND code=? ORDER BY date DESC LIMIT ?",
+                (market, code, days),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ── global_fundamentals (美股/港股基本面) ──
+
+    def upsert_global_fundamentals(self, market: str, code: str, data: dict) -> None:
+        conn = self._get_conn()
+        try:
+            conn.execute("""INSERT OR REPLACE INTO global_fundamentals
+                (market, code, name, sector, industry, pe_ttm, pb, market_cap, dividend_yield, beta, source, fetched_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                market, code,
+                data.get("name", ""), data.get("sector", ""), data.get("industry", ""),
+                data.get("pe_ttm", 0), data.get("pb", 0), data.get("market_cap", 0),
+                data.get("dividend_yield", 0), data.get("beta", 0),
+                data.get("source", "yfinance"), time.time(),
+            ))
+            conn.commit()
+            self._touch_meta(f"{market}:{code}", "global_fundamentals", 1, "yfinance", 86400)
+        finally:
+            conn.close()
+
+    def query_global_fundamentals(self, market: str, code: str) -> dict | None:
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT * FROM global_fundamentals WHERE market=? AND code=?",
+                (market, code),
+            ).fetchone()
+            return dict(row) if row else None
         finally:
             conn.close()
 
