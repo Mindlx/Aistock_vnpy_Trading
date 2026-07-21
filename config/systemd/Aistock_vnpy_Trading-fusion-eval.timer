@@ -1,0 +1,11 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 日间融合评估定时器 (12:12 / 14:41)
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Timer]
+OnCalendar=Mon..Fri 12:12:00
+OnCalendar=Mon..Fri 14:41:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -74,6 +74,10 @@ def parse_args() -> argparse.Namespace:
         help="运行 mind_TradingAgent 分析（耗时较长，每只股票需 1-5 分钟含 LLM 推理）",
     )
     parser.add_argument(
+        "--fusion-only", action="store_true",
+        help="仅融合评估(从已有信号文件读取, 不推送, 不回测)",
+    )
+    parser.add_argument(
         "--config", type=str, default="config/settings.yaml",
         help="配置文件路径",
     )
@@ -500,7 +504,7 @@ def main():
             print(f"  [回测] ⚠️ 异常: {e}")
 
     # 企业微信推送
-    if not args.dry_run and config.get("wecom", {}).get("enabled", False):
+    if not args.dry_run and not args.fusion_only and config.get("wecom", {}).get("enabled", False):
         # 优先读取环境变量（项目根 .env），兼容旧版 yaml 配置
         wecom_webhook = os.getenv("WECOM_WEBHOOK_URL") or config["wecom"].get("webhook_url", "")
         if wecom_webhook and wecom_webhook != "YOUR_KEY_HERE":

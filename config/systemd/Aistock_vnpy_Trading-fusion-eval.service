@@ -1,0 +1,8 @@
+[Unit]
+Description=Aistock_vnpy_Trading — 日间融合评估 (只记录回测, 不推送)
+Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
+
+[Service]
+Type=oneshot
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/run_daily.py --fusion-only
+WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading

@@ -1,9 +1,9 @@
 [Unit]
-Description=Aistock_vnpy_Trading — 日终融合定时器（工作日 19:00）
+Description=Aistock_vnpy_Trading — 日终融合定时器（工作日 18:00, 含推送）
 Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
 
 [Timer]
-OnCalendar=Mon..Fri 19:00:00
+OnCalendar=Mon..Fri 18:00:00
 Persistent=true
 
 [Install]
