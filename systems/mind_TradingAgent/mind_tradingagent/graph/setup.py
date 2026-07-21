@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from langgraph.graph import END, START, StateGraph, Send
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 from langgraph.prebuilt import ToolNode
 
 from mind_tradingagent.agents import (

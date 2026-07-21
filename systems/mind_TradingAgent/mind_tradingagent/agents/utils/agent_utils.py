@@ -73,8 +73,8 @@ def get_language_instruction() -> str:
     from mind_tradingagent.dataflows.config import get_config
     lang = get_config().get("output_language", "English")
     if lang.strip().lower() == "english":
-        return ""
-    return f" Write your entire response in {lang}."
+        return "\nKeep your response under 400 words."
+    return f"\n请用中文回复，控制在800字以内。"
 
 
 def _clean_identity_value(value: Any) -> str | None:
@@ -212,10 +212,10 @@ def create_msg_delete():
         instrument (#888). Anchoring it to the resolved instrument context and
         date keeps the next analyst on-task even if the provider treats the
         placeholder as a standalone request.
-        """
-        messages = state["messages"]
-        removal_operations = [RemoveMessage(id=m.id) for m in messages]
 
+        Note: replaces messages wholesale instead of using RemoveMessage
+        to avoid race conditions with parallel analyst execution.
+        """
         instrument_context = get_instrument_context_from_state(state)
         trade_date = state.get("trade_date", "the requested date")
         placeholder = HumanMessage(
@@ -224,7 +224,7 @@ def create_msg_delete():
                 f"{instrument_context} The analysis date is {trade_date}."
             )
         )
-        return {"messages": removal_operations + [placeholder]}
+        return {"messages": [placeholder]}
 
     return delete_messages
 
