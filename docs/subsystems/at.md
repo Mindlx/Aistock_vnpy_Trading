@@ -39,7 +39,7 @@ TradingAgent (AT) 是三系统信号融合中的**多智能体辩论引擎**。6
 ### 定时触发
 
 - **systemd 服务**: `Aistock_vnpy_Trading-TA.service`
-- **定时器**: `Aistock_vnpy_Trading-TA.timer` — 工作日 09:31 / 13:00
+- **定时器: 10:10 / 13:00
 - **执行命令**: `.venv/bin/python scripts/run_daily.py --run-ta`
 - **执行结果**: 写入 `at_signal.json` (准实时文件交换区) + `data/tradingagent/ta_logs/` (全量日志)
 
@@ -181,7 +181,7 @@ LLM 多智能体辩论
 ### 恢复时序
 
 ```
-1. systemd timer 触发 (09:31/13:00)
+1. systemd timer 触发 (10:10/13:30)
 2. MindTradingAgentWrapper._ensure_imported() → 加载 TA 子模块
 3. 遍历 18 只股票:
    a. verify_stock() → 仓库优先(微秒) → 外部API(追踪)

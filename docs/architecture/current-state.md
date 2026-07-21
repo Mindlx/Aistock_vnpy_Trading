@@ -26,7 +26,7 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 文件交换区三信号的更新频率：
 - ly_signal.json: 每日一次 (15:15) — RF模型预测T+1，盘中固定
 - ml_signal.json: 每5分钟 — 因子层读DB计算，有新数据就变
-- at_signal.json: 每日两次 (09:31/13:00) — LLM辩论跑完固定
+- at_signal.json: 每日两次 (10:10/13:30) — LLM辩论跑完固定
 
 盘中真正频繁变化的只有ml因子信号。准实时融合的价值不在于"更快发现行情变化"（ML实时预警已做到），而在于**把ml因子信号放到三系统坐标系中做上下文解读**：
 1. 共识漂移监测：ml因子变化在ly已是+2的背景下只是确认；在ly为-1.5时则是分歧加剧
@@ -41,12 +41,12 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 |------|------|------|------|---------|
 | ly | lynx_vnpy | RF+LGB双模型 + 15TA + 58Alpha158因子 | 日频 15:15 | 上涨概率 + L7信号 |
 | ml | MindLynx-Aistock | 12因子 + 15策略 + LLM推理 | 日频/实时 | 综合评分 0-100 + 文本解释(纯展示) |
-| at | mind_TradingAgent | 多智能体辩论 (LangGraph) | 09:31/13:00 | 5级评级 (Buy~Sell) |
+| at | mind_TradingAgent | 多智能体辩论 (LangGraph) | 10:10/13:30 | 5级评级 (Buy~Sell) |
 
 ### 1.2 两条融合路径
 
 ```
-                 日终融合 (19:00)                        准实时融合 (09:33+)
+                 日终融合 (18:00)                        准实时融合 (10:43+)
                  ───────────────                        ────────────────
                  run_daily.py                           realtime_fusion.py
                  (oneshot, systemd timer)               (daemon, 每300s扫描)
@@ -97,12 +97,12 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 | monitor | daemon | ~13MB | ✅ running | WebSocket盘中监控 |
 | ml-factor | daemon | ~15MB | ✅ running | 因子层纯数学计算(300s) |
 | realtime-fusion | daemon | ~15MB | ⏸️ inactive(周末跳过) | 文件交换区扫描(300s) |
-| fusion | oneshot | - | inactive(等待19:00) | 日终融合 |
+| fusion | oneshot | - | inactive(等待18:00) | 日终融合 |
 | lynx-signal | oneshot | - | inactive(等待15:15) | 量化信号+推送 |
-| TA | oneshot | - | inactive(等待09:31) | TradingAgent辩论 |
+| TA | oneshot | - | inactive(等待10:10) | TradingAgent辩论 |
 | calibrate-alphas | oneshot | - | ✅ timer 12:30 | Alpha权重自动校准 |
 | diagnose-agreement | oneshot | - | ✅ timer 20:30 | LY+ML同向诊断数据积累 |
-| eastmoney-rating | oneshot | - | ✅ timer 09:53 | 东方财富数据获取+简讯推送（09:53仅一次, 13:53已取消） |
+| eastmoney-rating | oneshot | - | ✅ timer 10:53 | 东方财富数据获取+简讯推送（09:53仅一次, 13:53已取消） |
 | retrain-lgb | oneshot | - | ✅ timer 15:20 | LGB+RF模型自动重训(≥7天触发) |
 | c1test-daily | oneshot | - | ✅ timer 20:00 | 🆕 统一回测快速模式 |
 | c1test-weekly | oneshot | - | ✅ timer 周日10:30 | 🆕 统一回测全面模式 |
@@ -128,10 +128,10 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 15:20 ─ retrain-lgb.timer ── 🆕 LGB 模型自动重训
 15:45 ─ scheduler ─── 大盘复盘(文字+PDF)
 
-# 准实时融合 09:33~15:00 每5分钟扫描(仅工作日)
+# 准实时融合 10:43~15:00 每5分钟扫描(仅工作日)
 # 因子计算 持续每5分钟扫描(仅工作日)
 
-19:00 ─ fusion.timer ── 日终融合+龙虎榜+评级PDF
+18:00 ─ fusion.timer ── 日终融合+龙虎榜+评级PDF
 20:30 ─ diagnose-agreement.timer ── 🆕 LY+ML同向诊断
 Sun 20:00 ─ scheduler ─ 周末情报推送
 Mon 07:30 ─ scheduler ─ 周末情报补量
@@ -153,7 +153,7 @@ data/realtime/
 
 ### 3.1 权重 (settings.yaml) — 2026-07-21 c1skill论证更新
 
-LY 经 c1skill 论证, 53.5% LGB 准确率被 ML 61.7% 完全覆盖, 融合贡献边际为负(相关性 > IC比率, 违反 G&K alpha叠加条件)。移出投票保留分歧检测角色。
+LY 经 c1skill 论证, 53.5% LGB 准确率被 ML 61.7% 完全覆盖, 融合贡献边际为负(相关性 > IC比率, 违反 G&K alpha叠加条件)。移出投票+退出分歧检测, 纯观察者。
 
 | 系统 | 权重 | 说明 |
 |------|------|------|

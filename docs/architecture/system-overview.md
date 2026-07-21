@@ -32,8 +32,8 @@
 │  [常驻daemon: ml-factor (~15MB), alpha158]              │
 ├─────────────────────────────────────────────────────────┤
 │                  🔗  融合决策层                          │
-│  日终融合 (fusion_engine.py, 19:00 oneshot)             │
-│  准实时融合 (realtime_fusion.py, 09:33+每5min)          │
+│  日终融合 (fusion_engine.py, 18:00 oneshot)             │
+│  准实时融合 (realtime_fusion.py, 10:43+每5min)          │
 │  分歧检测 / 贝叶斯融合 / L7决策映射                     │
 ├─────────────────────────────────────────────────────────┤
 │                 📢  推送通知层                           │
@@ -51,7 +51,7 @@
 |:----:|------|:----:|------|:----:|:-------:|
 | **ly** | lynx_vnpy | **纯客观** | RF + LGB + 15技术指标 + Alpha158(58因子) | 日频 15:15 | **0.0** (纯观察者) |
 | **ml** | MindLynx-Aistock | **半客观** | 12纯数学因子 + 策略Agent + LLM推理（注入客观数据） | 日频/实时 | **0.55** |
-| **at** | mind_TradingAgent | **纯主观** | 多智能体LLM辩论 (LangGraph, DeepSeek) | 09:31/13:00 | **0.30** |
+| **at** | mind_TradingAgent | **纯主观** | 多智能体LLM辩论 (LangGraph, DeepSeek) | 10:10/13:30 | **0.30** |
 
 来源: `config/settings.yaml:weights` 区块。
 
@@ -86,7 +86,7 @@
 
 ## 四、两条融合路径
 
-### 4.1 日终融合 (19:00 oneshot)
+### 4.1 日终融合 (18:00 oneshot)
 
 ```
 run_daily.py → data_loader (零侵入读取三系统) → fusion_engine.py → wecom_notifier.py
@@ -101,7 +101,7 @@ run_daily.py → data_loader (零侵入读取三系统) → fusion_engine.py →
 - 分歧检测: 三系统方向不一致时标记 (`has_disagreement`)，分歧时 ML 准确率从 37.9%→51.0%
 - 分歧增强: ML为少数方时自适应提升融合得分 (+0~0.3), 非一刀切惩罚 (ccc8ed0)
 
-### 4.2 准实时融合 (09:33+ 每5min daemon)
+### 4.2 准实时融合 (10:43+ 每5min daemon)
 
 ```
 realtime_fusion.py → data/realtime/ 文件交换区 → wecom_notifier.py
@@ -110,7 +110,7 @@ realtime_fusion.py → data/realtime/ 文件交换区 → wecom_notifier.py
 - 文件交换区:
   - `ly_signal.json` — lynx_signal 写入 (T+1 预测, 盘中不变)
   - `ml_signal.json` — ml_factor_service 写入 (因子层, 每300s更新)
-  - `at_signal.json` — TradingAgent 写入 (09:31/13:00)
+  - `at_signal.json` — TradingAgent 写入 (10:10/13:30)
 - 仅融合得分变化超阈值时推送
 - 盘中真正频繁变化的只有 ml 因子信号
 - 价值: 把 ml 因子变化放到三系统坐标系中做上下文解读
@@ -192,10 +192,10 @@ realtime_fusion.py → data/realtime/ 文件交换区 → wecom_notifier.py
 
 | 定时器 | 时间 | 职责 |
 |--------|:----:|------|
-| fusion.timer | 19:00 | 日终融合+龙虎榜+评级PDF |
+| fusion.timer | 18:00 | 日终融合+龙虎榜+评级PDF |
 | lynx-signal.timer | 15:15 | 量化信号建模+推送 |
-| TA.timer | 09:31/13:00 | TradingAgent 辩论 |
-| eastmoney-rating.timer | 09:53/14:53 | 东方财富评级简讯推送 |
+| TA.timer | 10:10/13:30 | TradingAgent 辩论 |
+| eastmoney-rating.timer | 10:53/13:53 | 东方财富评级简讯推送 |
 | calibrate-alphas.timer | 12:30 | Alpha权重自动校准 |
 | c1test-daily.timer | 20:00 | 统一回测快速模式 |
 | c1test-weekly.timer | 周日10:30 | 统一回测全面模式 |
@@ -222,18 +222,18 @@ realtime_fusion.py → data/realtime/ 文件交换区 → wecom_notifier.py
 | # | 推送类型 | emoji | 时间 | 引擎 | 格式章节 |
 |:-:|---------|:-----:|:----:|:----:|:--------:|
 | 1 | 融合决策 | 🛟 | 19:00 | Fusion | §2.1 |
-| 2 | 准实时速报 | 🛟 | 09:33+ | Fusion | §2.2 |
+| 2 | 准实时速报 | 🛟 | 10:43+ | Fusion | §2.2 |
 | 3 | 量化信号 | 🧬 | 15:15 | Fusion | §2.3 |
 | 4 | 整点分析 | 👾 | 11:00/14:00 | ML | §2.4 |
-| 5 | 每日情报 | 📰 | 08:30 | ML | §2.5 |
+| 5 | 每日情报 | 📰 | 09:00 | ML | §2.5 |
 | 6 | 周末情报 | 📰 | 周日20:00 | ML | §2.5 |
 | 7 | 大盘复盘 | 🎯 | 11:45/15:45 | ML | §2.6 |
 | 8 | 盘中速报 | 👾 | 事件驱动 | ML | §2.7 |
 | 9 | ATR止损 | 🚨 | 事件驱动 | ML | §2.7 |
 | 10 | 异动预警 | 🔥 | 事件驱动 | ML | §2.7 |
 | 11 | 均线突破 | 📈/📉 | 事件驱动 | ML | §2.7 |
-| 12 | 评级PDF | 💰 | 19:01 | ML | §2.8 |
-| 13 | 评级简讯 | 💰 | 09:53/14:53 | ML→Fusion | §2.9 |
+| 12 | 评级PDF | 💰 | 18:01 | ML | §2.8 |
+| 13 | 评级简讯 | 💰 | 10:53/13:53 | ML→Fusion | §2.9 |
 
 来源: `docs/push/format.md §7`
 

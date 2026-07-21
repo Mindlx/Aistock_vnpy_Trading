@@ -22,7 +22,7 @@
            │                              │
     ┌──────▼───────┐              ┌───────▼────────┐
     │ systemd timer │              │ systemd service │
-    │ 19:00 触发    │              │ 常驻 + 内部调度  │
+    │ 18:00 触发    │              │ 常驻 + 内部调度  │
     └──────────────┘              └─────────────────┘
 ```
 
@@ -34,9 +34,9 @@
 
 | # | Timer 文件 | 触发时间 | Service → Entry Script | 推送内容 |
 |---|-----------|---------|----------------------|---------|
-| 1 | `Aistock_vnpy_Trading-fusion.timer` | Mon-Fri 19:00 | `run_daily.py` | 融合决策 + 龙虎榜 + 东方财富评级 PDF |
+| 1 | `Aistock_vnpy_Trading-fusion.timer` | Mon-Fri 18:00 | `run_daily.py` | 融合决策 + 龙虎榜 + 东方财富评级 PDF |
 | 2 | ~~`Aistock_vnpy_Trading-lynx-signal.timer`~~ | ~~Mon-Fri 15:15~~ | ~~`lynx_signal.py`~~ | ~~LY 量化信号~~ **(2026-07-08 已禁用，准确率提升后恢复)** |
-| 3 | `Aistock_vnpy_Trading-realtime-fusion.timer` | Mon-Fri 09:33 | `realtime_fusion.py --daemon` | 准实时融合(5分钟扫描) |
+| 3 | `Aistock_vnpy_Trading-realtime-fusion.timer` | Mon-Fri 10:43 | `realtime_fusion.py --daemon` | 准实时融合(5分钟扫描) |
 
 ### 2.2 MindLynx 引擎 systemd 常驻服务（内部调度）
 
@@ -175,7 +175,7 @@
 ⚠ ly9/10 ml8/10 at7/10
 ```
 
-### 4.2 东方财富评级（Fusion 19:00 extra_section → 现已改为独立 PDF）
+### 4.2 东方财富评级（Fusion 18:00 extra_section → 现已改为独立 PDF）
 
 旧版 Markdown 文本格式（已废弃，现替换为 PDF 文件推送）:
 ```
@@ -226,7 +226,7 @@
 📊 12条 | 完整分析下个交易日推送
 ```
 
-### 4.7 每日情报（盘前 08:30 推送）
+### 4.7 每日情报（盘前 09:00 推送）
 
 ```
 📰 每日要闻 | 盘前
@@ -235,7 +235,7 @@
 📊 5条 | 下个交易时段分析将自动注入
 ```
 
-### 4.8 龙虎榜（Fusion 19:00 extra_section）
+### 4.8 龙虎榜（Fusion 18:00 extra_section）
 
 格式由 `build_dragon_tiger_prompt()` 生成，以 **🐉 龙虎榜** 标题开头。
 
@@ -279,7 +279,7 @@
 |---------|------|------|
 | **融合决策(19:00)** | 先发融合决策 Markdown → 再发龙虎榜 extra(独立消息) → subprocess 发评级 PDF(先文字后文件) | 融合结果优先 |
 | **大盘复盘(11:45/15:45)** | 先发文字摘要 → 再发 PDF 文件 | 摘要让用户快速了解 |
-| **东方财富评级(19:00 via subprocess)** | 先发 `💰东方财富自选股评级报告已生成` 文字 → 再发 PDF 附件 | 文字通知在前，详情文件在后 |
+| **东方财富评级(18:00 via subprocess)** | 先发 `💰东方财富自选股评级报告已生成` 文字 → 再发 PDF 附件 | 文字通知在前，详情文件在后 |
 
 ---
 
@@ -303,7 +303,7 @@
 src/wecom_notifier.py              → WeComNotifier（Markdown 推送核心）
 src/feature_bridge.py              → run_xueqiu_sentiment, run_dragon_tiger（可选功能）
 src/realtime_fusion.py             → RealtimeFusion（准实时融合速报）
-scripts/run_daily.py               → 19:00 入口（融合+龙虎榜+评级PDF）
+scripts/run_daily.py               → 18:00 入口（融合+龙虎榜+评级PDF）
 
 # MindLynx 引擎
 systems/MindLynx-Aistock/

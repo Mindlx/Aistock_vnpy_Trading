@@ -4,7 +4,7 @@
 
 > ⚠️ **2026-06-24 重新评估：方案C（通知代理服务）已判定为低价值，不实施。**
 >
-> 原因：三个系统的推送时间线天然错开（ML 整点/盘中、LY 15:15、Fusion 19:00），
+> 原因：三个系统的推送时间线天然错开（ML 整点/盘中、LY 15:15、Fusion 18:00），
 > 不存在真正的并发冲突。消息量峰值约 5条/min，远低于企业微信 API 限额 20条/min。
 > 核心痛点（重试机制、配置统一、日志散落）已通过 Phase 1+2 修复。
 > 新增队列/代理服务的运维成本 > 实际收益。详见本节末尾"2026-06-24 重新评估"。
@@ -81,10 +81,10 @@ MindLynx ──HTTP POST──▶ 企业微信 API
 ### 2.3 消息顺序无法保证
 
 ```
-19:00:02 Fusion 发融合决策 Markdown
-19:00:03 subprocess 启动 generate_rating_report.py (MindLynx venv)
-19:00:20 MindLynx 的 scheduler 也发了一条大盘复盘
-19:00:35 generate_rating_report.py 发 PDF → 实际排在 19:00:20 的后面
+18:00:02 Fusion 发融合决策 Markdown
+18:00:03 subprocess 启动 generate_rating_report.py (MindLynx venv)
+18:00:20 MindLynx 的 scheduler 也发了一条大盘复盘
+18:00:35 generate_rating_report.py 发 PDF → 实际排在 18:00:20 的后面
 ```
 
 用户看到：文字在前 → 别人的消息 → PDF 在后。顺序不可控。

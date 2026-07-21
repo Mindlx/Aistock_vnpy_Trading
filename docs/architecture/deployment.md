@@ -61,7 +61,7 @@ bash scripts/deploy-systemd.sh
 | `Aistock_vnpy_Trading-ml-factor.service` | `simple` | 因子层实时计算（每5分钟） | 手动启动，daemon |
 | `Aistock_vnpy_Trading-realtime-fusion.service` | `simple` | 准实时融合（文件交换驱动） | 手动启动，daemon |
 | `Aistock_vnpy_Trading-lynx-signal.service` | `oneshot` | lynx 量化信号推送 | timer → 工作日 15:15 |
-| `Aistock_vnpy_Trading-fusion.service` | `oneshot` | 融合引擎日终分析（含TA） | timer → 工作日 19:00 |
+| `Aistock_vnpy_Trading-fusion.service` | `oneshot` | 融合引擎日终分析（含TA） | timer → 工作日 18:00 |
 | `Aistock_vnpy_Trading-TA.service` | `oneshot` | TradingAgent 深度论证 | timer → 工作日 10:10/13:30 |
 
 ### 启用全部服务

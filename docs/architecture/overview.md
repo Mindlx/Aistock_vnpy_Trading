@@ -67,7 +67,7 @@
 |--------|------|------|---------|--------|
 | **ly** (lynx_vnpy) | RandomForest+LGB 双模型集成 + 15TA+58Alpha158因子 | 日频/准实时 | 上涨概率 + L7 信号 | 独立推送 |
 | **ml** (MindLynx-Aistock) | 12因子+15策略+LLM 推理 | 日频/实时 | 综合评分 0-100 (op_advice纯文本,不参与融合) | 独立 venv, 独立推送 |
-| **at** (mind_TradingAgent) | 多智能体辩论 (LangGraph) | 盘后 (09:31/13:00) | 5 级评级 | 独立 venv |
+| **at** (mind_TradingAgent) | 多智能体辩论 (LangGraph) | 盘后 (10:10/13:30) | 5 级评级 | 独立 venv |
 
 ### 核心原则
 
@@ -110,7 +110,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 文件交换区三信号的更新频率：
 - ly_signal.json: 每日一次 (15:15) — RF+LGB双模型集成，盘中固定
 - ml_signal.json: 每5分钟 — 12因子层读stock_daily DB，有新数据就变
-- at_signal.json: 每日两次 (09:31/13:00) — LLM辩论跑完即固定
+- at_signal.json: 每日两次 (10:10/13:30) — LLM辩论跑完即固定
 - alpha158_signal.json: 每5分钟 — 58Alpha158因子+LGB推理，纯数学无LLM
 
 所以盘中真正频繁变化的只有ml因子信号。那准实时融合的价值不在于"更快发现行情变化"（这事ML实时预警已经做到了），而在于**把ml因子信号放到三系统坐标系中做上下文解读**：
@@ -129,7 +129,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  Fusion Venv (.venv/ Python 3.10)                          │  │
-│  │  ├── scripts/run_daily.py         (19:00 日终融合)          │  │
+│  │  ├── scripts/run_daily.py         (18:00 日终融合)          │  │
 │  │  ├── src/realtime_fusion.py       (09:33+ 准实时 daemon)    │  │
 │  │  ├── src/wecom_notifier.py        (Markdown 推送)            │  │
 │  │  └── systems/lynx_vnpy/lynx_signal.py (15:15 量化信号)       │  │
@@ -162,9 +162,9 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 | `ml-factor.service` | 常驻 daemon | Fusion | ~15MB | ⚠️ 运行但无操作 | 12因子计算 daemon |
 | `alpha158-service.service` | 常驻 daemon | Fusion | ~15MB | ⚠️ 运行但无操作 | 58Alpha158因子+LGB daemon |
 | `realtime-fusion.service` | 常驻 daemon | Fusion | ~15MB | ❌ 周末跳过 | 文件交换区扫描 (v2 新增) |
-| `fusion.service` | oneshot | Fusion | - | ❌ 仅工作日 | 19:00 日终融合 |
+| `fusion.service` | oneshot | Fusion | - | ❌ 仅工作日 | 18:00 日终融合 |
 | `lynx-signal.service` | oneshot | Fusion | - | ❌ 仅工作日 | 15:15 量化信号 |
-| `TA.service` | oneshot | Fusion | - | ❌ 仅工作日 | 09:31/13:00 TA 分析 |
+| `TA.service` | oneshot | Fusion | - | ❌ 仅工作日 | 10:10/13:30 TA 分析 |
 
 **总计常驻内存**: ~118MB（scheduler 75MB + monitor 13MB + ml-factor 15MB + realtime-fusion 15MB）
 
@@ -172,8 +172,8 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 
 ```
 09:00 ─ scheduler ─── 日间情报(盘前)推送
-09:31 ─ TA.timer ──── mind_TradingAgent 深度分析 (LLM, ~30min)
-09:33 ─ realtime-fusion.timer ─── 启动准实时 daemon (每300s扫描文件交换区)
+10:10 ─ TA.timer ──── mind_TradingAgent 深度分析 (LLM, ~30min)
+10:43 ─ realtime-fusion.timer ─── 启动准实时 daemon (每300s扫描文件交换区)
 10:00 ─ scheduler ─── 整点全量分析
 11:00 ─ scheduler ─── 整点全量分析
 11:45 ─ scheduler ─── 大盘复盘 (文字摘要 + PDF)
@@ -182,7 +182,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 15:00 ─ scheduler ─── 整点全量分析
 15:15 ─ lynx-signal.timer ── 量化信号建模 + 推送
 15:45 ─ scheduler ─── 大盘复盘 (文字摘要 + PDF)
-19:00 ─ fusion.timer ──── 日终融合 + 龙虎榜 + 东方财富评级PDF
+18:00 ─ fusion.timer ──── 日终融合 + 龙虎榜 + 东方财富评级PDF
 Sun 20:00 ─ scheduler ─ 周末情报推送
 Mon 07:30 ─ scheduler ─ 周末情报补量
 ```
