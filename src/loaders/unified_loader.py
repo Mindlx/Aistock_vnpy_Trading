@@ -24,8 +24,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
-
 from src.loaders.lynx_loader import LynxDataLoader
 from src.loaders.mindlynx_loader import MindLynxDataLoader
 from src.loaders.tradingagent_loader import TradingAgentDataLoader
@@ -147,66 +145,28 @@ class UnifiedDataLoader:
             # 至少有一个系统有真实数据才加入
             has_data = bool(lynx_signal_raw) or bool(mindlynx_advice) or bool(ta_rating) or ml_factor_has_data or alpha158_has_data
 
-            # 获取最新股价和涨跌幅（直接调 Sina 实时行情 API，不依赖缓存）
-            price = 0.0
-            pct_chg = 0.0
-            volume_ratio = 0.0
-            ma5 = ma10 = ma20 = 0.0
-            price_fetched = False
+            # 通过数据仓库获取行情和技术指标（缓存优先，5层降级链）
             try:
-                prefix = 'sh' if code.startswith(('6', '5', '9')) else 'sz'
-                url = f'https://hq.sinajs.cn/list={prefix}{code}'
-                resp = requests.get(url, headers={'Referer': 'https://finance.sina.com.cn'}, timeout=10)
-                if resp.status_code == 200:
-                    parts = resp.text.split(',')
-                    if len(parts) >= 4:
-                        # 返回格式: 股票名,今开,昨收,当前价,最高,最低,...
-                        try:
-                            prev_close = float(parts[2]) if parts[2] and parts[2].replace('.','',1).replace('-','',1).isdigit() else 0.0
-                            price = float(parts[3]) if parts[3] and parts[3].replace('.','',1).replace('-','',1).isdigit() else 0.0
-                        except (ValueError, TypeError):
-                            prev_close = 0.0
-                            price = 0.0
-                        if prev_close > 0:
-                            pct_chg = round((price - prev_close) / prev_close * 100, 2)
-                            price_fetched = True
+                from services.data_warehouse import WarehouseReader
+                reader = WarehouseReader()
+                hf = reader.get_daily_df(code, days=120)
+                if hf is not None and not hf.empty and len(hf) >= 2:
+                    hl = hf.iloc[-1]
+                    hp = hf.iloc[-2]
+                    price = float(hl.get("close", hl.get("收盘", 0)))
+                    prev_close = float(hp.get("close", hp.get("收盘", 0)))
+                    if prev_close > 0:
+                        pct_chg = round((price - prev_close) / prev_close * 100, 2)
+                    if "volume_ratio" in hf.columns:
+                        volume_ratio = round(float(hf["volume_ratio"].iloc[-1]), 2)
+                    if "ma5" in hf.columns:
+                        ma5 = round(float(hf["ma5"].iloc[-1]), 2)
+                    if "ma10" in hf.columns:
+                        ma10 = round(float(hf["ma10"].iloc[-1]), 2)
+                    if "ma20" in hf.columns:
+                        ma20 = round(float(hf["ma20"].iloc[-1]), 2)
             except Exception:
-                logger.debug("Sina实时行情获取失败: %s", code)
-
-            # 降级：实时行情失败时，从 lynx 日K线获取（收盘后安全，有内容校验）
-            if not price_fetched and self.lynx._ensure_imported():
-                try:
-                    df_price = self.lynx._lynx_module.fetch_daily_bars(code)
-                    if df_price is not None and len(df_price) >= 2:
-                        last = df_price.iloc[-1]
-                        prev = df_price.iloc[-2]
-                        price = float(last.get("收盘", 0))
-                        prev_close = float(prev.get("收盘", 0))
-                        if prev_close > 0:
-                            pct_chg = round((price - prev_close) / prev_close * 100, 2)
-                            price_fetched = True
-                except Exception as e:
-                    logger.warning("[data_loader] Sina行情+lynx回退获取失败 (%s): %s", code, e)
-
-            # 从 stock_daily DB 获取更丰富的技术指标（量比、均线）
-            try:
-                import sqlite3
-                db_path = "systems/MindLynx-Aistock/data/stock_analysis.db"
-                db = sqlite3.connect(db_path)
-                try:
-                    row = db.execute(
-                        f"SELECT volume_ratio, ma5, ma10, ma20 FROM stock_daily "
-                        f"WHERE code=? ORDER BY date DESC LIMIT 1", (code,)
-                    ).fetchone()
-                    if row:
-                        volume_ratio = round(row[0], 2) if row[0] else 0.0
-                        ma5 = round(row[1], 2) if row[1] else 0.0
-                        ma10 = round(row[2], 2) if row[2] else 0.0
-                        ma20 = round(row[3], 2) if row[3] else 0.0
-                finally:
-                    db.close()
-            except Exception:
-                logger.debug("stock_daily DB 查询失败: %s", code)
+                logger.debug("数据仓库读取失败: %s", code)
 
             if has_data:
                 stock_signals.append({
