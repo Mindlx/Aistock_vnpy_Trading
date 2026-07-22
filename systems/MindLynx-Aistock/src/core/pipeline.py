@@ -729,10 +729,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
 
         # P4: portfolio allocation
 
-        # P2+: inject LY quantitative signal (zero-intrusion, disk-file read only)
-        ly_text = getattr(self, "_ly_signals", {}).get(code, "")
-        if ly_text:
-            enhanced["ly_signal"] = ly_text
+        # LY 量化信号已暂停注入 (2026-07-22: LY准确率49.8%, 接近随机)
         allocation_text = getattr(self, "_allocation_prompt", "")
         if allocation_text:
             enhanced["allocation_prompt"] = allocation_text
@@ -1405,10 +1402,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             if val:
                 ctx[key] = val
 
-        # LY signal
-        ly_text = getattr(self, "_ly_signals", {}).get(code, "")
-        if ly_text:
-            ctx["ly_signal"] = ly_text
+        # LY signal (已暂停注入, 2026-07-22)
 
         # Position sizing
         try:
@@ -2751,11 +2745,13 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
             logger.debug("Factor engine unavailable: %s", exc)
         self._compute_uncertainty_and_ood(stock_codes, per_stock_regimes)
         self._compute_portfolio_allocation(stock_codes)
-        try:
-            self._ly_signals = self._load_ly_signals(stock_codes)
-        except Exception as e:
-            logger.debug("[LY] LY signal loading failed: %s", e)
-            self._ly_signals = {}
+        # LY 信号加载已暂停 (2026-07-22: LY准确率49.8%)
+        # try:
+        #     self._ly_signals = self._load_ly_signals(stock_codes)
+        # except Exception as e:
+        #     logger.debug("[LY] LY signal loading failed: %s", e)
+        #     self._ly_signals = {}
+        self._ly_signals = {}
 
     def _apply_regime_weights(self, engine, per_stock_regimes: list[dict]):
         try:

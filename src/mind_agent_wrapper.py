@@ -177,10 +177,10 @@ class MindTradingAgentWrapper:
         # 当主数据源不可用时，从 LY/ML 缓存注入预加载数据，
         # 让 AT 的 LLM 辩论仍然可以运行（不跳过 LLM）。
         # 如果注入后 AT 仍然失败，走快速降级。
-        should_inject = True  # 始终注入，确保 AT Agent 获得 LY/ML 信号
+        should_inject = True  # 始终注入，确保 AT Agent 获得 ML 因子 + 行情/新闻数据
 
         if should_inject:
-            logger.info(f"TradingAgent [{stock_code}]: 尝试数据注入 (LY信号 + ML因子 + 缓存数据)")
+            logger.info(f"TradingAgent [{stock_code}]: 尝试数据注入 (ML因子 + 缓存数据)")
 
         import concurrent.futures as _futures
 
@@ -193,7 +193,7 @@ class MindTradingAgentWrapper:
                 def _injected_create(company_name, trade_date, asset_type="stock", past_context="", instrument_context=""):
                     state = orig_create(company_name, trade_date, asset_type, past_context, instrument_context)
                     enriched = (
-                        f"[系统注入 - LY量化信号 + ML因子分析 + 多源缓存数据]\n\n"
+                        f"[系统注入 - ML因子分析 + 多源缓存数据]\n\n"
                         f"{payload}\n\n"
                         f"---\n请求分析: {company_name} ({trade_date})"
                     )

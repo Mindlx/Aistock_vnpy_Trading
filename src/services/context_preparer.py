@@ -22,7 +22,6 @@ class ContextPreparer:
         self._sl = signal_loader or SignalLoader()
 
     def prepare_all(self, stock_code: str) -> Dict[str, str]:
-        ly_signals_md = self._sl.load_ly_signal(stock_code)
         ml_factor_md = self._sl.load_ml_factor(stock_code)
         market_md = self._prepare_market_context(stock_code)
         tech_md = self._prepare_technical_context(stock_code)
@@ -31,7 +30,6 @@ class ContextPreparer:
         ml_md = self._prepare_ml_analysis_context(stock_code)
 
         return {
-            "ly_signals_context": ly_signals_md,
             "ml_factor_context": ml_factor_md,
             "market_context": market_md + "\n\n" + tech_md,
             "fundamentals_context": fund_md + "\n\n" + ml_md,
@@ -40,14 +38,11 @@ class ContextPreparer:
         }
 
     def build_injection_payload(self, context: Dict[str, str]) -> str:
-        ly_md = context.get("ly_signals_context", "")
         ml_factor_md = context.get("ml_factor_context", "")
         payload = (
-            "\n\n[系统注入] 以下数据来自本平台量化模型(LY)和AI分析(ML)系统，"
-            "权威性高于原始行情数据。请首先参考以下预加载数据进行判断:\n\n"
+            "\n\n[系统注入] 以下数据来自本平台AI分析(ML)系统，"
+            "请参考以下预加载数据进行判断:\n\n"
         )
-        if ly_md:
-            payload += f"--- LY 量化信号 ---\n{ly_md}\n\n"
         if ml_factor_md:
             payload += f"--- ML 因子信号 ---\n{ml_factor_md}\n\n"
         payload += (
