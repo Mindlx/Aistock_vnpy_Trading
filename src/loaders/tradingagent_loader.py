@@ -259,22 +259,41 @@ class TradingAgentDataLoader:
     def load_all_by_date(self, date_str: str) -> Dict[str, Dict[str, Any]]:
         """
         扫描 logs/ 下所有股票目录，读取指定日期的决策。
+        后备: 读取 ta_signals_*.json 合并文件。
 
         返回:
             {stock_code: {"rating": str, ...}, ...}
         """
         results: Dict[str, Dict[str, Any]] = {}
-        if not self.logs_dir.exists():
-            logger.warning(f"TradingAgent 日志目录不存在: {self.logs_dir}")
-            return results
 
-        for ticker_dir in sorted(self.logs_dir.iterdir()):
-            if not ticker_dir.is_dir() or ticker_dir.name.startswith("."):
-                continue
-            ticker = ticker_dir.name
-            decision = self.load_by_stock_and_date(ticker, date_str)
-            if decision:
-                results[ticker] = decision
+        # 优先: 从 ta_logs 目录读取逐股票日志
+        if self.logs_dir.exists():
+            for ticker_dir in sorted(self.logs_dir.iterdir()):
+                if not ticker_dir.is_dir() or ticker_dir.name.startswith("."):
+                    continue
+                ticker = ticker_dir.name
+                decision = self.load_by_stock_and_date(ticker, date_str)
+                if decision:
+                    results[ticker] = decision
 
-        logger.info(f"TradingAgent: 扫描到 {len(results)} 只股票")
+        # 后备: 从 ta_signals_*.json 合并文件读取
+        if not results:
+            ta_file = Path(f"data/tradingagent/ta_signals_{date_str.replace('-', '')}.json")
+            if ta_file.exists():
+                try:
+                    with open(ta_file) as f:
+                        data = json.load(f)
+                    for r in data.get("results", []):
+                        code = r.get("code", "")
+                        rating = r.get("rating", "Hold")
+                        if code:
+                            results[code.upper()] = {
+                                "rating": rating,
+                                "source": "ta_signals_consolidated",
+                            }
+                    logger.info(f"TradingAgent: 从 {ta_file.name} 加载 {len(results)} 只股票")
+                except Exception as e:
+                    logger.warning(f"TradingAgent: 读取 {ta_file} 失败: {e}")
+
+        logger.info(f"TradingAgent: 共 {len(results)} 只股票")
         return results
