@@ -1479,12 +1479,7 @@ def _run_schedule_mode(config, args, stock_codes):
             logger.exception("周末情报失败: %s", e)
     additional_weekly.append({"task": _sched_weekend_intel, "time": "20:00", "day": "sunday", "name": "周末情报"})
 
-    def _sched_weekend_refresh():
-        try:
-            _run_weekend_intel(_reload_runtime_config(), is_refresh=True, no_push=False)
-        except Exception as e:
-            logger.exception("周末情报补量失败: %s", e)
-    additional_weekly.append({"task": _sched_weekend_refresh, "time": "07:30", "day": "monday", "name": "周末情报补量"})
+    # 周一07:30补量已取消 (电脑未开机 + 与09:00每日要闻重复, 2026-07-22)
 
     run_with_schedule(task=scheduled_task, schedule_time=config.schedule_time,
                       run_immediately=should_run_immediately, background_tasks=background_tasks,
