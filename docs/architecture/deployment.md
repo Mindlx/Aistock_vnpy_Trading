@@ -49,37 +49,67 @@ cat systems/MindLynx-Aistock/.env
 ### 部署命令
 
 ```bash
+# 同步所有配置 + 启用新 timer
 bash scripts/deploy-systemd.sh
+
+# 如需同时重启常驻 daemon（配置变更后建议）
+bash scripts/deploy-systemd.sh --restart-daemons
 ```
+
+⚠️ **重要经验**：修改 `config/systemd/` 后必须运行此脚本，否则 systemd 仍用旧配置运行。
+2026-07-22 审计发现此前多次配置更新均未部署，导致定时器时间错位、部分服务未启动。
 
 ### 服务总览
 
-| Service | 类型 | 运行内容 | 触发方式 |
-|---------|------|---------|---------|
-| `Aistock_vnpy_Trading-monitor.service` | `simple` | MindLynx 盘中实时监控 | 手动启动，daemon |
-| `Aistock_vnpy_Trading-scheduler.service` | `simple` | MindLynx 定时分析调度 | 手动启动，daemon |
-| `Aistock_vnpy_Trading-ml-factor.service` | `simple` | 因子层实时计算（每5分钟） | 手动启动，daemon |
-| `Aistock_vnpy_Trading-realtime-fusion.service` | `simple` | 准实时融合（文件交换驱动） | 手动启动，daemon |
-| `Aistock_vnpy_Trading-lynx-signal.service` | `oneshot` | lynx 量化信号推送 | timer → 工作日 15:15 |
-| `Aistock_vnpy_Trading-fusion.service` | `oneshot` | 融合引擎日终分析（含TA） | timer → 工作日 18:00 |
-| `Aistock_vnpy_Trading-TA.service` | `oneshot` | TradingAgent 深度论证 | timer → 工作日 10:10/13:30 |
+#### 常驻 Daemon（持续运行）
+
+| Service | 运行内容 | 自动重启 |
+|---------|---------|:--------:|
+| `Aistock_vnpy_Trading-monitor.service` | MindLynx 盘中实时监控（Phase 1-3） | `always` |
+| `Aistock_vnpy_Trading-scheduler.service` | MindLynx 定时分析调度（情报/整点/复盘） | `always` |
+| `Aistock_vnpy_Trading-ml-factor.service` | ML 12 因子实时计算（每 300s） | `always` |
+| `Aistock_vnpy_Trading-alpha158.service` | Alpha158 58 因子实时计算（每 300s） | `always` |
+| `Aistock_vnpy_Trading-realtime-fusion.service` | 准实时融合（扫描文件交换区，每 300s） | `always` |
+| `Aistock_vnpy_Trading-data-warehouse.service` | 数据仓库调度器（自动刷新 16 类数据） | `on-failure` |
+| `Aistock_vnpy_Trading-webui.service` | ML WebUI 前端 (port 8000) | `always` |
+
+#### Timer 触发（oneshot）
+
+| Service | 触发时间 | 说明 |
+|---------|---------|------|
+| `fusion.timer` | 工作日 **18:00** | 日终融合决策 + 推送 |
+| `fusion-eval.timer` | 工作日 **12:12 / 14:41** | 日间融合评估（只记回测，不推送） |
+| `realtime-fusion.timer` | 工作日 **10:43** | 准实时融合 daemon 启动（等 AT+ML 数据就绪） |
+| `TA.timer` | 工作日 **10:10 / 13:30** | TradingAgent 辩论（积累行情数据后） |
+| `eastmoney-rating.timer` | 工作日 **10:53 / 13:53** | 东方财富评级（对齐 ML 整点分析） |
+| `eastmoney-rating-pdf.timer` | 工作日 **18:00** | 评级 PDF 推送（60s 延时避让融合） |
+| `lynx-signal.timer` | 工作日 **15:15** | LY 量化信号推送（收盘后） |
+| `retrain-lgb.timer` | 工作日 **15:20** | LGB + RF 模型自动重训 |
+| `warehouse-warmup.timer` | **08:30 / 09:20 / 10:50 / 12:55 / 13:50** | 数据仓库分阶段预热 |
+| `alpha158.timer` | 工作日 **09:33** | Alpha158 daemon 启动 |
+| `c1test-daily.timer` | 每日 **20:00** | c1test 统一回测 |
+| `calibrate-alphas.timer` | 每日 **12:30** | 因子校准 |
+| `diagnose-agreement.timer` | 每日 **20:30** | 融合分歧诊断 |
+| `trace-collect.timer` | 每 **10 分钟** | 运行时追踪收集 |
+| `eastmoney-calibrate.timer` | 每月 **1 日 10:00** | 东方财富评级校准 |
+| `lynx-backtest.timer` | 周日 **10:00** | LY 周度回测 |
+| `c1test-weekly.timer` | 周日 **10:30** | c1test 全量回测 |
+| `ic-monitor.timer` | 周五 **19:30** | IC 监控 |
 
 ### 启用全部服务
 
 ```bash
-# 1. 同步配置
+# 1. 同步配置 + 启用所有 timer
 bash scripts/deploy-systemd.sh
 
-# 2. 启动 daemon（一次启动，之后自动重启）
+# 2. 启动常驻 daemon
 systemctl --user start Aistock_vnpy_Trading-monitor.service
 systemctl --user start Aistock_vnpy_Trading-scheduler.service
 systemctl --user start Aistock_vnpy_Trading-ml-factor.service
+systemctl --user start Aistock_vnpy_Trading-alpha158.service
 systemctl --user start Aistock_vnpy_Trading-realtime-fusion.service
-
-# 3. 启用定时器（周一至周五自动触发）
-systemctl --user enable --now Aistock_vnpy_Trading-fusion.timer
-systemctl --user enable --now Aistock_vnpy_Trading-TA.timer
-systemctl --user enable --now Aistock_vnpy_Trading-lynx-signal.timer
+systemctl --user start Aistock_vnpy_Trading-data-warehouse.service
+systemctl --user start Aistock_vnpy_Trading-webui.service
 ```
 
 ### 查看状态
@@ -112,31 +142,36 @@ tail -f config/logs/realtime-fusion.log    # 实时融合日志
 ## 交易日自动运行流程
 
 ```
-08:30  warehouse-warmup.timer → 数据仓库预热（日K线）
-09:20  warehouse-warmup.timer → 数据仓库预热（AT用数据）
-10:10  TA.timer    → TA 分析（积累40min行情数据后辩论）
-10:43  realtime-fusion.service → 准实时融合 daemon 启动
-10:50  warehouse-warmup.timer → 数据仓库预热（ML用数据）
-11:00  ML 整点分析
-12:55  warehouse-warmup.timer → 数据仓库预热（AT用数据）
-13:30  TA.timer    → TA 分析（午盘）
-13:50  warehouse-warmup.timer → 数据仓库预热（ML用数据）
-14:00  ML 整点分析
-15:15  LY 信号
-19:00  日终融合
-21:00  warehouse-warmup.timer → 仓库全量预热（含美股/指数）
-15:15  lynx-signal → ly RF 量化信号推送 + 写 ly_signal.json
-15:00~ scheduler   → ML 整点分析（含因子计算）
-       realtime    → 实时融合 300s 扫描 exchange area（有变化才推）
-19:00  fusion      → TA（含收盘全量数据）+ 融合 → 终版推送 ★
+08:30  warehouse-warmup → 数据仓库预热（日K线）
+09:00  scheduler → 每日情报盘前搜集 + 推送
+09:20  warehouse-warmup → 数据仓库预热
+09:33  alpha158 daemon 启动
+10:10  TA 辩论（早盘） ← 积累 40min 行情数据
+10:43  realtime-fusion daemon 启动（之后每 5min 扫描）
+10:50  warehouse-warmup → 数据仓库预热
+10:53  eastmoney-rating（对齐 11:00 ML 整点）
+11:00  ML 整点分析（早盘）
+12:12  fusion-eval（日间融合评估）
+12:55  warehouse-warmup → 数据仓库预热
+13:30  TA 辩论（午盘）
+13:50  warehouse-warmup → 数据仓库预热
+13:53  eastmoney-rating（对齐 14:00 ML 整点）
+14:00  ML 整点分析（午盘）
+14:41  fusion-eval（日间融合评估）
+15:15  lynx-signal → LY 量化信号推送 + 写 ly_signal.json
+15:20  retrain-lgb → LGB + RF 模型重训
+18:00  fusion → 日终融合决策 + 推送 ★
+18:00  eastmoney-rating-pdf → 东方财富评级PDF推送（60s 延时）
+18:18  ML scheduler → 日终整点分析（原 23:59 从未执行）
 ```
 
 融合系统关键依赖：
 
 ```
-ly: 昨日收盘后即可生成（RF 模型不需要当天数据）
-ml: 15:00 收盘后生成完整报告
-at: TA 19:00 内部自跑（使用当日 ly+ml 数据）
+ly:   昨日收盘后即可生成（RF 模型不需要当天数据）
+ml:   因子数据 08:40 就绪，LLM 整点分析 11:00/14:00/收盘后
+at:   10:10/13:30 各跑一轮辩论
+融合: 18:00 终版（所有数据就绪）
 ```
 
 ## 配置管理
@@ -144,9 +179,34 @@ at: TA 19:00 内部自跑（使用当日 ly+ml 数据）
 修改 systemd 配置后：
 
 ```bash
-vim config/systemd/Aistock_vnpy_Trading-*.service   # 改配置
-bash scripts/deploy-systemd.sh                       # 同步到 systemd
-systemctl --user restart xxx.service                 # 生效
+vim config/systemd/xxx.service                       # 改配置
+bash scripts/deploy-systemd.sh                       # 同步到 systemd + 启用新 timer
+systemctl --user restart xxx.service                 # 重启生效
+```
+
+⚠️ **2026-07-22 审计发现**：此前多次 `config/systemd/` 修改从未真正部署到 systemd，
+导致定时器时间错位（TA/fusion/eastmoney-rating 等）、部分服务未安装（融合评估/仓库预热/c1test回测）。
+修改后必须运行 `bash scripts/deploy-systemd.sh` 才能生效。
+
+验证命令：
+
+```bash
+# 检查所有 timer 时间是否与 config/ 一致
+for f in config/systemd/*.timer; do
+  base=$(basename "$f")
+  echo "--- $base ---"
+  echo "config:    $(grep OnCalendar $f)"
+  echo "installed: $(systemctl --user show $base -p OnCalendar --value 2>/dev/null)"
+done
+
+# 检查所有 timer 是否已启用
+systemctl --user list-timers --no-pager | grep -E 'Aistock|aistock|c1test'
+```
+
+常驻 daemon 配置变更后需重启：
+
+```bash
+bash scripts/deploy-systemd.sh --restart-daemons
 ```
 
 ## 运行方式
