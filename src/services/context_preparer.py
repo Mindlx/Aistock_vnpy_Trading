@@ -22,6 +22,9 @@ class ContextPreparer:
         self._sl = signal_loader or SignalLoader()
 
     def prepare_all(self, stock_code: str) -> Dict[str, str]:
+        # LY 信号已暂停 (2026-07-22: 准确率49.8%)
+        # 恢复: 取消注释下两行, build_injection_payload 取消注释 LY 段
+        # ly_signals_md = self._sl.load_ly_signal(stock_code)
         ml_factor_md = self._sl.load_ml_factor(stock_code)
         market_md = self._prepare_market_context(stock_code)
         tech_md = self._prepare_technical_context(stock_code)
@@ -38,11 +41,16 @@ class ContextPreparer:
         }
 
     def build_injection_payload(self, context: Dict[str, str]) -> str:
+        # LY 段已移除 (2026-07-22)
+        # 恢复: 取消注释下行 + 下方 f"--- LY 量化信号 ---\n{ly_md}\n\n"
+        # ly_md = context.get("ly_signals_context", "")
         ml_factor_md = context.get("ml_factor_context", "")
         payload = (
-            "\n\n[系统注入] 以下数据来自本平台AI分析(ML)系统，"
+            "\n\n[系统注入] 以下数据来自本平台分析系统，"
             "请参考以下预加载数据进行判断:\n\n"
         )
+        # if ly_md:
+        #     payload += f"--- LY 量化信号 ---\n{ly_md}\n\n"
         if ml_factor_md:
             payload += f"--- ML 因子信号 ---\n{ml_factor_md}\n\n"
         payload += (

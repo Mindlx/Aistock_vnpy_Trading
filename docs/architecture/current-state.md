@@ -166,6 +166,11 @@ DIRECTION_THRESHOLD 同步从 0 调至 0.05, 过滤 ML 最弱 16% 信号, 融合
 2. ML 0.55→0.65, AT 0.30→0.35: LY 移出后按比例重分配。
 3. DIRECTION_THRESHOLD 0→0.05: 排除 16% 弱信号, 配合 LY 移除产生协同效应。
 4. LY 退出分歧检测: 分歧时 LY 仅 22.7%, 以低精度压制 ML 77.3%, 弊大于利。
+5. LY 信号注入 AT/ML 提示词已停止 (2026-07-22): LY 独立准确率 49.8%(回测) 接近随机,
+   注入 prompt 只会误导 LLM 判断。AT 的 `context_preparer.py` 移除 LY 段,
+   ML 的 `pipeline.py` LY 加载+注入均已注释。
+   **如需恢复**: `pipeline.py` 取消注释 `_load_ly_signals` + `enhanced["ly_signal"]`;
+   `context_preparer.py` 恢复 `ly_signals_md` 加载和 payload 拼接。
 
 fusion_mode: "dual"（同时输出linear+bayesian，CSV暴露linear层字段）
 
