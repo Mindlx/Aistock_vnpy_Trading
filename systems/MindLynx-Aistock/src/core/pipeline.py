@@ -836,7 +836,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 if rows:
                     lines = ["## 📰 近日要闻 (Daily Intel)"]
                     for r in rows:
-                        lines.append(f"{get_importance_emoji(r[2])} [{r[3] or ''}] {r[0][:60]} — {r[1][:80]}")
+                        lines.append(f"{get_importance_emoji(r[2])} [{r[3] or ''}] {r[0][:60]} — {r[1][:200]}")
                     lines.append("> 以上要闻基于最近24小时搜集，仅供参考。")
                     enhanced["daily_intel_context"] = "\n".join(lines)
         except Exception:
@@ -1306,7 +1306,7 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
                 if rows:
                     lines = ["## 📰 近日要闻 (Daily Intel)"]
                     for r in rows:
-                        lines.append(f"{get_importance_emoji(r[2])} [{r[3] or ''}] {r[0][:60]} — {r[1][:80]}")
+                        lines.append(f"{get_importance_emoji(r[2])} [{r[3] or ''}] {r[0][:60]} — {r[1][:200]}")
                     lines.append("> 以上要闻基于最近24小时搜集，仅供参考。")
                     di = "\n".join(lines)
                     ctx["news_context"] = di + ("\n\n" + ctx.get("news_context", "") if ctx.get("news_context") else "")
