@@ -505,8 +505,10 @@ def main():
         except Exception as e:
             print(f"  [回测] ⚠️ 异常: {e}")
 
-    # 企业微信推送
-    if not args.dry_run and not args.fusion_only and config.get("wecom", {}).get("enabled", False):
+    # 企业微信推送（仅日终 18:00 推送，--run-ta/--fusion-only 不推免重复）
+    if args.run_ta:
+        print("  ⏭ TA 模式跳过推送（仅写入信号文件，由 18:00 日终融合统一推送）")
+    elif not args.dry_run and not args.fusion_only and config.get("wecom", {}).get("enabled", False):
         # 优先读取环境变量（项目根 .env），兼容旧版 yaml 配置
         wecom_webhook = os.getenv("WECOM_WEBHOOK_URL") or config["wecom"].get("webhook_url", "")
         if wecom_webhook and wecom_webhook != "YOUR_KEY_HERE":
@@ -532,7 +534,7 @@ def main():
             notifier.push_daily_decision(results, today, extra_sections=extra_sections or None)
 
             # ── 东方财富评级 PDF 报告（独立推送，延迟 60s 避免与融合决策同时涌入）──
-            # 仅在 19:00 fusion 时推送，--run-ta (09:31/13:00) 不推送免重复
+            # (主推送已被上层 not args.run_ta 拦截，此仅做双重保险)
             if not args.run_ta and fc.get("xueqiu", {}).get("enabled") and not args.dry_run:
                 time.sleep(60)
                 _root = Path(__file__).resolve().parent.parent
