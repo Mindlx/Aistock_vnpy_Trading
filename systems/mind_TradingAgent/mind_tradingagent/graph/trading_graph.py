@@ -383,7 +383,11 @@ class TradingAgentsGraph:
         self.ticker = company_name
 
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
-        self._resolve_pending_entries(company_name)
+        # ── 防御: 历史结算失败不阻断当前分析 ──
+        try:
+            self._resolve_pending_entries(company_name)
+        except Exception as _e:
+            logger.warning("Pending entry resolution failed for %s: %s (continuing)", company_name, _e)
 
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):

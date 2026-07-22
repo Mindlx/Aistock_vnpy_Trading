@@ -79,7 +79,7 @@ bash scripts/deploy-systemd.sh --restart-daemons
 |---------|---------|------|
 | `fusion.timer` | 工作日 **18:00** | 日终融合决策 + 推送 |
 | `fusion-eval.timer` | 工作日 **12:12 / 14:41** | 日间融合评估（只记回测，不推送） |
-| `realtime-fusion.timer` | 工作日 **10:43** | 准实时融合 daemon 启动（等 AT+ML 数据就绪） |
+| `realtime-fusion.timer` | 工作日 **09:33** | 准实时融合 daemon 启动（开盘即扫描） |
 | `TA.timer` | 工作日 **10:10 / 13:30** | TradingAgent 辩论（积累行情数据后） |
 | `eastmoney-rating.timer` | 工作日 **10:53 / 13:53** | 东方财富评级（对齐 ML 整点分析） |
 | `eastmoney-rating-pdf.timer` | 工作日 **18:00** | 评级 PDF 推送（60s 延时避让融合） |
@@ -147,7 +147,7 @@ tail -f config/logs/realtime-fusion.log    # 实时融合日志
 09:20  warehouse-warmup → 数据仓库预热
 09:33  alpha158 daemon 启动
 10:10  TA 辩论（早盘） ← 积累 40min 行情数据
-10:43  realtime-fusion daemon 启动（之后每 5min 扫描）
+09:33  realtime-fusion daemon 启动（之后每 5min 扫描）
 10:50  warehouse-warmup → 数据仓库预热
 10:53  eastmoney-rating（对齐 11:00 ML 整点）
 11:00  ML 整点分析（早盘）

@@ -33,7 +33,7 @@
 ├─────────────────────────────────────────────────────────┤
 │                  🔗  融合决策层                          │
 │  日终融合 (fusion_engine.py, 18:00 oneshot)             │
-│  准实时融合 (realtime_fusion.py, 10:43+每5min)          │
+│  准实时融合 (realtime_fusion.py, 09:33+每5min)          │
 │  分歧检测 / 贝叶斯融合 / L7决策映射                     │
 ├─────────────────────────────────────────────────────────┤
 │                 📢  推送通知层                           │
@@ -101,7 +101,7 @@ run_daily.py → data_loader (零侵入读取三系统) → fusion_engine.py →
 - 分歧检测: 三系统方向不一致时标记 (`has_disagreement`)，分歧时 ML 准确率从 37.9%→51.0%
 - 分歧增强: ML为少数方时自适应提升融合得分 (+0~0.3), 非一刀切惩罚 (ccc8ed0)
 
-### 4.2 准实时融合 (10:43+ 每5min daemon)
+### 4.2 准实时融合 (09:33+ 每5min daemon)
 
 ```
 realtime_fusion.py → data/realtime/ 文件交换区 → wecom_notifier.py

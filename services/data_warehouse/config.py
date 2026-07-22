@@ -53,6 +53,7 @@ class DataWarehouseConfig:
         "tencent":   RateLimitConfig(max_tokens=120,refill_rate=120/60, base_delay=0.5),
         "cninfo":    RateLimitConfig(max_tokens=30, refill_rate=30/60,  base_delay=1.0),
         "tushare":   RateLimitConfig(max_tokens=50, refill_rate=50/60,  base_delay=1.0),
+        "yfinance":  RateLimitConfig(max_tokens=30, refill_rate=30/60,  base_delay=2.0),
     })
 
     # ── 数据类型刷新策略 ──

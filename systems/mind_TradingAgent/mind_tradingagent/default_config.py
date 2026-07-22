@@ -102,8 +102,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Internal agent debate stays in English for reasoning quality
     "output_language": "Chinese",
     # Debate and discussion settings
-    "max_debate_rounds": 2,
-    "max_risk_discuss_rounds": 2,
+    "max_debate_rounds": 1,
+    "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;

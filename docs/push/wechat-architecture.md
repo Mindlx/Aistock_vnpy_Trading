@@ -36,7 +36,7 @@
 |---|-----------|---------|----------------------|---------|
 | 1 | `Aistock_vnpy_Trading-fusion.timer` | Mon-Fri 18:00 | `run_daily.py` | 融合决策 + 龙虎榜 + 东方财富评级 PDF |
 | 2 | ~~`Aistock_vnpy_Trading-lynx-signal.timer`~~ | ~~Mon-Fri 15:15~~ | ~~`lynx_signal.py`~~ | ~~LY 量化信号~~ **(2026-07-08 已禁用，准确率提升后恢复)** |
-| 3 | `Aistock_vnpy_Trading-realtime-fusion.timer` | Mon-Fri 10:43 | `realtime_fusion.py --daemon` | 准实时融合(5分钟扫描) |
+| 3 | `Aistock_vnpy_Trading-realtime-fusion.timer` | Mon-Fri 09:33 | `realtime_fusion.py --daemon` | 准实时融合(5分钟扫描) |
 
 ### 2.2 MindLynx 引擎 systemd 常驻服务（内部调度）
 
@@ -46,8 +46,6 @@
 | | | | | `10:00/11:00/14:00/15:00` 整点全量分析 | 个股分析 |
 | | | | | `11:45/15:45` 大盘复盘 | 大盘复盘 PDF |
 | | | | | `Sun 20:00` 周末情报 | 周末要闻 |
-| | | | | `Mon 07:30` 周末情报补量 | 周末要闻 |
-| 5 | `Aistock_vnpy_Trading-monitor.service` | `Type=simple` 常驻 | `main.py --realtime-monitor-daemon` | 交易时段实时监控 | 盘中异动告警 |
 
 ### 2.3 其他 systemd 定时器
 
