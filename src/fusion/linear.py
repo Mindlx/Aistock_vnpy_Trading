@@ -49,8 +49,8 @@ class LinearFusionStrategy:
 
         if not mindlynx_valid:
             if ml_factor_l7 is not None and ml_factor_valid:
-                mindlynx_normalized = float(ml_factor_l7) * 0.9
-                self.logger.info(f"[{stock_code}] ML因子降级: ml_factor_l7={ml_factor_l7:.2f} → {mindlynx_normalized:.2f}")
+                mindlynx_normalized = float(ml_factor_l7)
+                self.logger.info(f"[{stock_code}] ML因子降级: ml_factor_l7={ml_factor_l7:.2f}")
             else:
                 mindlynx_normalized = 0.0
         else:
