@@ -132,33 +132,17 @@ class WeComNotifier:
         name = r.get('stock_name', '')
         price = r.get('price', 0)
         pct = r.get('pct_chg', 0)
-        vr = r.get('volume_ratio', 0)
-        ma5 = r.get('ma5', 0)
-        ma10 = r.get('ma10', 0)
-        ma20 = r.get('ma20', 0)
         ls = r.get("lynx_score", 0)
         ms = r.get("mindlynx_score", 0)
         ts = r.get("tradingagent_score", 0)
-        # v4.0: 优先用 unified_position，否则从信号标签计算百分比
-        up = r.get('unified_position')
-        if up and isinstance(up, dict) and up.get('pct', 0) > 0:
-            pos = f"{up['pct']:.0f}%"
-        else:
-            sig_label = r.get('signal', 'neutral')
-            pct_target = SignalNormalizer.l7_target_pct(sig_label)
-            pos = f"{pct_target:.0f}%" if pct_target > 0 else "持有"
 
-        # 股价和涨跌幅
         price_str = f"¥{price:.2f}" if price else "-"
         chg_str = f"{pct:+.2f}%" if pct is not None else "-"
-
-        # 三系统得分
         sys_str = f"ly{ls:+.2f} ml{ms:+.2f} at{ts:+.2f}"
 
         return (
             f"**{name}**{price_str} {chg_str}"
             f"｜{sys_str}"
-            f"｜{pos}"
         )
 
     def format_daily_summary(self, results: List[Dict[str, Any]]) -> str:

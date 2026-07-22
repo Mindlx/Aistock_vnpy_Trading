@@ -249,7 +249,6 @@ class RealtimeFusion:
             name = self._stock_names.get(c['code'], c['code'])
             signal_display = c.get('signal_name', c['signal'])
             score = c['score']
-            position = c.get('position', '')
             emoji = L7_EMOJI.get(c['signal'], "⚪")
             price = c.get('price', 0)
             pct = c.get('pct_chg', 0)
@@ -258,7 +257,7 @@ class RealtimeFusion:
             chg_str = f"{pct:+.2f}%" if pct else ""
             vr_str = f"量比{vr:.2f}" if vr else ""
             extras = ' '.join(x for x in [price_str, chg_str, vr_str] if x)
-            line = f"{emoji} **{name}**｜{extras} {signal_display} Δ{score:+.2f}"
+            line = f"{emoji} **{name}**{extras} Δ{score:+.2f}｜{signal_display}"
             lines.append(line)
         self.notifier.send_markdown("\n".join(lines))
 
