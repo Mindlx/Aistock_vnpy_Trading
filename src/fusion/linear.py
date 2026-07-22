@@ -35,6 +35,8 @@ class LinearFusionStrategy:
         ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
         alpha158_l7: Optional[float] = None,
+        ml_factor_l7: Optional[float] = None,
+        ml_factor_valid: bool = False,
     ) -> Dict[str, Any]:
         lynx_normalized, lynx_valid = self.normalizer.normalize_lynx(
             lynx_prob_up
@@ -46,7 +48,11 @@ class LinearFusionStrategy:
             self.logger.info(f"[{stock_code}] alpha158增强ly: a158={float(alpha158_l7):.2f} ly→{lynx_normalized:.2f}")
 
         if not mindlynx_valid:
-            mindlynx_normalized = 0.0
+            if ml_factor_l7 is not None and ml_factor_valid:
+                mindlynx_normalized = float(ml_factor_l7) * 0.9
+                self.logger.info(f"[{stock_code}] ML因子降级: ml_factor_l7={ml_factor_l7:.2f} → {mindlynx_normalized:.2f}")
+            else:
+                mindlynx_normalized = 0.0
         else:
             mindlynx_normalized = self.normalizer.normalize_mindlynx_score(
                 mindlynx_score,

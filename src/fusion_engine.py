@@ -152,6 +152,8 @@ class FusionEngine:
         ta_is_stale: bool = False,
         ta_debate_state: Optional[Dict[str, Any]] = None,
         alpha158_l7: Optional[float] = None,
+        ml_factor_l7: Optional[float] = None,
+        ml_factor_valid: bool = False,
     ) -> Dict[str, Any]:
         """
         对单只股票进行融合分析。
@@ -163,6 +165,7 @@ class FusionEngine:
 
         mindlynx_valid/tradingagent_valid: 数据是否真实可用（来自 data_loader）
         ta_debate_state: 来自 data_loader._parse_debate_state()，贝叶斯模式使用
+        ml_factor_l7: LLM分析未就绪时的12因子降级信号
         """
         # 模式分发
         if self.fusion_mode == self.MODE_BAYESIAN:
@@ -190,6 +193,8 @@ class FusionEngine:
                 ta_is_stale=ta_is_stale,
                 ta_debate_state=ta_debate_state,
                 alpha158_l7=alpha158_l7,
+                ml_factor_l7=ml_factor_l7,
+                ml_factor_valid=ml_factor_valid,
             )
             bayesian_result = self._fuse_bayesian(
                 stock_code=stock_code, stock_name=stock_name,
@@ -237,6 +242,8 @@ class FusionEngine:
             ta_is_stale=ta_is_stale,
             ta_debate_state=ta_debate_state,
             alpha158_l7=alpha158_l7,
+            ml_factor_l7=ml_factor_l7,
+            ml_factor_valid=ml_factor_valid,
         )
 
     # ──────── 原始线性融合逻辑（重命名自 fuse_single_stock） ────────
@@ -277,6 +284,8 @@ class FusionEngine:
                 ta_is_stale=ta_is_stale,
                 ta_debate_state=item.get("ta_debate_state", {}),
                 alpha158_l7=item.get("alpha158_l7"),
+                ml_factor_l7=item.get("ml_factor_l7"),
+                ml_factor_valid=item.get("ml_factor_valid", False),
             )
             # 补充行情数据和子系统原始数据（从输入透传到结果）
             for k in ("price", "pct_chg", "volume_ratio", "ma5", "ma10", "ma20",
