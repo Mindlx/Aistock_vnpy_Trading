@@ -117,13 +117,11 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 
 ```
 09:00 ─ scheduler ─── 日间情报(盘前)推送
-10:00 ─ scheduler ─── 整点全量分析
 11:00 ─ scheduler ─── 整点全量分析
 11:45 ─ scheduler ─── 大盘复盘(文字+PDF)
 12:30 ─ calibrate-alphas.timer ── 🆕 Alpha权重自动校准
 13:00 ─ TA.timer ──── 第二轮TA深度分析
 14:00 ─ scheduler ─── 整点全量分析
-15:00 ─ scheduler ─── 整点全量分析
 15:15 ─ lynx-signal ─ 量化信号建模+推送
 15:20 ─ retrain-lgb.timer ── 🆕 LGB 模型自动重训
 15:45 ─ scheduler ─── 大盘复盘(文字+PDF)

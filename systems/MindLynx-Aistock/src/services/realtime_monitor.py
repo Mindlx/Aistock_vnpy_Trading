@@ -1105,7 +1105,7 @@ class RealtimeMonitorService:
         # 重置状态
         self._states.clear()
         self._quotes.clear()
-        # 首次简报偏移，避开与整点分析(10:00/11:00/14:00/15:00)同时触发
+        # 首次简报偏移，避开与整点分析(11:00/14:00)同时触发
         # 早盘目标 09:37，午盘目标 13:07
         from src.core.trading_calendar import get_market_now as _get_mkt_now
         _mkt = _get_mkt_now("cn")

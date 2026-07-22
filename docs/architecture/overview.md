@@ -174,12 +174,10 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 09:00 ─ scheduler ─── 日间情报(盘前)推送
 10:10 ─ TA.timer ──── mind_TradingAgent 深度分析 (LLM, ~30min)
 09:33 ─ realtime-fusion.timer ─── 启动准实时 daemon (每300s扫描文件交换区)
-10:00 ─ scheduler ─── 整点全量分析
 11:00 ─ scheduler ─── 整点全量分析
 11:45 ─ scheduler ─── 大盘复盘 (文字摘要 + PDF)
 13:00 ─ TA.timer ──── 第二轮 TA 深度分析
 14:00 ─ scheduler ─── 整点全量分析
-15:00 ─ scheduler ─── 整点全量分析
 15:15 ─ lynx-signal.timer ── 量化信号建模 + 推送
 15:45 ─ scheduler ─── 大盘复盘 (文字摘要 + PDF)
 18:00 ─ fusion.timer ──── 日终融合 + 龙虎榜 + 东方财富评级PDF
