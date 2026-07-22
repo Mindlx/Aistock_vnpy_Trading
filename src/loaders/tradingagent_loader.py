@@ -258,15 +258,54 @@ class TradingAgentDataLoader:
 
     def load_all_by_date(self, date_str: str) -> Dict[str, Dict[str, Any]]:
         """
-        扫描 logs/ 下所有股票目录，读取指定日期的决策。
-        后备: 读取 ta_signals_*.json 合并文件。
+        读取 TA 评级结果。
+
+        优先从准实时文件交换区 (data/realtime/at_signal.json) 读取，
+        后备从 ta_signals_*.json 合并文件或 ta_logs/ 逐股票日志读取。
 
         返回:
             {stock_code: {"rating": str, ...}, ...}
         """
         results: Dict[str, Dict[str, Any]] = {}
 
-        # 优先: 从 ta_logs 目录读取逐股票日志
+        # 路径1: 准实时文件交换区 (--run-ta 写入, 实时融合也在用)
+        at_file = Path("data/realtime/at_signal.json")
+        if at_file.exists():
+            try:
+                with open(at_file) as f:
+                    data = json.load(f)
+                for code, info in data.get("stocks", {}).items():
+                    rating = info.get("rating", "Hold")
+                    results[code] = {
+                        "rating": rating,
+                        "source": "at_signal.json",
+                    }
+                if results:
+                    logger.info(f"TradingAgent: 从 at_signal.json 加载 {len(results)} 只股票")
+                    return results
+            except Exception as e:
+                logger.warning(f"TradingAgent: 读取 {at_file} 失败: {e}")
+
+        # 路径2: ta_signals_*.json 合并文件 (旧 --run-ta 输出)
+        ta_file = Path(f"data/tradingagent/ta_signals_{date_str.replace('-', '')}.json")
+        if ta_file.exists():
+            try:
+                with open(ta_file) as f:
+                    data = json.load(f)
+                for r in data.get("results", []):
+                    code = r.get("code", "")
+                    rating = r.get("rating", "Hold")
+                    if code:
+                        results[code.upper()] = {
+                            "rating": rating,
+                            "source": "ta_signals_consolidated",
+                        }
+                logger.info(f"TradingAgent: 从 {ta_file.name} 加载 {len(results)} 只股票")
+                return results
+            except Exception as e:
+                logger.warning(f"TradingAgent: 读取 {ta_file} 失败: {e}")
+
+        # 路径3: ta_logs/ 逐股票日志 (最旧路径, 6月18日起无更新)
         if self.logs_dir.exists():
             for ticker_dir in sorted(self.logs_dir.iterdir()):
                 if not ticker_dir.is_dir() or ticker_dir.name.startswith("."):
@@ -275,25 +314,8 @@ class TradingAgentDataLoader:
                 decision = self.load_by_stock_and_date(ticker, date_str)
                 if decision:
                     results[ticker] = decision
-
-        # 后备: 从 ta_signals_*.json 合并文件读取
-        if not results:
-            ta_file = Path(f"data/tradingagent/ta_signals_{date_str.replace('-', '')}.json")
-            if ta_file.exists():
-                try:
-                    with open(ta_file) as f:
-                        data = json.load(f)
-                    for r in data.get("results", []):
-                        code = r.get("code", "")
-                        rating = r.get("rating", "Hold")
-                        if code:
-                            results[code.upper()] = {
-                                "rating": rating,
-                                "source": "ta_signals_consolidated",
-                            }
-                    logger.info(f"TradingAgent: 从 {ta_file.name} 加载 {len(results)} 只股票")
-                except Exception as e:
-                    logger.warning(f"TradingAgent: 读取 {ta_file} 失败: {e}")
+            if results:
+                logger.info(f"TradingAgent: 从 ta_logs/ 加载 {len(results)} 只股票")
 
         logger.info(f"TradingAgent: 共 {len(results)} 只股票")
         return results
