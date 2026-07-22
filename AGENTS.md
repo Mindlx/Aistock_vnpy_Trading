@@ -33,6 +33,9 @@ python scripts/run_daily.py
 python scripts/diagnose_agreement.py
 
 # 部署 systemd 配置（修改 config/systemd/ 后必须执行）
+bash scripts/deploy-systemd.sh
+
+# 如需重启常驻 daemon（非交易时段，需用户确认）
 bash scripts/deploy-systemd.sh --restart-daemons
 
 # 验证 systemd 状态

@@ -10,6 +10,10 @@ USER_SYSD="${HOME}/.config/systemd/user"
 
 RESTART_DAEMONS=false
 if [ "${1:-}" = "--restart-daemons" ]; then
+    echo "⚠️  将重启所有常驻 daemon（scheduler/monitor/ml-factor/alpha158/realtime-fusion/data-warehouse）"
+    echo "   交易时段重启可能导致监控中断或分析任务中断。"
+    read -r -p "确认重启? [y/N] " reply
+    case "$reply" in [yY]|[yY][eE][sS]) ;; *) echo "已取消"; exit 0 ;; esac
     RESTART_DAEMONS=true
 fi
 
