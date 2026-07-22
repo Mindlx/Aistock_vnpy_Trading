@@ -31,6 +31,13 @@ python scripts/run_daily.py
 
 # 融合引擎诊断
 python scripts/diagnose_agreement.py
+
+# 部署 systemd 配置（修改 config/systemd/ 后必须执行）
+bash scripts/deploy-systemd.sh --restart-daemons
+
+# 验证 systemd 状态
+systemctl --user list-timers --no-pager | grep -E 'Aistock|aistock|c1test'
+systemctl --user list-units --all | grep 'Aistock_vnpy_Trading' | grep running
 ```
 
 ## 模型选择
