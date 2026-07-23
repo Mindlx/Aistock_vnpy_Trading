@@ -18,6 +18,17 @@ _ENV_OVERRIDES = {
     "MIND_TRADINGAGENT_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "MIND_TRADINGAGENT_BENCHMARK_TICKER":     "benchmark_ticker",
     "MIND_TRADINGAGENT_TEMPERATURE":          "temperature",
+    "TRADINGAGENTS_LLM_PROVIDER":         "llm_provider",
+    "TRADINGAGENTS_DEEP_THINK_LLM":       "deep_think_llm",
+    "TRADINGAGENTS_QUICK_THINK_LLM":      "quick_think_llm",
+    "TRADINGAGENTS_LLM_BACKEND_URL":      "backend_url",
+    "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
+    "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
+    "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
+    "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
+    "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
+    "TRADINGAGENTS_TEMPERATURE":          "temperature",
+    "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -95,12 +106,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # variation on models that honor it; reasoning models largely ignore it
     # and no setting makes LLM output bit-identical across runs (see README).
     "temperature": None,
+    # SDK retry budget forwarded to every provider chat client. None leaves each
+    # provider/SDK at its own default (usually 2). Raise it to ride out bursty
+    # 429 throttling on rate-limited deployments instead of aborting a run (#1091).
+    "llm_max_retries": None,
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.
     "checkpoint_enabled": False,
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality
-    "output_language": "Chinese",
+    "output_language": "English",
     # Debate and discussion settings
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
@@ -114,11 +129,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Search queries used by get_global_news for macro headlines. Extend or
     # replace to broaden geographic / sector coverage.
     "global_news_queries": [
-        "中国人民银行 PBOC monetary policy LPR loan prime rate RRR reserve requirement ratio",
-        "中国 CPI PPI inflation 国家统计局 economic data PMI GDP",
-        "A股 沪深300 上证指数 CSI 300 SSE Composite market trend north-bound capital 北向资金",
-        "证监会 CSRC regulatory policy IPO reform delisting rules margin trading",
-        "全国两会 国务院 发改委 NDRC fiscal stimulus industry policy China macro",
+        "Federal Reserve interest rates inflation",
+        "S&P 500 earnings GDP economic outlook",
+        "geopolitical risk trade war sanctions",
+        "ECB Bank of England BOJ central bank policy",
+        "oil commodities supply chain energy",
     ],
     # Data vendor configuration
     # Category-level configuration (default for all tools in category).
@@ -126,12 +141,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # routed to vendors you didn't choose. For ordered fallback, list several,
     # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
     "data_vendors": {
-        "core_stock_apis": "warehouse",        # Options: warehouse, yfinance, alpha_vantage
-        "technical_indicators": "warehouse",   # Options: warehouse, yfinance, alpha_vantage
-        "fundamental_data": "warehouse",       # Options: warehouse, yfinance, alpha_vantage
-        "news_data": "warehouse",              # Options: warehouse, yfinance, alpha_vantage
-        "macro_data": "warehouse",             # Options: warehouse, fred (needs FRED_API_KEY)
-        "prediction_markets": "warehouse",     # Options: warehouse, polymarket (keyless)
+        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
+        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
+        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
+        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
+        "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

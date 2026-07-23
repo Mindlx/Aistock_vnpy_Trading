@@ -16,6 +16,9 @@ from mind_tradingagent.agents.utils.agent_utils import (
     get_language_instruction,
 )
 from mind_tradingagent.agents.utils.structured import (
+    NO_EXTERNAL_TOOLS,
+from tradingagents.agents.utils.structured import (
+    NO_EXTERNAL_TOOLS,
     bind_structured,
     invoke_structured_or_freetext,
 )
@@ -61,7 +64,9 @@ def create_portfolio_manager(llm):
 
 ---
 
-Be decisive and ground every conclusion in specific evidence from the analysts.{get_language_instruction()}"""
+Be decisive and ground every conclusion in specific evidence from the analysts.
+
+{NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 
         final_trade_decision = invoke_structured_or_freetext(
             structured_llm,

@@ -3,21 +3,18 @@
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Send
 from langgraph.prebuilt import ToolNode
 
 from mind_tradingagent.agents import (
     create_aggressive_debator,
     create_bear_researcher,
     create_bull_researcher,
-    create_capital_flow_tracker,
     create_conservative_debator,
     create_fundamentals_analyst,
     create_market_analyst,
     create_msg_delete,
     create_neutral_debator,
     create_news_analyst,
-    create_policy_analyst,
     create_portfolio_manager,
     create_research_manager,
     create_sentiment_analyst,
@@ -27,6 +24,22 @@ from mind_tradingagent.agents.utils.agent_states import AgentState
 
 from .analyst_execution import build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
+
+# Every target a shared conditional router can return. Each edge driven by the
+# router maps all of them, so a fall-through return (e.g. under prompt/i18n/
+# refactor drift in the speaker labels) can never hit a missing path_map entry
+# and crash LangGraph mid-run (#1088).
+DEBATE_PATH_MAP = {
+    "Bull Researcher": "Bull Researcher",
+    "Bear Researcher": "Bear Researcher",
+    "Research Manager": "Research Manager",
+}
+RISK_ANALYSIS_PATH_MAP = {
+    "Aggressive Analyst": "Aggressive Analyst",
+    "Conservative Analyst": "Conservative Analyst",
+    "Neutral Analyst": "Neutral Analyst",
+    "Portfolio Manager": "Portfolio Manager",
+}
 
 
 class GraphSetup:
@@ -46,7 +59,7 @@ class GraphSetup:
         self.conditional_logic = conditional_logic
 
     def setup_graph(
-        self, selected_analysts=("market", "social", "news", "fundamentals", "policy", "capital_flow")
+        self, selected_analysts=("market", "social", "news", "fundamentals")
     ):
         """Set up and compile the agent workflow graph.
 
@@ -56,8 +69,6 @@ class GraphSetup:
                 - "social": Social media analyst
                 - "news": News analyst
                 - "fundamentals": Fundamentals analyst
-                - "policy": Policy analyst
-                - "capital_flow": Capital flow tracker
         """
         plan = build_analyst_execution_plan(selected_analysts)
 
@@ -66,8 +77,6 @@ class GraphSetup:
             "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
             "news": lambda: create_news_analyst(self.quick_thinking_llm),
             "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
-            "policy": lambda: create_policy_analyst(self.quick_thinking_llm),
-            "capital_flow": lambda: create_capital_flow_tracker(self.quick_thinking_llm),
         }
 
         # Create researcher and manager nodes
@@ -102,74 +111,45 @@ class GraphSetup:
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
         # Define edges
-        # Fan-out: all analysts run in parallel (no data dependency between them)
-        def _route_to_all_analysts(state):
-            return [Send(spec.agent_node, state) for spec in plan.specs]
+        # Start with the first analyst
+        workflow.add_edge(START, plan.specs[0].agent_node)
 
-        workflow.add_conditional_edges(START, _route_to_all_analysts, [spec.agent_node for spec in plan.specs])
+        # Connect analysts in sequence
+        for i, spec in enumerate(plan.specs):
+            current_analyst = spec.agent_node
+            current_tools = spec.tool_node
+            current_clear = spec.clear_node
 
-        # Each analyst: analyst → tool (optional) → analyst → clear
-        for spec in plan.specs:
+            # Add conditional edges for current analyst
             workflow.add_conditional_edges(
-                spec.agent_node,
+                current_analyst,
                 getattr(self.conditional_logic, f"should_continue_{spec.key}"),
-                [spec.tool_node, spec.clear_node],
+                [current_tools, current_clear],
             )
-            workflow.add_edge(spec.tool_node, spec.agent_node)
+            workflow.add_edge(current_tools, current_analyst)
 
-        # Fan-in: all analysts finish → aggregate → Bull Researcher
-        def _aggregate_analysts(state):
-            """Collect all analyst reports and pass to debate stage."""
-            return state
+            # Connect to next analyst or to Bull Researcher if this is the last analyst
+            if i < len(plan.specs) - 1:
+                workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
+            else:
+                workflow.add_edge(current_clear, "Bull Researcher")
 
-        workflow.add_node("aggregate_analysts", _aggregate_analysts)
-        for spec in plan.specs:
-            workflow.add_edge(spec.clear_node, "aggregate_analysts")
-        workflow.add_edge("aggregate_analysts", "Bull Researcher")
-
-        # Add remaining edges
-        workflow.add_conditional_edges(
-            "Bull Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bear Researcher": "Bear Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Bear Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bull Researcher": "Bull Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
+        # Both research-debate edges share the complete DEBATE_PATH_MAP (#1088).
+        for debate_node in ("Bull Researcher", "Bear Researcher"):
+            workflow.add_conditional_edges(
+                debate_node,
+                self.conditional_logic.should_continue_debate,
+                DEBATE_PATH_MAP,
+            )
         workflow.add_edge("Research Manager", "Trader")
         workflow.add_edge("Trader", "Aggressive Analyst")
-        workflow.add_conditional_edges(
-            "Aggressive Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Conservative Analyst": "Conservative Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Conservative Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Neutral Analyst": "Neutral Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Neutral Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Aggressive Analyst": "Aggressive Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
+        # All three risk edges share the complete RISK_ANALYSIS_PATH_MAP (#1088).
+        for risk_node in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
+            workflow.add_conditional_edges(
+                risk_node,
+                self.conditional_logic.should_continue_risk_analysis,
+                RISK_ANALYSIS_PATH_MAP,
+            )
 
         workflow.add_edge("Portfolio Manager", END)
 

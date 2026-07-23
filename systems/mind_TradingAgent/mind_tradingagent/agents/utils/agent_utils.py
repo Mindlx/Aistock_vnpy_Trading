@@ -26,7 +26,6 @@ from mind_tradingagent.agents.utils.market_data_validation_tools import (
     get_verified_market_snapshot,
 )
 from mind_tradingagent.agents.utils.news_data_tools import (
-    get_capital_flows,
     get_global_news,
     get_insider_transactions,
     get_news,
@@ -47,7 +46,6 @@ __all__ = [
     "get_news",
     "get_global_news",
     "get_insider_transactions",
-    "get_capital_flows",
     "get_macro_indicators",
     "get_prediction_markets",
     "get_verified_market_snapshot",
@@ -73,8 +71,8 @@ def get_language_instruction() -> str:
     from mind_tradingagent.dataflows.config import get_config
     lang = get_config().get("output_language", "English")
     if lang.strip().lower() == "english":
-        return "\nKeep your response under 400 words."
-    return f"\n请用中文回复，控制在800字以内。"
+        return ""
+    return f" Write your entire response in {lang}."
 
 
 def _clean_identity_value(value: Any) -> str | None:
@@ -91,46 +89,43 @@ def _clean_identity_value(value: Any) -> str | None:
 def resolve_instrument_identity(ticker: str) -> dict:
     """Resolve deterministic identity metadata (company name, sector, …) for a ticker.
 
-    Two-stage lookup:
-      1. A_SHARE_MARKET_MAP (local, zero-network) — returns Chinese name + exchange.
-      2. WarehouseReader fundamentals (cache-first) — returns industry, market cap, etc.
-      3. Fallback (any 6-digit code without suffix is treated as A-share).
-    Cacheable so the lookup happens at most once per ticker per process.
-    """
-    bare = ticker.replace(".SS", "").replace(".SZ", "").replace(".SH", "").strip()
+    This exists to stop the pipeline from hallucinating a *different* company
+    when a chart pattern suggests a different industry than the real one
+    (#814): without a ground-truth name, the market analyst would pattern-match
+    the price action to a narrative and invent an identity that then cascaded
+    through every downstream agent.
 
-    identity: dict[str, str] = {}
+    Best-effort by design: if yfinance is unavailable, rate-limited, or doesn't
+    recognise the ticker, we return ``{}`` and the caller falls back to
+    ticker-only context rather than failing before analysis starts. Cached so
+    the lookup happens at most once per ticker per process.
+
+    The symbol is normalized first (e.g. ``XAUUSD`` -> ``GC=F``) so identity
+    resolves for the same instrument the price path actually fetches (#983).
+    """
+    from mind_tradingagent.dataflows.symbol_utils import normalize_symbol
 
     try:
-        from src.mind_stock_config import A_SHARE_MARKET_MAP
-        if bare in A_SHARE_MARKET_MAP:
-            yf_ticker, market, cname = A_SHARE_MARKET_MAP[bare]
-            identity["company_name"] = cname
-            identity["exchange"] = "SH" if market == "SH" else "SZ"
-            identity["quote_type"] = "stock"
-    except (ImportError, Exception):
-        pass
+        info = yf.Ticker(normalize_symbol(ticker)).info or {}
+    except Exception as exc:  # noqa: BLE001 — fail open, never block the run
+        logger.debug("Could not resolve instrument identity for %s: %s", ticker, exc)
+        return {}
 
-    if "sector" not in identity or "industry" not in identity:
-        try:
-            from services.data_warehouse import WarehouseReader
-            reader = WarehouseReader()
-            fund = reader.get_fundamentals(bare)
-            if fund:
-                if "industry" in fund:
-                    identity["industry"] = str(fund["industry"])
-                if "sector" in fund:
-                    identity["sector"] = str(fund["sector"])
-                if not identity.get("company_name") and "company_name" in fund:
-                    identity["company_name"] = str(fund["company_name"])
-        except (ImportError, Exception):
-            pass
-
-    if not identity and len(bare) == 6 and bare.isdigit():
-        identity["company_name"] = bare
-        identity["exchange"] = "SH" if bare.startswith(("6", "5", "9")) else "SZ"
-        identity["quote_type"] = "stock"
-
+    identity: dict[str, str] = {}
+    company_name = _clean_identity_value(info.get("longName")) or _clean_identity_value(
+        info.get("shortName")
+    )
+    if company_name:
+        identity["company_name"] = company_name
+    for source_key, target_key in (
+        ("sector", "sector"),
+        ("industry", "industry"),
+        ("exchange", "exchange"),
+        ("quoteType", "quote_type"),
+    ):
+        value = _clean_identity_value(info.get(source_key))
+        if value:
+            identity[target_key] = value
     return identity
 
 
@@ -212,10 +207,10 @@ def create_msg_delete():
         instrument (#888). Anchoring it to the resolved instrument context and
         date keeps the next analyst on-task even if the provider treats the
         placeholder as a standalone request.
-
-        Note: replaces messages wholesale instead of using RemoveMessage
-        to avoid race conditions with parallel analyst execution.
         """
+        messages = state["messages"]
+        removal_operations = [RemoveMessage(id=m.id) for m in messages]
+
         instrument_context = get_instrument_context_from_state(state)
         trade_date = state.get("trade_date", "the requested date")
         placeholder = HumanMessage(
@@ -224,7 +219,7 @@ def create_msg_delete():
                 f"{instrument_context} The analysis date is {trade_date}."
             )
         )
-        return {"messages": [placeholder]}
+        return {"messages": removal_operations + [placeholder]}
 
     return delete_messages
 

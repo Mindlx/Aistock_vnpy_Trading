@@ -4,13 +4,6 @@ from langgraph.graph import MessagesState
 from typing_extensions import TypedDict
 
 
-def _last_value(a: str, b: str) -> str:
-    """Reducer: keep the last non-empty value (for parallel analyst reports)."""
-    if b and b != a:
-        return b
-    return a if a else (b or "")
-
-
 # Researcher team state
 class InvestDebateState(TypedDict):
     bull_history: Annotated[
@@ -59,13 +52,13 @@ class AgentState(MessagesState):
 
     sender: Annotated[str, "Agent that sent this message"]
 
-    # research step — parallel-safe reducers (last writer wins)
-    market_report: Annotated[str, _last_value]
-    sentiment_report: Annotated[str, _last_value]
-    news_report: Annotated[str, _last_value]
-    fundamentals_report: Annotated[str, _last_value]
-    policy_report: Annotated[str, _last_value]
-    capital_flow_report: Annotated[str, _last_value]
+    # research step
+    market_report: Annotated[str, "Report from the Market Analyst"]
+    sentiment_report: Annotated[str, "Report from the Sentiment Analyst"]
+    news_report: Annotated[
+        str, "Report from the News Researcher of current world affairs"
+    ]
+    fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
 
     # researcher team discussion step
     investment_debate_state: Annotated[
