@@ -1,6 +1,6 @@
 # 工具清单与适用场景
 
-> 最后更新：2026-06-26
+> 最后更新：2026-07-22
 
 ---
 
@@ -42,6 +42,8 @@
 | `scripts/backtest.py report` | 回测报告生成 | `scripts/backtest.py` |
 | `scripts/scan_calibration_assets.py` | 扫描 `@calibration` 标记 | `scripts/scan_calibration_assets.py` |
 | `scripts/verify_data_chains.py`（规划中） | 数据链完整性验证 | — |
+| `scripts/deploy-systemd.sh` | systemd 配置部署 + 重启 daemon | `scripts/deploy-systemd.sh` |
+| `systemctl --user list-timers` | 验证所有定时器状态 | 系统命令 |
 
 ---
 

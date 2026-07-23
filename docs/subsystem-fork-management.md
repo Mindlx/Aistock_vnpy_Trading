@@ -2,7 +2,7 @@
 
 > 用途：主项目对 LY/ML/AT 子系统的优化代码，同步回独立上游 fork 的操作手册。
 > 原则：凡是对子系统自身的代码优化，都可以（且应该）同步回 fork，保持上游可追踪。
-> 最后更新: 2026-07-21 (AT 时序已更新)
+> 最后更新: 2026-07-22
 
 ---
 
@@ -106,4 +106,5 @@ git push origin main
 1. fork 仓库的 `pre-commit` hook 依赖 venv，未激活时会失败。始终用 `--no-verify` 跳过
 2. `.env` 文件在 fork 仓库中被 gitignore，不提交
 3. 当前仅 **ML** 子系统有定制代码差异（见上方记录），LY 和 AT 无差异
+   - `src/mind_agent_wrapper.py` 等融合层代码的改动不属于子系统，不会同步
 4. 上游 sync（`sync_systems.sh`）后，需按高/中风险文件清单逐项检查并恢复

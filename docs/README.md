@@ -1,6 +1,6 @@
 # Aistock_vnpy_Trading 文档中心
 
-> 最后更新: 2026-07-21
+> 最后更新: 2026-07-22
 
 ## 📖 推荐阅读
 
@@ -27,12 +27,17 @@
 ```
 docs/
 ├── architecture/        系统架构与部署
+├── changelog/           变更日志(已归档)
 ├── data-chain/          数据链与仓库
+├── decisions/           架构决策(已归档)
+├── eastmoney/           东方财富分析
+├── goose-doc/           Goose 遗留文档
+├── llm/                 LLM 注入与路线图
 ├── push/                推送格式
 ├── subsystems/          子系统文档
-├── data-sources.md      数据源清单
+├── opencode-config.md   OpenCode 配置
+├── protected_files.txt  受保护文件清单
+├── subsystem-fork-management.md  子系统上游管理
 ├── tools-inventory.md   工具清单
-├── changelog/           变更日志(已归档)
-├── decisions/           架构决策(已归档)
 └── README.md            本文档
 ```
