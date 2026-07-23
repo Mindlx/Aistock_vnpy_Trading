@@ -286,6 +286,85 @@ def save_fusion_output(
     # ── 写入 ly_signal.json（准实时文件交换区） ──
     write_ly_signal(results, date)
 
+    # ── 桥接：融合结果写入 stock_analysis.db（前端 WebUI 读取） ──
+    _save_fusion_to_analysis_db(results, date)
+
+
+def _save_fusion_to_analysis_db(results: list[dict], date_str: str):
+    """将融合结果写入 stock_analysis.db，供前端 /api/v1/history 读取"""
+    try:
+        import sqlite3
+        db_path = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.db"
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        inserted = 0
+        for r in results:
+            code = r.get("stock_code", "")
+            if not code:
+                continue
+            name = r.get("stock_name", "")
+            linear = r.get("linear", r)
+            fusion_score = linear.get("fusion_score", 0)
+            signal_name = linear.get("signal_name", "")
+            signal = linear.get("signal", "")
+            position_advice = linear.get("position_advice", "")
+            is_degraded = r.get("is_degraded", False)
+            has_disagreement = r.get("has_disagreement", False)
+
+            # fusion_score [-3, +3] → sentiment_score [0, 100]
+            sentiment_score = int(50 + fusion_score * 16.67)
+            sentiment_score = max(0, min(100, sentiment_score))
+
+            summary_parts = []
+            if is_degraded:
+                summary_parts.append("降级运行")
+            if has_disagreement:
+                summary_parts.append(f"分歧(p={r.get('uncertainty_penalty', 0):.2f})")
+            lynx = linear.get("lynx_score")
+            ml = linear.get("mindlynx_score")
+            ta = linear.get("tradingagent_score")
+            if lynx is not None and ml is not None and ta is not None:
+                summary_parts.append(f"LY={lynx:.1f} ML={ml:.1f} TA={ta:.1f}")
+            analysis_summary = " | ".join(summary_parts) if summary_parts else None
+
+            raw = {
+                "fusion_score": fusion_score,
+                "signal": signal,
+                "signal_name": signal_name,
+                "position_advice": position_advice,
+                "is_degraded": is_degraded,
+                "has_disagreement": has_disagreement,
+                "lynx_score": lynx,
+                "mindlynx_score": ml,
+                "tradingagent_score": ta,
+            }
+
+            # 避免同一天重复写入
+            cursor.execute(
+                "SELECT id FROM analysis_history WHERE code=? AND DATE(created_at)=?",
+                (code, date_str),
+            )
+            if cursor.fetchone():
+                continue
+            query_id = f"fusion_{date_str}_{code}"
+            cursor.execute(
+                """INSERT INTO analysis_history
+                   (query_id, code, name, report_type, sentiment_score,
+                    operation_advice, trend_prediction, analysis_summary,
+                    raw_result, created_at)
+                   VALUES (?, ?, ?, 'fusion', ?, ?, ?, ?, ?, ?)""",
+                (query_id, code, name, sentiment_score,
+                 signal_name, position_advice, analysis_summary,
+                 json.dumps(raw, ensure_ascii=False), now),
+            )
+            inserted += 1
+        conn.commit()
+        conn.close()
+        print(f"  📊 stock_analysis.db: {inserted} 条记录已写入")
+    except Exception as e:
+        print(f"  ⚠️ stock_analysis.db 写入失败: {e}")
+
 
 def write_ly_signal(results: List[Dict[str, Any]], date: str):
     """将 ly 信号写入准实时文件交换区"""
