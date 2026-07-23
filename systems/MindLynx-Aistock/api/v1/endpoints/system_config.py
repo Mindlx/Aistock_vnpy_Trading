@@ -511,27 +511,27 @@ def get_system_config_schema(
 
 # ── 桩端点：generation-backends / agent-backends / scheduler ──
 
-@router.get("/generation-backends/status")
+@router.get("/config/generation-backends/status")
 def get_generation_backends_status():
     return {"backends": []}
 
 
-@router.post("/generation-backends/status/preview")
+@router.post("/config/generation-backends/status/preview")
 def preview_generation_backend_status():
     return {}
 
 
-@router.post("/generation-backends/smoke-test")
+@router.post("/config/generation-backends/smoke-test")
 def smoke_test_generation_backend():
     return {"success": True, "message": "smoke test skipped (stub)"}
 
 
-@router.get("/agent-backends/status")
+@router.get("/config/agent-backends/status")
 def get_agent_backends_status():
     return {"backends": []}
 
 
-@router.post("/agent-backends/status/preview")
+@router.post("/config/agent-backends/status/preview")
 def preview_agent_backend_status():
     return {}
 
