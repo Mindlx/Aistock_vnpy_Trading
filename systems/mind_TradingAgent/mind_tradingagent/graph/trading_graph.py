@@ -34,7 +34,6 @@ from mind_tradingagent.agents.utils.agent_utils import (
     get_insider_transactions,
     get_macro_indicators,
     get_news,
-    get_capital_flows,
     get_prediction_markets,
     get_stock_data,
     get_verified_market_snapshot,
@@ -231,16 +230,6 @@ class TradingAgentsGraph:
                     get_balance_sheet,
                     get_cashflow,
                     get_income_statement,
-                ]
-            ),
-            "policy": ToolNode(
-                [
-                    # Policy analysis: news + fundamentals + capital flows
-                    get_news,
-                    get_global_news,
-                    get_fundamentals,
-                    get_capital_flows,
-                    search_stock_news,
                 ]
             ),
         }
