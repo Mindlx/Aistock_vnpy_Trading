@@ -45,8 +45,8 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
   disabled = false,
 }) => {
   const [channel, setChannel] = useState<NotificationTestChannel>('wechat');
-  const [title, setTitle] = useState('DSA 通知测试');
-  const [content, setContent] = useState('这是一条来自 DSA Web 设置页的通知测试消息。');
+  const [title, setTitle] = useState('Aistock 通知测试');
+  const [content, setContent] = useState('这是一条来自 Aistock Web 设置页的通知测试消息。');
   const [timeoutSeconds, setTimeoutSeconds] = useState('20');
   const [result, setResult] = useState<TestNotificationChannelResponse | null>(null);
   const [error, setError] = useState<ParsedApiError | null>(null);
@@ -66,8 +66,8 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
         channel,
         items: normalizedItems,
         maskToken,
-        title: title.trim() || 'DSA 通知测试',
-        content: content.trim() || '这是一条来自 DSA Web 设置页的通知测试消息。',
+        title: title.trim() || 'Aistock 通知测试',
+        content: content.trim() || '这是一条来自 Aistock Web 设置页的通知测试消息。',
         timeoutSeconds: clampTimeout(timeoutSeconds),
       });
       setResult(payload);
