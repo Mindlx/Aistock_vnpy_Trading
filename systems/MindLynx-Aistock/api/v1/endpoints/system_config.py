@@ -528,12 +528,26 @@ def smoke_test_generation_backend():
 
 @router.get("/config/agent-backends/status")
 def get_agent_backends_status():
-    return {"backends": []}
+    return {
+        "backend": "litellm",
+        "available": True,
+        "experimental": False,
+        "version": None,
+        "errorCode": None,
+        "message": None,
+    }
 
 
 @router.post("/config/agent-backends/status/preview")
 def preview_agent_backend_status():
-    return {}
+    return {
+        "backend": "litellm",
+        "available": True,
+        "experimental": False,
+        "version": None,
+        "errorCode": None,
+        "message": None,
+    }
 
 
 @router.get("/scheduler/status")
