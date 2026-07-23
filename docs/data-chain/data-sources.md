@@ -86,12 +86,15 @@
 |:---:|------|---------|--------|
 | 1 | **`config/stock_pool.csv`** | 编辑 CSV（格式: `代码,名称,SH\|SZ`） | **唯一手工维护点** |
 | 2 | `src/mind_stock_config.py` | 自动读 CSV → `A_SHARE_MARKET_MAP` | TA 模块 + 部分服务 |
-| 3 | `systems/MindLynx-Aistock/.env` | `STOCK_LIST`（需与 CSV 同步） | ML 子系统 |
-| 4 | `systems/lynx_vnpy/lynx_signal.py` | 自动读 CSV → `STOCK_CODES` | 量化信号系统 |
+| 3 | `systems/MindLynx-Aistock/.env` | `STOCK_LIST` + `STOCK_GROUP_[1-3]`（已同步 CSV） | ML 子系统 |
+| 4 | `systems/lynx_vnpy/lynx_signal.py` | 自动读 CSV → `STOCK_CODES` + `STOCK_NAMES` | 量化信号系统 |
 | 5 | `services/alpha158_service.py` | 自动读 CSV → `STOCK_CODES` | Alpha158 因子服务 |
 | 6 | `services/ml_factor_service.py` | 自动读 CSV → `STOCK_CODES` | ML 因子服务 |
+| 7 | `services/data_warehouse/config.py` | 优先读 CSV，env `STOCK_LIST` 仅作覆盖 | 数据仓库 |
+| 8 | `scripts/backtest_lgb.py` | 自动读 CSV → `STOCK_CODES` | LGB 回测 |
 
-> ⚠️ `.env` 暂未自动读取 CSV（ML venv 启动时序依赖）。新增股票时请同步更新 `.env` 的 `STOCK_LIST`。
+> `.env` 两处（项目根 + `systems/MindLynx-Aistock/`）已与 CSV 同步。
+> 增减股票只需编辑 `config/stock_pool.csv`，其余位置自动适配。
 
 ---
 
