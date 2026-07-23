@@ -465,3 +465,8 @@ async def agent_chat_stream(request: ChatRequest):
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/status")
+def agent_status():
+    return {"status": "ok", "agent_available": True, "mode": "disabled"}

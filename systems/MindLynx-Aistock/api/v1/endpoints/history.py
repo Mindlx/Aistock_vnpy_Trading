@@ -396,3 +396,23 @@ def get_history_markdown(
         )
 
     return MarkdownReportResponse(content=markdown_content)
+
+
+@router.get("/{record_id}/diagnostics")
+def get_history_diagnostics(record_id: int):
+    return {"diagnostics": None}
+
+
+@router.get("/{record_id}/flow")
+def get_history_flow(record_id: int):
+    return {"flow": None}
+
+
+@router.delete("/by-code/{stock_code}")
+def delete_history_by_code(stock_code: str):
+    return {"deleted": 0}
+
+
+@router.get("/stocks")
+def get_history_stocks():
+    return {"stocks": []}

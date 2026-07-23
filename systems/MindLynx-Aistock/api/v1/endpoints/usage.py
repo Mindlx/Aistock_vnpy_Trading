@@ -58,3 +58,15 @@ def get_usage_summary(
         by_call_type=data["by_call_type"],
         by_model=data["by_model"],
     )
+
+
+@router.get("/dashboard")
+def get_usage_dashboard():
+    return {
+        "total_calls": 0,
+        "total_tokens": 0,
+        "total_cost": 0,
+        "daily_stats": [],
+        "model_stats": [],
+        "period": "month",
+    }

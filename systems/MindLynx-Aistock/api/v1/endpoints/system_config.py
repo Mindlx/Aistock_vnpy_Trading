@@ -507,3 +507,40 @@ def get_system_config_schema(
                 "message": "Failed to load system configuration schema",
             },
         )
+
+
+# ── 桩端点：generation-backends / agent-backends / scheduler ──
+
+@router.get("/generation-backends/status")
+def get_generation_backends_status():
+    return {"backends": []}
+
+
+@router.post("/generation-backends/status/preview")
+def preview_generation_backend_status():
+    return {}
+
+
+@router.post("/generation-backends/smoke-test")
+def smoke_test_generation_backend():
+    return {"success": True, "message": "smoke test skipped (stub)"}
+
+
+@router.get("/agent-backends/status")
+def get_agent_backends_status():
+    return {"backends": []}
+
+
+@router.post("/agent-backends/status/preview")
+def preview_agent_backend_status():
+    return {}
+
+
+@router.get("/scheduler/status")
+def get_scheduler_status():
+    return {"status": "unknown", "enabled": False, "next_run": None}
+
+
+@router.post("/scheduler/run-now")
+def run_scheduler_now():
+    return {"success": True, "message": "scheduler run triggered (stub)"}
