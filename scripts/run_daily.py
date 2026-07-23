@@ -297,7 +297,7 @@ def _save_fusion_to_analysis_db(results: list[dict], date_str: str):
         db_path = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.db"
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
-        now = datetime.now().isoformat()
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")  # 无时区后缀，与旧记录一致
         inserted = 0
         for r in results:
             code = r.get("stock_code", "")
@@ -316,7 +316,7 @@ def _save_fusion_to_analysis_db(results: list[dict], date_str: str):
             sentiment_score = int(50 + fusion_score * 16.67)
             sentiment_score = max(0, min(100, sentiment_score))
 
-            summary_parts = []
+            summary_parts = [f"融合信号: {signal_name}"]
             if is_degraded:
                 summary_parts.append("降级运行")
             if has_disagreement:
@@ -324,7 +324,7 @@ def _save_fusion_to_analysis_db(results: list[dict], date_str: str):
             lynx = linear.get("lynx_score")
             ml = linear.get("mindlynx_score")
             ta = linear.get("tradingagent_score")
-            if lynx is not None and ml is not None and ta is not None:
+            if all(x is not None for x in (lynx, ml, ta)):
                 summary_parts.append(f"LY={lynx:.1f} ML={ml:.1f} TA={ta:.1f}")
             analysis_summary = " | ".join(summary_parts) if summary_parts else None
 
@@ -348,6 +348,7 @@ def _save_fusion_to_analysis_db(results: list[dict], date_str: str):
             if cursor.fetchone():
                 continue
             query_id = f"fusion_{date_str}_{code}"
+            # signal_name → operation_advice, position_advice → trend_prediction
             cursor.execute(
                 """INSERT INTO analysis_history
                    (query_id, code, name, report_type, sentiment_score,
