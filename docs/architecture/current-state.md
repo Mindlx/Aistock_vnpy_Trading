@@ -40,7 +40,7 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 | 缩写 | 系统 | 方法 | 频率 | 核心输出 |
 |------|------|------|------|---------|
 | ly | lynx_vnpy | RF+LGB双模型 + 15TA + 58Alpha158因子 | 日频 15:15 | 上涨概率 + L7信号 |
-| ml | MindLynx-Aistock | 12因子 + 15策略 + LLM推理 | 日频/实时 | 综合评分 0-100 + 文本解释(纯展示) |
+| ml | MindLynx-Aistock | 14因子(FactorEngine) + 18策略 + LLM推理 | 日频/实时 | 综合评分 0-100 + 文本解释(纯展示) |
 | at | mind_TradingAgent | 多智能体辩论 (LangGraph) | 10:10/13:30 | 5级评级 (Buy~Sell) |
 
 ### 1.2 两条融合路径
@@ -80,7 +80,7 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 ```
      ml_factor_service.py (daemon, 每300s)
      ─────────────────────────────────────
-     读取 stock_daily DB → FactorEngine 计算 12 因子
+     读取 data_warehouse.db → FactorEngine 计算 13 因子
      → 横截面归一化 → tanh映射到L7 → 写 ml_signal.json
      完全绕过 LLM 层，纯数学计算。
 ```

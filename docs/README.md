@@ -21,6 +21,7 @@
 | **ML (MindLynx)** | `subsystems/ml/backtest.md`, `data-chain/data-sources.md` |
 | **AT (TradingAgent)** | `subsystems/at.md`, `llm/injection.md` |
 | **LY (lynx_vnpy)** | `subsystems/ly/architecture.md` |
+| **研究** | `research/turnover-chip-cross-analysis.md` — 换手率×筹码交叉分析 |
 
 ## 📂 目录结构
 
@@ -34,6 +35,7 @@ docs/
 ├── goose-doc/           Goose 遗留文档
 ├── llm/                 LLM 注入与路线图
 ├── push/                推送格式
+├── research/            研究重点方向（换手率×筹码交叉分析等）
 ├── subsystems/          子系统文档
 ├── opencode-config.md   OpenCode 配置
 ├── protected_files.txt  受保护文件清单

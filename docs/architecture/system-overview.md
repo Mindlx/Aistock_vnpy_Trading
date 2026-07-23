@@ -27,7 +27,7 @@
 ├─────────────────────────────────────────────────────────┤
 │                   📊  因子计算层                         │
 │  lynx_signal: RF+LGB 模型 (日频15:15)                   │
-│  ml_factor_service: 12因子纯数学 (300s轮询)             │
+  │  ml_factor_service: 14因子纯数学 (300s轮询)             │
 │  Alpha158 daemon: 58因子+LGB (300s轮询)                │
 │  [常驻daemon: ml-factor (~15MB), alpha158]              │
 ├─────────────────────────────────────────────────────────┤
@@ -68,7 +68,7 @@
 
 ### 3.2 ml — AI分析子系统
 
-- 因子引擎: 12因子 (illiquidity/max_effect/volume_trend 等), 纯数学计算 (`ml_factor_service.py`)
+- 因子引擎: 14因子 (含 pattern_chart_elevated 高中间峰双底), 纯数学计算 (`ml_factor_service.py`)
 - LLM分析: 6个策略 Agent (50+提示词版本历史) + MarketAnalyzer
 - 双路径输出: sentiment_score (评分 0-100) + operation_advice (纯文本解释, 不参与融合)
 - 融合路径: sentiment_score 占 100% (op_advice 于 2026-06-30 完全退出 L7 裁决) (`fusion_engine.py:555-556`)
@@ -182,7 +182,7 @@ realtime_fusion.py → data/realtime/ 文件交换区 → wecom_notifier.py
 |------|------|:----:|:----:|------|
 | scheduler | 常驻 | ~75MB | ✅ running | ML内部调度 (整点分析/大盘复盘/情报) |
 | monitor | 常驻 | ~245MB | ✅ running | WebSocket实时盘中监控 |
-| ml-factor | 常驻 | ~15MB | ✅ running | 12因子纯数学计算 (300s轮询) |
+| ml-factor | 常驻 | ~15MB | ✅ running | 14因子纯数学计算 (300s轮询, data_warehouse.db) |
 | data-warehouse | 常驻 | — | ✅ running | 统一数据缓存+限流+调度 |
 | realtime-fusion | 常驻 | ~15MB | ⏸️ inactive(非交易时段) | 文件交换区扫描 (300s) |
 
@@ -288,7 +288,7 @@ c1test.py (编排器)
         ▼
   因子引擎
   ├─ lynx_signal: RF+LGB → ly_signal.json + 上涨概率
-  ├─ ml_factor_service: 12因子 → ml_signal.json
+   ├─ ml_factor_service: 14因子 → ml_signal.json
   └─ Alpha158: 58因子+LGB → alpha158_signal.json
         │
         ▼
@@ -330,7 +330,7 @@ c1test.py (编排器)
 ### 10.1 关键发现：ML"半客观割裂"（40pp 语义差距的根本原因）— ✅ 已解决
 
 **问题**: LLM 收到了充足的外部数据（东方财富评级、新闻情报、大盘统计），
-但自己系统的**12因子细化分析和策略层结论**只被压缩为 2-3 行的 `factor_profile`。
+但自己系统的**14因子细化分析和策略层结论**只被压缩为 2-3 行的 `factor_profile`。
 LLM 在缺乏自身半客观分析上下文的情况下，被迫"独立判断"，导致：
 
 ```
@@ -343,7 +343,7 @@ operation_advice（需要推理的文字）→ 27.5% ❌
 - `42c01fd`: **op_advice 完全退出 L7 裁决** → 纯文本解释器，不参与融合
   - 2026-07-21 移除 80/20 blend, op 76.6% 中性, 仅用 sentiment_score
   - 现在是确定性退出 → 融合 100% 依赖 sentiment_score，op_advice 仅保留文字展示价值
-- `6deb8a2`: Action 1~3 → 因子剖面从2行扩展为12因子逐项展开、prompt重排、op_advice方向守卫
+- `6deb8a2`: Action 1~3 → 因子剖面从2行扩展为14因子逐项展开、prompt重排、op_advice方向守卫
 - `a2f7be1`: 修复 LLM 注入数据缺失单位，增强因子背景数据质量
 
 **最终判定**: 40pp 语义差距不再影响融合决策。sentiment_score 路径独立承担 ML 的 L7 贡献，
@@ -366,7 +366,7 @@ operation_advice 27.5% 证明它"说不清楚为什么"。
          operation_advice = 纯文本解释器（翻译系统分析+补充外部注释）
          1. 翻译: 用人类语言表述因子层和策略层的结论
          2. 扩展: 用外部情报作为注释补充，而非论据主体
-         3. 输出: "12因子综合偏多(+0.45)，但波动率异常(+1.8σ)需警惕"
+         3. 输出: "14因子综合偏多(+0.45)，但波动率异常(+1.8σ)需警惕"
 ```
 
 两条线从"互相替代"变为"分析层与表达层"的协作关系。

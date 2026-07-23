@@ -67,7 +67,7 @@ bash scripts/deploy-systemd.sh --restart-daemons
 |---------|---------|:--------:|
 | `Aistock_vnpy_Trading-monitor.service` | MindLynx 盘中实时监控（Phase 1-3） | `always` |
 | `Aistock_vnpy_Trading-scheduler.service` | MindLynx 定时分析调度（情报/整点/复盘） | `always` |
-| `Aistock_vnpy_Trading-ml-factor.service` | ML 12 因子实时计算（每 300s） | `always` |
+| `Aistock_vnpy_Trading-ml-factor.service` | ML 13 因子实时计算（每 300s, data_warehouse.db） | `always` |
 | `Aistock_vnpy_Trading-alpha158.service` | Alpha158 58 因子实时计算（每 300s） | `always` |
 | `Aistock_vnpy_Trading-realtime-fusion.service` | 准实时融合（扫描文件交换区，每 300s） | `always` |
 | `Aistock_vnpy_Trading-data-warehouse.service` | 数据仓库调度器（自动刷新 16 类数据） | `on-failure` |

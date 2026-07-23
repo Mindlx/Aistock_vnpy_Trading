@@ -27,7 +27,7 @@
 │  │  ly          │  │(AI分析)     │  │ (多智能体辩论)    │       │
 │  │              │  │ ml          │  │ at               │       │
 │  ├──────────────┤  ├──────────────┤  ├──────────────────┤       │
-│  │ RandomForest │  │ 12因子+策略  │  │ 多空辩论         │       │
+│  │ RandomForest │  │ 14因子+18策略│  │ 多空辩论         │       │
 │  │ 技术指标     │  │ LLM推理     │  │ 风险讨论         │       │
 │  │ 上涨概率%    │  │ 评分0-100   │  │ 5级评级          │       │
 │  └──────┬──────┘  └──────┬──────┘  └────────┬─────────┘       │
@@ -66,7 +66,7 @@
 | 子系统 | 方法 | 频率 | 核心输出 | 独立性 |
 |--------|------|------|---------|--------|
 | **ly** (lynx_vnpy) | RandomForest+LGB 双模型集成 + 15TA+58Alpha158因子 | 日频/准实时 | 上涨概率 + L7 信号 | 权重=0, 不推送 |
-| **ml** (MindLynx-Aistock) | 12因子+15策略+LLM 推理 | 日频/实时 | 综合评分 0-100 (op_advice纯文本,不参与融合) | 独立 venv, 独立推送 |
+| **ml** (MindLynx-Aistock) | 14因子+18策略+LLM 推理 | 日频/实时 | 综合评分 0-100 (op_advice纯文本,不参与融合) | 独立 venv, 独立推送 |
 | **at** (mind_TradingAgent) | 多智能体辩论 (LangGraph) | 盘后 (10:10/13:30) | 5 级评级 | 独立 venv |
 
 ### 核心原则
@@ -101,7 +101,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 
 文件交换区三信号的更新频率：
 - ly_signal.json: 每日一次 (15:15) — RF+LGB双模型集成，盘中固定
-- ml_signal.json: 每5分钟 — 12因子层读stock_daily DB，有新数据就变
+- ml_signal.json: 每5分钟 — 14因子层读 data_warehouse.db，有新数据就变
 - at_signal.json: 每日两次 (10:10/13:30) — LLM辩论跑完即固定
 - alpha158_signal.json: 每5分钟 — 58Alpha158因子+LGB推理，纯数学无LLM
 
@@ -151,7 +151,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 |------|------|------|------|---------|------|
 | `scheduler.service` | 常驻 daemon | MindLynx | ~75MB | ❌ 智能跳过 | 内部调度 10 个定时任务 |
 | `monitor.service` | 常驻 daemon | MindLynx | ~13MB | ❌ 智能跳过 | WebSocket 盘中监控 |
-| `ml-factor.service` | 常驻 daemon | Fusion | ~15MB | ⚠️ 运行但无操作 | 12因子计算 daemon |
+| `ml-factor.service` | 常驻 daemon | Fusion | ~15MB | ⚠️ 运行但无操作 | 14因子计算 daemon (data_warehouse.db) |
 | `alpha158-service.service` | 常驻 daemon | Fusion | ~15MB | ⚠️ 运行但无操作 | 58Alpha158因子+LGB daemon |
 | `realtime-fusion.service` | 常驻 daemon | Fusion | ~15MB | ❌ 周末跳过 | 文件交换区扫描 (v2 新增) |
 | `fusion.service` | oneshot | Fusion | - | ❌ 仅工作日 | 18:00 日终融合 |
@@ -310,7 +310,7 @@ Sun 20:00 ─ scheduler ─ 周末情报推送
 
 at不使用因子。它的方法论与ly和ml完全不同：
 - ly = 纯量价数学模型（RF消费15TA, LGB消费58Alpha158）
-- ml = 因子+LLM混合模型（12因子注入LLM Prompt，15个YAML策略Agent）
+- ml = 因子+LLM混合模型（14因子注入LLM Prompt，17个YAML策略Agent）
 - at = 多智能体定性研究（分析师→研究员→交易员→风控→PM，全部LLM驱动）
 
 三种方法论独立互补：同一个股票，ly从量价技术面看、ml从因子+AI分析看、at从多智能体辩论看。当三者形成共识时信号可靠性显著提升——这就是三系统融合的意义。
@@ -351,7 +351,7 @@ Aistock_vnpy_Trading/
 │   └── deploy-systemd.sh       # systemd 部署脚本
 │
 ├── services/
-│   ├── ml_factor_service.py      # 12因子纯数学信号 (每5分钟)
+│   ├── ml_factor_service.py      # 14因子纯数学信号 (每5分钟, data_warehouse.db)
 │   ├── alpha158_service.py       # 58Alpha158因子+LGB信号 (每5分钟)
 │   ├── data_warehouse/           # 数据湖: 统一OHLCV缓存+限流
 │   └── eastmoney/                # 东方财富数据服务 (自包含,无子系统依赖)
