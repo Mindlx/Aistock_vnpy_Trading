@@ -212,7 +212,7 @@ class ChipFetcher:
 
     @_get_limiter().retry("eastmoney")
     def fetch(self, code: str) -> dict | None:
-        """akshare stock_cyq_em — 筹码分布"""
+        """akshare stock_cyq_em — 筹码分布 (最新快照)"""
         try:
             import akshare as ak
             df = ak.stock_cyq_em(symbol=code, adjust="")
@@ -221,12 +221,41 @@ class ChipFetcher:
                 return {
                     "profit_ratio": float(last.get("获利比例", 0) or 0),
                     "avg_cost": float(last.get("平均成本", 0) or 0),
-                    "concentration": float(last.get("筹码集中度", 0) or 0),
+                    "concentration": float(last.get("90集中度", 0) or 0),
                     "source": "akshare",
                 }
         except Exception as exc:
             logger.debug("[ChipFetcher] 筹码分布获取失败 %s: %s", code, exc)
         return None
+
+    @_get_limiter().retry("eastmoney")
+    def fetch_all(self, code: str) -> list[dict]:
+        """akshare stock_cyq_em — 筹码分布完整历史序列
+
+        Returns:
+            list of dict: [{date, profit_ratio, avg_cost, concentration, source}, ...]
+        """
+        try:
+            import akshare as ak
+            df = ak.stock_cyq_em(symbol=code, adjust="")
+            if df is None or df.empty:
+                return []
+            rows = []
+            for _, r in df.iterrows():
+                date_val = str(r.get("日期", ""))[:10].replace("-", "")
+                if not date_val:
+                    continue
+                rows.append({
+                    "date": date_val,
+                    "profit_ratio": float(r.get("获利比例", 0) or 0),
+                    "avg_cost": float(r.get("平均成本", 0) or 0),
+                    "concentration": float(r.get("90集中度", 0) or 0),
+                    "source": "akshare",
+                })
+            return rows
+        except Exception as exc:
+            logger.debug("[ChipFetcher] 筹码完整历史获取失败 %s: %s", code, exc)
+        return []
 
 
 # ═══════════════════════════════════════════

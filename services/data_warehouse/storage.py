@@ -258,6 +258,29 @@ class DataLake:
                          "warehouse", 86400)
         return count
 
+    def update_ohlcv_turnover(self, code: str, date_turnover_pairs: list[tuple[str, float]]) -> int:
+        """回填换手率: 只更新 turnover 字段, 不修改其他 OHLCV 数据。
+
+        Args:
+            code: 股票代码
+            date_turnover_pairs: [(date_str, turnover_pct), ...]
+
+        Returns:
+            更新的行数
+        """
+        if not date_turnover_pairs:
+            return 0
+        conn = self._get_conn()
+        count = 0
+        for date_str, turnover_val in date_turnover_pairs:
+            conn.execute(
+                "UPDATE daily_ohlcv SET turnover=?, fetched_at=? WHERE stock_code=? AND date=?",
+                (turnover_val, time.time(), code, date_str),
+            )
+            count += 1
+        conn.commit()
+        return count
+
     def query_ohlcv(self, code: str, start: str = "", end: str = "",
                     days: int = 120) -> list[dict]:
         conn = self._get_conn()
@@ -478,29 +501,51 @@ class DataLake:
 
     def upsert_chip_distribution(self, code: str, date: str, data: dict) -> None:
         conn = self._get_conn()
-        try:
+        conn.execute("""INSERT OR REPLACE INTO chip_distribution
+            (stock_code, date, profit_ratio, avg_cost, concentration, source, fetched_at)
+            VALUES (?,?,?,?,?,?,?)""", (
+            code, date,
+            data.get("profit_ratio", 0), data.get("avg_cost", 0),
+            data.get("concentration", 0), data.get("source", "akshare"), time.time(),
+        ))
+        conn.commit()
+        self._touch_meta(code, "chip_distribution", 1, data.get("source", "akshare"), 86400)
+
+    def batch_upsert_chip_distribution(self, code: str, rows: list[dict]) -> int:
+        """批量写入筹码分布历史序列. rows from ChipFetcher.fetch_all()."""
+        if not rows:
+            return 0
+        conn = self._get_conn()
+        count = 0
+        for r in rows:
             conn.execute("""INSERT OR REPLACE INTO chip_distribution
                 (stock_code, date, profit_ratio, avg_cost, concentration, source, fetched_at)
                 VALUES (?,?,?,?,?,?,?)""", (
-                code, date,
-                data.get("profit_ratio", 0), data.get("avg_cost", 0),
-                data.get("concentration", 0), data.get("source", "akshare"), time.time(),
+                code, r.get("date", ""),
+                r.get("profit_ratio", 0), r.get("avg_cost", 0),
+                r.get("concentration", 0), r.get("source", "akshare"), time.time(),
             ))
-            conn.commit()
-            self._touch_meta(code, "chip_distribution", 1, data.get("source", "akshare"), 86400)
-        finally:
-            conn.close()
+            count += 1
+        conn.commit()
+        self._touch_meta(code, "chip_distribution", count, "akshare", 86400)
+        return count
 
     def query_chip_distribution(self, code: str) -> dict | None:
         conn = self._get_conn()
-        try:
-            row = conn.execute(
-                "SELECT * FROM chip_distribution WHERE stock_code=? ORDER BY date DESC LIMIT 1",
-                (code,),
-            ).fetchone()
-            return dict(row) if row else None
-        finally:
-            conn.close()
+        row = conn.execute(
+            "SELECT * FROM chip_distribution WHERE stock_code=? ORDER BY date DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def query_chip_distribution_history(self, code: str) -> list[dict]:
+        """查询筹码分布完整历史序列."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM chip_distribution WHERE stock_code=? ORDER BY date ASC",
+            (code,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ── index_ohlcv ──
 

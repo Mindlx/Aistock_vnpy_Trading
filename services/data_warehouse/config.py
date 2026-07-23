@@ -92,6 +92,16 @@ class DataWarehouseConfig:
                 stock_list = [s.strip() for s in env_val.split(",") if s.strip()]
             if not stock_list:
                 stock_list = os.environ.get("WATCHLIST", "").split(",") if os.environ.get("WATCHLIST") else []
+            # 从 stock_pool.csv 补充
+            if not stock_list:
+                csv_path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "stock_pool.csv")
+                if os.path.exists(csv_path):
+                    with open(csv_path) as f:
+                        next(f, None)  # skip header
+                        for line in f:
+                            parts = line.strip().split(",")
+                            if parts:
+                                stock_list.append(parts[0])
             cls._instance = cls(stock_pool=stock_list)
         return cls._instance
 
