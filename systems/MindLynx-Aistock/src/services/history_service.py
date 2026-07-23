@@ -436,12 +436,25 @@ class HistoryService:
                     ).fetchall()
                     wh.close()
                     if wh_codes:
+                        seen = set()
+                        deduped = []
+                        for r in wh_codes:
+                            title = r[1] or ""
+                            if not title:
+                                continue
+                            # 去掉 <em> 等 HTML 标签
+                            import re
+                            clean = re.sub(r'<[^>]+>', '', title)
+                            if clean in seen:
+                                continue
+                            seen.add(clean)
+                            deduped.append((clean, r[2] or ""))
                         matched = [
                             type("NewsItem", (), {
-                                "title": r[1], "snippet": r[2],
+                                "title": t, "snippet": s,
                                 "url": "", "published_date": anchor_date,
                                 "fetched_at": anchor_date,
-                            }) for r in wh_codes if r[1]
+                            }) for t, s in deduped
                         ]
             except Exception:
                 pass
