@@ -61,3 +61,7 @@ config/logs/fusion_history.csv
 # Backup files
 *.bak
 .env.secrets
+data/stock_analysis.db-shm
+data/stock_analysis.db-wal
+*.db-shm
+*.db-wal
