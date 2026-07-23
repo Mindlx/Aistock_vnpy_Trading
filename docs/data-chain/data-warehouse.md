@@ -336,7 +336,7 @@ cd ~/workspace/Aistock_vnpy_Trading
 from services.data_warehouse.storage import DataLake
 import requests, time, random
 
-STOCKS = ['001390','300652','600372','605368','000592','603189','603557','688202','601801','300676']
+STOCKS = ['001390','300652','600372','605368','000592','603189','603557','688202','601801','300676','603127','000999','301293','301106','002230','000988','000060','605117']
 session = requests.Session()
 session.headers.update({'Referer': 'https://finance.sina.com.cn'})
 lake = DataLake()
