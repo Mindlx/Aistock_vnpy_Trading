@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import logging
 import random
+import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from services.data_warehouse.config import DataWarehouseConfig
@@ -257,6 +258,221 @@ class RefreshScheduler:
             time.sleep(5 + random.uniform(0, 3))
         return results
 
+    def backfill_turnover(self, codes: list[str] | None = None) -> dict[str, int]:
+        """回填换手率: 查询 daily_ohlcv 中 turnover=0 的行，用 Tushare→akshare 补充。
+
+        降级链: Tushare Pro (daily_basic, 付费) → akshare EM (免费)
+        """
+        results: dict[str, int] = {}
+        from services.data_warehouse.storage import DataLake
+        from services.data_warehouse.fetchers import _ts_post
+
+        lake = DataLake()
+        target_codes = codes or self._stock_codes
+
+        for code in target_codes:
+            pairs: list[tuple[str, float]] = []
+            prefix = f"{code}.SZ" if code.startswith(("0", "3")) else f"{code}.SH"
+
+            # ── 1. Tushare Pro (付费, 优先) ──
+            try:
+                start = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+                end = datetime.now().strftime("%Y%m%d")
+                fields, items = _ts_post("daily_basic", {
+                    "ts_code": prefix, "start_date": start, "end_date": end,
+                    "fields": "trade_date,turnover_rate",
+                })
+                if items and "turnover_rate" in fields:
+                    tr_idx = fields.index("turnover_rate")
+                    date_idx = fields.index("trade_date")
+                    for row in items:
+                        d = str(row[date_idx])[:8]
+                        tr = float(row[tr_idx]) if row[tr_idx] is not None else 0.0
+                        if d and tr > 0:
+                            pairs.append((d, tr))
+                    if pairs:
+                        logger.info("[BackfillTurnover] %s: Tushare %d 行", code, len(pairs))
+            except Exception as exc:
+                logger.debug("[BackfillTurnover] %s Tushare 失败: %s", code, exc)
+
+            # ── 2. akshare EM (免费, 降级) ──
+            if not pairs:
+                try:
+                    import akshare as ak
+                    start = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+                    end = datetime.now().strftime("%Y%m%d")
+                    df = ak.stock_zh_a_hist(
+                        symbol=code, period="daily",
+                        start_date=start, end_date=end, adjust="qfq",
+                    )
+                    if df is not None and not df.empty:
+                        for _, r in df.iterrows():
+                            d = str(r.get("日期", ""))[:10].replace("-", "")
+                            tr = float(r.get("换手率", 0) or 0)
+                            if d and tr > 0:
+                                pairs.append((d, tr))
+                        if pairs:
+                            logger.info("[BackfillTurnover] %s: akshare %d 行", code, len(pairs))
+                except Exception as exc:
+                    logger.debug("[BackfillTurnover] %s akshare 失败: %s", code, exc)
+
+            if not pairs:
+                logger.info("[BackfillTurnover] %s: 两源均无换手率数据", code)
+                continue
+
+            updated = lake.update_ohlcv_turnover(code, pairs)
+            results[code] = updated
+            logger.info("[BackfillTurnover] %s: 入库 %d 行", code, updated)
+            time.sleep(1.0 + random.uniform(0, 1))  # 更短间隔，Tushare 限流 50/min 已足够
+
+        total = sum(results.values())
+        logger.info("[BackfillTurnover] 完成: %d 只股票, 共 %d 行", len(results), total)
+        return results
+
+    def backfill_chip_history(self, codes: list[str] | None = None) -> dict[str, int]:
+        """回填筹码分布完整历史序列: 用 ChipFetcher.fetch_all() 一次写入全部历史行。
+
+        akshare stock_cyq_em 每只股票返回约 90 行历史数据，
+        此方法一次性写入 chip_distribution 表，后续每日增量由 refresh_chip_distribution 处理。
+        """
+        results: dict[str, int] = {}
+        from services.data_warehouse.fetchers import ChipFetcher
+        from services.data_warehouse.storage import DataLake
+
+        fetcher = ChipFetcher()
+        lake = DataLake()
+        target_codes = codes or self._stock_codes
+
+        for code in target_codes:
+            try:
+                rows = fetcher.fetch_all(code)
+                if not rows:
+                    logger.info("[BackfillChip] %s: 无历史筹码数据", code)
+                    continue
+                cnt = lake.batch_upsert_chip_distribution(code, rows)
+                results[code] = cnt
+                logger.info("[BackfillChip] %s: 写入 %d 行历史筹码", code, cnt)
+            except Exception as exc:
+                logger.warning("[BackfillChip] %s 失败: %s", code, exc)
+            time.sleep(4 + random.uniform(0, 1))
+
+        total = sum(results.values())
+        logger.info("[BackfillChip] 完成: %d 只股票, 共 %d 行", len(results), total)
+        return results
+
+    def refresh_chip_distribution(self, codes: list[str] | None = None) -> dict[str, bool]:
+        """采集筹码分布: 调用 ChipFetcher 写入 chip_distribution 表（每日快照）。
+
+        如果该股票尚无历史数据（首次运行），自动触发 backfill_chip_history。
+        """
+        results: dict[str, bool] = {}
+        from services.data_warehouse.fetchers import ChipFetcher
+        from services.data_warehouse.storage import DataLake
+        from datetime import timezone as tz, timedelta
+
+        fetcher = ChipFetcher()
+        lake = DataLake()
+        target_codes = codes or self._stock_codes
+        today = datetime.now(tz(timedelta(hours=8))).strftime("%Y%m%d")
+
+        for code in target_codes:
+            # 如果该股无历史数据，先回流
+            existing = lake.query_chip_distribution(code)
+            if existing is None:
+                logger.info("[ChipDist] %s: 无历史数据, 触发回填", code)
+                hist_rows = fetcher.fetch_all(code)
+                if hist_rows:
+                    lake.batch_upsert_chip_distribution(code, hist_rows)
+                    logger.info("[ChipDist] %s: 历史回填 %d 行", code, len(hist_rows))
+                else:
+                    results[code] = False
+                    continue
+
+            try:
+                data = fetcher.fetch(code)
+                if data:
+                    lake.upsert_chip_distribution(code, today, data)
+                    results[code] = True
+                    logger.info("[ChipDist] %s: 筹码已采集 profit=%.1f%% cost=%.2f conc=%.2f",
+                                code, data.get("profit_ratio", 0),
+                                data.get("avg_cost", 0), data.get("concentration", 0))
+                else:
+                    results[code] = False
+                    logger.info("[ChipDist] %s: 采集失败", code)
+            except Exception as exc:
+                logger.warning("[ChipDist] %s 异常: %s", code, exc)
+                results[code] = False
+            time.sleep(2 + random.uniform(0, 1))
+
+        success = sum(1 for v in results.values() if v)
+        logger.info("[ChipDist] 完成: %d/%d 成功", success, len(results))
+        return results
+
+    def refresh_research_data(self) -> dict[str, int]:
+        """刷新研究数据: 对所有有 OHLCV 数据的股票执行换手率回填 + 筹码本地计算.
+
+        生产环境只维护 stock_pool 的 18 只股票. 此方法补充维护扩展的 216 只,
+        确保研究数据持续积累.
+        """
+        results: dict[str, int] = {}
+        all_codes = self._get_all_db_codes()
+        logger.info("[ResearchData] 开始刷新 %d 只研究股票", len(all_codes))
+
+        # Step 1: 换手率回填 (Tushare)
+        logger.info("[ResearchData] Step 1/2: 换手率回填")
+        turn_results = self.backfill_turnover(codes=all_codes)
+        results["turnover"] = sum(turn_results.values())
+
+        # Step 2: 筹码分布 (本地计算, 零API)
+        logger.info("[ResearchData] Step 2/2: 筹码本地计算")
+        chip_ok = 0
+        from services.data_warehouse.storage import DataLake
+        import numpy as np
+
+        lake = DataLake()
+        for code in all_codes:
+            try:
+                import sqlite3
+                cfg = DataWarehouseConfig.get_instance()
+                conn = sqlite3.connect(str(cfg.db_path))
+                rows = conn.execute(
+                    "SELECT date, open, high, low, close, volume, turnover "
+                    "FROM daily_ohlcv WHERE stock_code=? AND turnover > 0 ORDER BY date", (code,)
+                ).fetchall()
+                conn.close()
+
+                if len(rows) < 30:
+                    continue
+
+                # 取最近 150 天计算
+                data = rows[-150:]
+                o = np.array([r[1] for r in data], dtype=float)
+                h = np.array([r[2] for r in data], dtype=float)
+                l = np.array([r[3] for r in data], dtype=float)
+                c = np.array([r[4] for r in data], dtype=float)
+                v = np.array([r[5] for r in data], dtype=float)
+                tr = np.array([float(r[6] or 0) for r in data], dtype=float)
+
+                # 调用本地筹码算法
+                from scripts.compute_chip_local import compute_chip_distribution
+                chip_result = compute_chip_distribution(o, h, l, c, v, tr)
+                if chip_result:
+                    today = date.today().strftime("%Y%m%d")
+                    lake.upsert_chip_distribution(code, today, {
+                        "profit_ratio": chip_result["profit_ratio"],
+                        "avg_cost": chip_result["avg_cost"],
+                        "concentration": chip_result["concentration"],
+                        "source": "local_compute",
+                    })
+                    chip_ok += 1
+            except Exception as exc:
+                logger.debug("[ResearchData] %s 筹码失败: %s", code, exc)
+
+        results["chip"] = chip_ok
+        logger.info("[ResearchData] 完成: 换手率=%d 只, 筹码=%d 只",
+                    results.get("turnover", 0), chip_ok)
+        return results
+
     # ═══════════════════════════════════════
     # 批量操作
     # ═══════════════════════════════════════
@@ -270,6 +486,10 @@ class RefreshScheduler:
         results["capital_flows"] = self.refresh_capital_flows(force)
         results["news"] = self.refresh_news(force)
         results["fundamentals"] = self.refresh_fundamentals(force)
+        # P0 研究数据: 换手率回填 + 筹码分布采集
+        if force or results.get("daily_ohlcv"):
+            results["turnover_backfill"] = self.backfill_turnover()
+            results["chip_distribution"] = self.refresh_chip_distribution()
         return results
 
     def refresh_stale(self) -> dict[str, int]:
@@ -277,7 +497,8 @@ class RefreshScheduler:
         refreshed = 0
         for code in self._stock_codes:
             for dtype in ["daily_ohlcv", "financial_indicators",
-                          "capital_flows", "fundamentals"]:
+                          "capital_flows", "fundamentals",
+                          "chip_distribution"]:
                 if not self._reader.is_fresh(code, dtype):
                     logger.info("[Scheduler] %s %s 过期, 触发刷新", code, dtype)
                     # 按 type 调用对应刷新方法
@@ -295,6 +516,17 @@ class RefreshScheduler:
                         refreshed += sum(r.values())
         return {"refreshed": refreshed}
 
+    def _get_all_db_codes(self) -> list[str]:
+        """获取 data_warehouse 中所有有 OHLCV 数据的股票代码."""
+        import sqlite3
+        cfg = DataWarehouseConfig.get_instance()
+        conn = sqlite3.connect(str(cfg.db_path))
+        codes = [r[0] for r in conn.execute(
+            "SELECT DISTINCT stock_code FROM daily_ohlcv ORDER BY stock_code"
+        ).fetchall()]
+        conn.close()
+        return codes
+
     # ═══════════════════════════════════════
     # 独立进程循环
     # ═══════════════════════════════════════
@@ -308,6 +540,10 @@ class RefreshScheduler:
         last_news = 0
         last_fundamentals = 0
         last_purge = 0
+        last_turnover = 0
+        last_chip = 0
+        last_research = 0
+        last_calibrate = 0
 
         while True:
             try:
@@ -357,6 +593,20 @@ class RefreshScheduler:
                         self.refresh_fundamentals()
                         last_fundamentals = now
 
+                # 15:35 后: 回填换手率（日K刷新后完成，每日一次）
+                if (hour > 15 or (hour == 15 and minute >= 35)) and now - last_turnover > 3600:
+                    if weekday <= 5:
+                        logger.info("[Scheduler] 触发: 换手率回填")
+                        self.backfill_turnover()
+                        last_turnover = now
+
+                # 15:40 后: 采集筹码分布（每日一次，收盘后）
+                if (hour > 15 or (hour == 15 and minute >= 40)) and now - last_chip > 3600:
+                    if weekday <= 5:
+                        logger.info("[Scheduler] 触发: 筹码分布采集")
+                        self.refresh_chip_distribution()
+                        last_chip = now
+
                 # 每日 03:00: 清理过期数据
                 if hour == 3 and 0 <= minute < 5 and now - last_purge > 82000:
                     from services.data_warehouse.storage import DataLake
@@ -369,6 +619,27 @@ class RefreshScheduler:
                 if _is_trading_hour() and weekday <= 5:
                     if int(minute) % 5 == 0 and now - last_daily > 240:
                         self.refresh_realtime()
+
+                # 15:45 后: 刷新研究数据 (216只, 换手率+筹码, 每日一次)
+                if (hour > 15 or (hour == 15 and minute >= 45)) and now - last_research > 3600:
+                    if weekday <= 5:
+                        logger.info("[Scheduler] 触发: 研究数据刷新")
+                        self.refresh_research_data()
+                        last_research = now
+
+                # 20:30: 校准策略评分调整值
+                if hour == 20 and minute == 30 and now - last_calibrate > 3600:
+                    if weekday <= 5:
+                        logger.info("[Scheduler] 触发: 策略评分校准")
+                        import subprocess
+                        result = subprocess.run(
+                            [sys.executable, "scripts/calibrate_skill_scores.py", "--min-samples", "30"],
+                            capture_output=True, text=True, timeout=120,
+                        )
+                        logger.info("[Scheduler] 校准完成:\n%s", result.stdout)
+                        if result.stderr:
+                            logger.warning("[Scheduler] 校准错误:\n%s", result.stderr)
+                        last_calibrate = now
 
                 # 每次循环: 处理失败补拉队列
                 self._process_failed_queue()
