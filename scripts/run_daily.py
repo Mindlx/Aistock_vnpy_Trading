@@ -636,6 +636,9 @@ def main():
     )
     save_fusion_output(results, today, output_dir, config)
 
+    # ── 桥接：大盘复盘写入 stock_analysis.db ──
+    _save_market_review(results, today)
+
     # ── 审核模式：保存到staging + 等待确认 ──
     if args.review_mode:
         STAGING_DIR.mkdir(parents=True, exist_ok=True)
