@@ -148,6 +148,11 @@ def delete_history_records(
         )
 
 
+@router.get("/stocks")
+def get_history_stocks():
+    return {"stocks": []}
+
+
 @router.get(
     "/{record_id}",
     response_model=AnalysisReport,
@@ -411,8 +416,3 @@ def get_history_flow(record_id: int):
 @router.delete("/by-code/{stock_code}")
 def delete_history_by_code(stock_code: str):
     return {"deleted": 0}
-
-
-@router.get("/stocks")
-def get_history_stocks():
-    return {"stocks": []}
