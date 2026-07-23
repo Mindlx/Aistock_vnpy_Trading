@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -412,13 +413,25 @@ class DataLake:
         count = 0
         now = time.time()
         for item in items:
+            raw_title = item.get("title", "")
+            # 入库前清洗：去掉 <em> 等 HTML 标签
+            clean_title = re.sub(r'<[^>]+>', '', raw_title).strip() if raw_title else ""
+            if not clean_title:
+                continue
+            # 去重：同股票同标题不再重复写入
+            exists = conn.execute(
+                "SELECT 1 FROM news_events WHERE stock_code=? AND title=? LIMIT 1",
+                (item.get("stock_code", ""), clean_title),
+            ).fetchone()
+            if exists:
+                continue
             try:
                 conn.execute(
                     """INSERT INTO news_events
                        (stock_code, title, url, summary, source, category,
                         importance, published_at, created_at, ttl_seconds)
                        VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                    (item.get("stock_code", ""), item["title"],
+                    (item.get("stock_code", ""), clean_title,
                      item.get("url", ""), item.get("summary", "")[:200],
                      item.get("source", ""), item.get("category", ""),
                      item.get("importance", 0), item.get("published_at", ""),
