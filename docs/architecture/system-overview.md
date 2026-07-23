@@ -1,6 +1,6 @@
 # 系统架构全景
 
-> 生成日期: 2026-07-02 (同步至最新代码状态)
+> 生成日期: 2026-07-22 (同步至最新代码状态)
 > 信息来源: `docs/architecture/current-state.md`, `config/settings.yaml`, `src/fusion_engine.py`,
 > `src/data_loader.py`, `src/wecom_notifier.py`, `scripts/c1test.py`, `docs/push/format.md`,
 > 运行时 `systemctl` 状态
@@ -50,8 +50,8 @@
 | 缩写 | 全称 | 性质 | 方法 | 频率 | 融合权重 |
 |:----:|------|:----:|------|:----:|:-------:|
 | **ly** | lynx_vnpy | **纯客观** | RF + LGB + 15技术指标 + Alpha158(58因子) | 日频 15:15 | **0.0** (纯观察者) |
-| **ml** | MindLynx-Aistock | **半客观** | 12纯数学因子 + 策略Agent + LLM推理（注入客观数据） | 日频/实时 | **0.55** |
-| **at** | mind_TradingAgent | **纯主观** | 多智能体LLM辩论 (LangGraph, DeepSeek) | 10:10/13:30 | **0.30** |
+| **ml** | MindLynx-Aistock | **半客观** | 12纯数学因子 + 策略Agent + LLM推理（注入客观数据） | 日频/实时 | **0.65** |
+| **at** | mind_TradingAgent | **纯主观** | 多智能体LLM辩论 (LangGraph, DeepSeek) | 10:10/13:30 | **0.35** |
 
 来源: `config/settings.yaml:weights` 区块。
 
@@ -127,9 +127,9 @@ realtime_fusion.py → data/realtime/ 文件交换区 → wecom_notifier.py
 
 | 系统 | 权重 | 依据 |
 |------|:----:|------|
-| mindlynx | **0.55** | 62.2% (p=0.010) 唯一统计显著系统 |
+| mindlynx | **0.65** | 61.7% (p=0.010) 唯一统计显著系统, LY移出后提权 |
 | lynx_vnpy | **0.0** | 2026-07-21 经 c1skill 论证移出投票 |
-| tradingagent | **0.30** | 53.9% 权重扫一扫后确认为最优值 |
+| tradingagent | **0.35** | LY移出后按比例重分配 |
 
 来源: `config/settings.yaml`
 
@@ -221,8 +221,8 @@ realtime_fusion.py → data/realtime/ 文件交换区 → wecom_notifier.py
 
 | # | 推送类型 | emoji | 时间 | 引擎 | 格式章节 |
 |:-:|---------|:-----:|:----:|:----:|:--------:|
-| 1 | 融合决策 | 🛟 | 19:00 | Fusion | §2.1 |
-| 2 | 准实时速报 | 🛟 | 10:43+ | Fusion | §2.2 |
+| 1 | 融合决策 | 🛟 | 18:00 | Fusion | §2.1 |
+| 2 | 准实时速报 | 🛟 | 09:33+ | Fusion | §2.2 |
 | 3 | 量化信号 | 🧬 | 15:15 | Fusion | §2.3 |
 | 4 | 整点分析 | 👾 | 11:00/14:00 | ML | §2.4 |
 | 5 | 每日情报 | 📰 | 09:00 | ML | §2.5 |

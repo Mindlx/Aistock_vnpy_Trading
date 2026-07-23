@@ -1,6 +1,6 @@
 # 当前项目状态快照
 
-> 最后更新: 2026-07-21 (c1skill 论证: LY 移出投票 + ML 阈值 0.05 + 融合 52.5%)
+> 最后更新: 2026-07-22 (LY注入暂停 + AT数据路径统一 + 推送仅18:00)
 > 范围: 代码架构 + 运行时状态 + 关键配置 + 近期变更 + 待办
 > 覆盖: src/、scripts/、services/、config/systemd/、docs/
 
@@ -102,7 +102,10 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 | TA | oneshot | - | inactive(等待10:10) | TradingAgent辩论 |
 | calibrate-alphas | oneshot | - | ✅ timer 12:30 | Alpha权重自动校准 |
 | diagnose-agreement | oneshot | - | ✅ timer 20:30 | LY+ML同向诊断数据积累 |
-| eastmoney-rating | oneshot | - | ✅ timer 10:53 | 东方财富数据获取+简讯推送（09:53仅一次, 13:53已取消） |
+| eastmoney-rating | oneshot | - | ✅ timer 10:53/13:53 | 东方财富数据获取+简讯推送 |
+| eastmoney-rating-pdf | oneshot | - | ✅ timer 18:01 | 评级PDF推送 |
+| fusion-eval | oneshot | - | ✅ timer 12:12/14:41 | 日间融合评估(不推送) |
+| warehouse-warmup | oneshot | - | ✅ timer 08:30/09:20/10:50/12:55/13:50 | 数据仓库分阶段预热 |
 | retrain-lgb | oneshot | - | ✅ timer 15:20 | LGB+RF模型自动重训(≥7天触发) |
 | c1test-daily | oneshot | - | ✅ timer 20:00 | 🆕 统一回测快速模式 |
 | c1test-weekly | oneshot | - | ✅ timer 周日10:30 | 🆕 统一回测全面模式 |
@@ -120,7 +123,7 @@ ML实时预警是真正的**事件驱动的实时**：行情一跳就检查是�
 11:00 ─ scheduler ─── 整点全量分析
 11:45 ─ scheduler ─── 大盘复盘(文字+PDF)
 12:30 ─ calibrate-alphas.timer ── 🆕 Alpha权重自动校准
-13:00 ─ TA.timer ──── 第二轮TA深度分析
+13:30 ─ TA.timer ──── 第二轮TA深度分析
 14:00 ─ scheduler ─── 整点全量分析
 15:15 ─ lynx-signal ─ 量化信号建模+推送
 15:20 ─ retrain-lgb.timer ── 🆕 LGB 模型自动重训
@@ -237,11 +240,11 @@ prob_up 100%→ L7 +3.00   (钳位上限)
 
 | 类型 | 引擎 | 时间 | 说明 |
 |------|------|------|------|
-| 融合决策 | Fusion | 19:00 | L7分组，三层结构 |
+| 融合决策 | Fusion | 18:00 | L7分组，仅推送一次 |
 | 准实时速报 | Fusion | 09:33+每5min | 仅变化超阈值推送 |
 | 量化信号 | Fusion | 15:15 | 单行每只 |
 | 大盘复盘 | MindLynx | 11:45/15:45 | 文字摘要+PDF |
-| 个股分析 | MindLynx | 整点(10/11/14/15) | Markdown仪表盘 |
+| 个股分析 | MindLynx | 整点(11:00/14:00) | Markdown仪表盘 |
 | 盘中告警 | MindLynx | 盘中触发 | ATR止损/均线突破 |
 | 周末要闻 | MindLynx | 周日20:00 | 按股分组 |
 

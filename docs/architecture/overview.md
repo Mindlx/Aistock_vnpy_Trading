@@ -1,6 +1,6 @@
 # Aistock_vnpy_Trading 系统架构文档
 
-> 最后更新: 2026-07-02
+> 最后更新: 2026-07-22
 > 覆盖: 三系统融合 + ly双模型IC加权 + v4.0精度校准 + op_advice退出L7裁决 + 分歧ML少数方增强
 
 ---
@@ -65,7 +65,7 @@
 
 | 子系统 | 方法 | 频率 | 核心输出 | 独立性 |
 |--------|------|------|---------|--------|
-| **ly** (lynx_vnpy) | RandomForest+LGB 双模型集成 + 15TA+58Alpha158因子 | 日频/准实时 | 上涨概率 + L7 信号 | 独立推送 |
+| **ly** (lynx_vnpy) | RandomForest+LGB 双模型集成 + 15TA+58Alpha158因子 | 日频/准实时 | 上涨概率 + L7 信号 | 权重=0, 不推送 |
 | **ml** (MindLynx-Aistock) | 12因子+15策略+LLM 推理 | 日频/实时 | 综合评分 0-100 (op_advice纯文本,不参与融合) | 独立 venv, 独立推送 |
 | **at** (mind_TradingAgent) | 多智能体辩论 (LangGraph) | 盘后 (10:10/13:30) | 5 级评级 | 独立 venv |
 
@@ -79,16 +79,8 @@ Fusion Engine 通过两种方式集成：
 
 ### LLM 模型配置
 
-AT 系统默认使用本地模型 (Qwen3.6-27B, 2×RTX 3090, llama.cpp)：
-- 配置文件: `systems/mind_TradingAgent/.env`
-- 推理端点: `http://localhost:15433/v1` (llama.cpp server, Docker)
-- 结构化输出: 不原生支持, 系统自动回退到 free-text 生成
-
-**如需切回 DeepSeek API**:
-```bash
-cp systems/mind_TradingAgent/.env.deepseek-backup systems/mind_TradingAgent/.env
-```
-> `.env` 文件不提交到 Git (含 API Key), 备份为 `.env.deepseek-backup`。
+AT 系统使用 DeepSeek API（云端推理）。
+配置文件: `systems/mind_TradingAgent/.env`
 
 ---
 
@@ -128,7 +120,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 │                        系统组成                                   │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Fusion Venv (.venv/ Python 3.10)                          │  │
+│  │  Fusion Venv (.venv/ Python 3.13)                          │  │
 │  │  ├── scripts/run_daily.py         (18:00 日终融合)          │  │
 │  │  ├── src/realtime_fusion.py       (09:33+ 准实时 daemon)    │  │
 │  │  ├── src/wecom_notifier.py        (Markdown 推送)            │  │
@@ -176,7 +168,7 @@ ML实时预警是真正的**事件驱动实时**：行情一跳就检查止损�
 09:33 ─ realtime-fusion.timer ─── 启动准实时 daemon (每300s扫描文件交换区)
 11:00 ─ scheduler ─── 整点全量分析
 11:45 ─ scheduler ─── 大盘复盘 (文字摘要 + PDF)
-13:00 ─ TA.timer ──── 第二轮 TA 深度分析
+13:30 ─ TA.timer ──── 第二轮 TA 深度分析
 14:00 ─ scheduler ─── 整点全量分析
 15:15 ─ lynx-signal.timer ── 量化信号建模 + 推送
 15:45 ─ scheduler ─── 大盘复盘 (文字摘要 + PDF)
@@ -232,7 +224,7 @@ Sun 20:00 ─ scheduler ─ 周末情报推送
 **决策时间**: 项目初始化时（2026-05-30）
 **原因**: 三个子系统是独立上游项目，各自有依赖要求：
 - `MindLynx-Aistock` 需要 Python 3.12 + 特定版本 `akshare`/`weasyprint`
-- Fusion 引擎使用 Python 3.10 + `scikit-learn`/`pandas`
+- Fusion 引擎使用 Python 3.13 + `scikit-learn`/`pandas`
 - 合并 venv 会导致依赖冲突
 **判定**: ✅ 正确的设计。跨 venv 调用通过 subprocess（进程隔离）是合理的集成模式。
 
