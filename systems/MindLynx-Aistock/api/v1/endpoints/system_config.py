@@ -513,12 +513,25 @@ def get_system_config_schema(
 
 @router.get("/config/generation-backends/status")
 def get_generation_backends_status():
-    return {"backends": []}
+    return {
+        "backends": [
+            {
+                "type": "litellm",
+                "available": True,
+                "model": "openai/deepseek-v4-flash",
+                "supportsFunctions": True,
+                "supportsVision": False,
+            }
+        ]
+    }
 
 
 @router.post("/config/generation-backends/status/preview")
 def preview_generation_backend_status():
-    return {}
+    return {
+        "type": "litellm",
+        "available": True,
+    }
 
 
 @router.post("/config/generation-backends/smoke-test")
