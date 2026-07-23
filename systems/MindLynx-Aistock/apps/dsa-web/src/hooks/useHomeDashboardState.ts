@@ -39,6 +39,7 @@ export function useHomeDashboardState() {
       syncTaskCreated: state.syncTaskCreated,
       syncTaskUpdated: state.syncTaskUpdated,
       syncTaskFailed: state.syncTaskFailed,
+      refreshActiveTasks: state.refreshActiveTasks,
       removeTask: state.removeTask,
       openMarkdownDrawer: state.openMarkdownDrawer,
       closeMarkdownDrawer: state.closeMarkdownDrawer,

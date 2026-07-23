@@ -37,6 +37,7 @@ vi.mock('../../api/analysis', async () => {
       analyzeAsync: vi.fn(),
       triggerMarketReview: vi.fn(),
       getStatus: vi.fn(),
+      getTasks: vi.fn(),
     },
   };
 });
@@ -117,6 +118,12 @@ describe('HomePage', () => {
     vi.clearAllMocks();
     navigateMock.mockReset();
     useStockPoolStore.getState().resetDashboardState();
+    vi.mocked(analysisApi.getTasks).mockResolvedValue({
+      total: 0,
+      pending: 0,
+      processing: 0,
+      tasks: [],
+    });
     vi.mocked(agentApi.getSkills).mockResolvedValue({ skills: [], default_skill_id: '' });
     vi.mocked(systemConfigApi.getSetupStatus).mockResolvedValue({
       isComplete: true,
@@ -457,26 +464,31 @@ describe('HomePage', () => {
   });
 
   it('renders active task panel content from dashboard state', async () => {
+    const activeTask = {
+      taskId: 'task-1',
+      stockCode: '600519',
+      stockName: '贵州茅台',
+      status: 'processing' as const,
+      progress: 45,
+      message: '正在抓取最新行情',
+      reportType: 'detailed',
+      createdAt: '2026-03-18T08:00:00Z',
+    };
     vi.mocked(historyApi.getList).mockResolvedValue({
       total: 0,
       page: 1,
       limit: 20,
       items: [],
     });
+    vi.mocked(analysisApi.getTasks).mockResolvedValue({
+      total: 1,
+      pending: 0,
+      processing: 1,
+      tasks: [activeTask],
+    });
 
     useStockPoolStore.setState({
-      activeTasks: [
-        {
-          taskId: 'task-1',
-          stockCode: '600519',
-          stockName: '贵州茅台',
-          status: 'processing',
-          progress: 45,
-          message: '正在抓取最新行情',
-          reportType: 'detailed',
-          createdAt: '2026-03-18T08:00:00Z',
-        },
-      ],
+      activeTasks: [activeTask],
     });
 
     render(

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analysisApi, DuplicateTaskError } from '../../api/analysis';
 import { historyApi } from '../../api/history';
+import type { TaskInfo, TaskListResponse } from '../../types/analysis';
 import { useStockPoolStore } from '../stockPoolStore';
 
 vi.mock('../../api/history', () => ({
@@ -17,6 +18,7 @@ vi.mock('../../api/analysis', async () => {
     ...actual,
     analysisApi: {
       analyzeAsync: vi.fn(),
+      getTasks: vi.fn(),
     },
   };
 });
@@ -48,6 +50,33 @@ const historyReport = {
   },
 };
 
+function createTask(overrides: Partial<TaskInfo> = {}): TaskInfo {
+  return {
+    taskId: 'task-1',
+    stockCode: '600519',
+    stockName: '贵州茅台',
+    status: 'processing',
+    progress: 50,
+    reportType: 'detailed',
+    createdAt: '2026-03-18T08:00:00Z',
+    ...overrides,
+  };
+}
+
+function createTaskListResponse(
+  tasks: TaskInfo[],
+  counts: Partial<Pick<TaskListResponse, 'pending' | 'processing' | 'total'>> = {},
+): TaskListResponse {
+  const pending = counts.pending ?? tasks.filter((task) => task.status === 'pending').length;
+  const processing = counts.processing ?? tasks.filter((task) => task.status === 'processing').length;
+  return {
+    total: counts.total ?? tasks.length,
+    pending,
+    processing,
+    tasks,
+  };
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -62,6 +91,7 @@ describe('stockPoolStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useStockPoolStore.getState().resetDashboardState();
+    vi.mocked(analysisApi.getTasks).mockResolvedValue(createTaskListResponse([]));
   });
 
   it('loads initial history and auto-selects the first report', async () => {
@@ -365,6 +395,126 @@ describe('stockPoolStore', () => {
     const state = useStockPoolStore.getState();
     expect(state.activeTasks).toHaveLength(0);
     expect(state.error).toBeTruthy();
+  });
+
+  it('reconciles active tasks from a complete empty backend snapshot without dismissing them', async () => {
+    const staleTask = createTask();
+    useStockPoolStore.getState().syncTaskCreated(staleTask);
+    vi.mocked(analysisApi.getTasks).mockResolvedValue(createTaskListResponse([]));
+
+    await useStockPoolStore.getState().refreshActiveTasks();
+
+    expect(analysisApi.getTasks).toHaveBeenCalledWith({
+      status: 'pending,processing',
+      limit: 100,
+    });
+    expect(useStockPoolStore.getState().activeTasks).toHaveLength(0);
+
+    useStockPoolStore.getState().syncTaskCreated(staleTask);
+    expect(useStockPoolStore.getState().activeTasks).toEqual([staleTask]);
+  });
+
+  it('does not prune tasks created after an active-task refresh request started', async () => {
+    const emptySnapshot = createDeferred<TaskListResponse>();
+    const createdTask = createTask({
+      taskId: 'task-created-after-request',
+      status: 'pending',
+      progress: 0,
+    });
+    const updatedTask = {
+      ...createdTask,
+      status: 'processing' as const,
+      progress: 35,
+    };
+    vi.mocked(analysisApi.getTasks).mockReturnValue(emptySnapshot.promise);
+
+    const refreshPromise = useStockPoolStore.getState().refreshActiveTasks();
+    useStockPoolStore.getState().syncTaskCreated(createdTask);
+
+    emptySnapshot.resolve(createTaskListResponse([]));
+    await refreshPromise;
+
+    expect(useStockPoolStore.getState().activeTasks).toEqual([createdTask]);
+
+    useStockPoolStore.getState().syncTaskUpdated(updatedTask);
+    expect(useStockPoolStore.getState().activeTasks).toEqual([updatedTask]);
+  });
+
+  it('upserts pending and processing tasks from the backend snapshot', async () => {
+    const existingTask = createTask({ taskId: 'task-existing', progress: 30 });
+    const updatedTask = createTask({ taskId: 'task-existing', progress: 80, message: 'LLM 正在生成分析结果' });
+    const newTask = createTask({
+      taskId: 'task-new',
+      stockCode: '000001',
+      stockName: '平安银行',
+      status: 'pending',
+      progress: 0,
+    });
+    useStockPoolStore.getState().syncTaskCreated(existingTask);
+    vi.mocked(analysisApi.getTasks).mockResolvedValue(
+      createTaskListResponse([updatedTask, newTask]),
+    );
+
+    await useStockPoolStore.getState().refreshActiveTasks();
+
+    expect(useStockPoolStore.getState().activeTasks).toEqual([updatedTask, newTask]);
+  });
+
+  it('does not re-add dismissed tasks from backend reconciliation', async () => {
+    const dismissedTask = createTask();
+    useStockPoolStore.getState().syncTaskCreated(dismissedTask);
+    useStockPoolStore.getState().removeTask(dismissedTask.taskId);
+    vi.mocked(analysisApi.getTasks).mockResolvedValue(
+      createTaskListResponse([dismissedTask]),
+    );
+
+    await useStockPoolStore.getState().refreshActiveTasks();
+
+    expect(useStockPoolStore.getState().activeTasks).toHaveLength(0);
+  });
+
+  it('ignores late active-task snapshots from older refreshes', async () => {
+    const staleSnapshot = createDeferred<TaskListResponse>();
+    const freshSnapshot = createDeferred<TaskListResponse>();
+    const staleTask = createTask({ taskId: 'task-stale' });
+    const freshTask = createTask({ taskId: 'task-fresh', stockCode: '000001', stockName: '平安银行' });
+    vi.mocked(analysisApi.getTasks)
+      .mockReturnValueOnce(staleSnapshot.promise)
+      .mockReturnValueOnce(freshSnapshot.promise);
+
+    const staleRefresh = useStockPoolStore.getState().refreshActiveTasks();
+    const freshRefresh = useStockPoolStore.getState().refreshActiveTasks();
+
+    freshSnapshot.resolve(createTaskListResponse([freshTask]));
+    await freshRefresh;
+    expect(useStockPoolStore.getState().activeTasks).toEqual([freshTask]);
+
+    staleSnapshot.resolve(createTaskListResponse([staleTask]));
+    await staleRefresh;
+    expect(useStockPoolStore.getState().activeTasks).toEqual([freshTask]);
+  });
+
+  it('does not prune local tasks when the backend active-task snapshot is incomplete', async () => {
+    const localTask = createTask({ taskId: 'task-local' });
+    const remoteTask = createTask({ taskId: 'task-remote', stockCode: '000001', stockName: '平安银行' });
+    useStockPoolStore.getState().syncTaskCreated(localTask);
+    vi.mocked(analysisApi.getTasks).mockResolvedValue(
+      createTaskListResponse([remoteTask], { processing: 2, total: 2 }),
+    );
+
+    await useStockPoolStore.getState().refreshActiveTasks();
+
+    expect(useStockPoolStore.getState().activeTasks).toEqual([localTask, remoteTask]);
+  });
+
+  it('keeps active tasks unchanged when backend reconciliation fails', async () => {
+    const activeTask = createTask();
+    useStockPoolStore.getState().syncTaskCreated(activeTask);
+    vi.mocked(analysisApi.getTasks).mockRejectedValue(new Error('network failed'));
+
+    await useStockPoolStore.getState().refreshActiveTasks();
+
+    expect(useStockPoolStore.getState().activeTasks).toEqual([activeTask]);
   });
 
   it('triggers an analysis with the forceRefresh flag', async () => {

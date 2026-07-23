@@ -118,13 +118,178 @@ describe('SettingsField', () => {
       />
     );
 
-    const select = screen.getByLabelText('NOTIFICATION_MIN_SEVERITY');
-    expect(screen.getByRole('option', { name: 'Not set' })).not.toBeDisabled();
+    const select = screen.getByLabelText('最小通知级别');
+    expect(screen.getByRole('option', { name: '未设置' })).not.toBeDisabled();
     expect(screen.queryByRole('option', { name: '请选择' })).not.toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: '' } });
 
     expect(onChange).toHaveBeenCalledWith('NOTIFICATION_MIN_SEVERITY', '');
+  });
+
+  it('renders localized labels for real system config select options', () => {
+    const selectCases = [
+      {
+        key: 'NEWS_STRATEGY_PROFILE',
+        category: 'data_source',
+        options: ['ultra_short', 'short', 'medium', 'long'],
+        expectedLabels: ['超短线（1天）', '短期（3天）', '中期（7天）', '长期（30天）'],
+      },
+      {
+        key: 'REPORT_TYPE',
+        category: 'notification',
+        options: ['simple', 'full', 'brief'],
+        expectedLabels: ['简洁', '完整', '简报'],
+      },
+      {
+        key: 'LOG_LEVEL',
+        category: 'system',
+        options: ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        expectedLabels: ['调试', '信息', '警告', '错误', '严重'],
+      },
+      {
+        key: 'MARKET_REVIEW_REGION',
+        category: 'system',
+        options: ['cn', 'hk', 'us', 'both'],
+        expectedLabels: ['A 股', '港股', '美股', '全部市场'],
+      },
+    ] as const;
+
+    selectCases.forEach(({ key, category, options, expectedLabels }) => {
+      const { unmount } = render(
+        <SettingsField
+          item={{
+            key,
+            value: options[0],
+            rawValueExists: true,
+            isMasked: false,
+            schema: {
+              key,
+              title: key,
+              category,
+              dataType: 'string',
+              uiControl: 'select',
+              isSensitive: false,
+              isRequired: false,
+              isEditable: true,
+              options: [...options],
+              validation: {},
+              displayOrder: 1,
+            },
+          }}
+          value={options[0]}
+          onChange={() => undefined}
+        />
+      );
+
+      expectedLabels.forEach((label) => {
+        expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
+      });
+
+      options.forEach((rawOption) => {
+        expect(screen.queryByRole('option', { name: rawOption })).not.toBeInTheDocument();
+      });
+
+      unmount();
+    });
+  });
+
+  it('renders context compression profile options with Chinese labels', () => {
+    const onChange = vi.fn();
+
+    render(
+      <SettingsField
+        item={{
+          key: 'AGENT_CONTEXT_COMPRESSION_PROFILE',
+          value: 'balanced',
+          rawValueExists: true,
+          isMasked: false,
+          schema: {
+            key: 'AGENT_CONTEXT_COMPRESSION_PROFILE',
+            category: 'agent',
+            dataType: 'string',
+            uiControl: 'select',
+            isSensitive: false,
+            isRequired: false,
+            isEditable: true,
+            options: [
+              { label: '成本优先', value: 'cost' },
+              { label: '均衡推荐', value: 'balanced' },
+              { label: '长上下文原文优先', value: 'long_context_raw_first' },
+            ],
+            validation: {
+              enum: ['cost', 'balanced', 'long_context_raw_first'],
+            },
+            displayOrder: 72,
+          },
+        }}
+        value="balanced"
+        onChange={onChange}
+      />
+    );
+
+    expect(screen.getByLabelText('上下文压缩策略')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '成本优先' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '均衡推荐' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '长上下文原文优先' })).toBeInTheDocument();
+  });
+
+  it('renders blank-value preset guidance for context compression numeric fields', () => {
+    const onChange = vi.fn();
+
+    render(
+      <>
+        <SettingsField
+          item={{
+            key: 'AGENT_CONTEXT_COMPRESSION_TRIGGER_TOKENS',
+            value: '',
+            rawValueExists: false,
+            isMasked: false,
+            schema: {
+              key: 'AGENT_CONTEXT_COMPRESSION_TRIGGER_TOKENS',
+              category: 'agent',
+              dataType: 'integer',
+              uiControl: 'number',
+              isSensitive: false,
+              isRequired: false,
+              isEditable: true,
+              options: [],
+              validation: { min: 1000 },
+              displayOrder: 73,
+            },
+          }}
+          value=""
+          onChange={onChange}
+        />
+        <SettingsField
+          item={{
+            key: 'AGENT_CONTEXT_PROTECTED_TURNS',
+            value: '',
+            rawValueExists: false,
+            isMasked: false,
+            schema: {
+              key: 'AGENT_CONTEXT_PROTECTED_TURNS',
+              category: 'agent',
+              dataType: 'integer',
+              uiControl: 'number',
+              isSensitive: false,
+              isRequired: false,
+              isEditable: true,
+              options: [],
+              validation: { min: 1 },
+              displayOrder: 74,
+            },
+          }}
+          value=""
+          onChange={onChange}
+        />
+      </>
+    );
+
+    expect(screen.getByLabelText('压缩触发阈值（tokens）')).toBeInTheDocument();
+    expect(screen.getByLabelText('原文保护轮次')).toBeInTheDocument();
+    expect(screen.getByText(/估算历史 token 超过该值时触发摘要/)).toHaveTextContent('留空则跟随当前上下文压缩策略 profile 默认值');
+    expect(screen.getByText(/压缩时最近 N 个用户轮次及其后的回复保持原文/)).toHaveTextContent('留空则跟随当前上下文压缩策略 profile 默认值');
   });
 
   it('renders localized custom webhook body template guidance', () => {

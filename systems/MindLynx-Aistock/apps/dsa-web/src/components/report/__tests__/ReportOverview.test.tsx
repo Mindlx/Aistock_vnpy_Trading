@@ -48,6 +48,31 @@ describe('ReportOverview', () => {
     expect(screen.queryByText('中性')).not.toBeInTheDocument();
   });
 
+  it('places related boards below action advice and renders more than three on one row', () => {
+    const { container } = render(
+      <ReportOverview
+        meta={baseMeta}
+        summary={baseSummary}
+        details={{
+          belongBoards: [
+            { name: '白酒', type: '行业' },
+            { name: '消费', type: '概念' },
+            { name: '高端制造' },
+            { name: '沪股通' },
+          ],
+        }}
+      />,
+    );
+
+    const actionAdviceTitle = screen.getByText('操作建议');
+    const relatedBoardsRegion = screen.getByRole('region', { name: '关联板块' });
+    const boardList = container.querySelector('.home-related-board-list');
+
+    expect(actionAdviceTitle.compareDocumentPosition(relatedBoardsRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('沪股通')).toBeInTheDocument();
+    expect(boardList).toHaveClass('flex-nowrap', 'overflow-x-auto');
+  });
+
   it('shows board list when rankings are unavailable', () => {
     render(
       <ReportOverview

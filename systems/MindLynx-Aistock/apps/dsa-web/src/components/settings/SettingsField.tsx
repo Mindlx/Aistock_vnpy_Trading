@@ -2,17 +2,20 @@ import { useState } from 'react';
 import type React from 'react';
 import { Badge, Button, Select, Input } from '../common';
 import type { ConfigValidationIssue, SystemConfigFieldSchema, SystemConfigItem } from '../../types/systemConfig';
-import { getFieldDescriptionZh, getFieldTitleZh } from '../../utils/systemConfigI18n';
+import { getFieldDescriptionZh, getFieldOptionLabelZh, getFieldTitleZh } from '../../utils/systemConfigI18n';
 import { cn } from '../../utils/cn';
 import { SettingsHelpButton } from './SettingsHelpButton';
 
-function normalizeSelectOptions(options: SystemConfigFieldSchema['options'] = []) {
+function normalizeSelectOptions(key: string, options: SystemConfigFieldSchema['options'] = []) {
   return options.map((option) => {
     if (typeof option === 'string') {
-      return { value: option, label: option };
+      return { value: option, label: getFieldOptionLabelZh(key, option) };
     }
 
-    return option;
+    return {
+      ...option,
+      label: getFieldOptionLabelZh(key, option.value, option.label),
+    };
   });
 }
 
@@ -78,7 +81,7 @@ function renderFieldControl(
           id={controlId}
           value={value}
           onChange={onChange}
-          options={normalizeSelectOptions(schema.options)}
+          options={normalizeSelectOptions(item.key, schema.options)}
           disabled={disabled || !schema.isEditable}
           placeholder="请选择"
         />

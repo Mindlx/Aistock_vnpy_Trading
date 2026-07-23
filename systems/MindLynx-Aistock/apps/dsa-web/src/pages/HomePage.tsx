@@ -96,6 +96,7 @@ const HomePage: React.FC = () => {
     syncTaskCreated,
     syncTaskUpdated,
     syncTaskFailed,
+    refreshActiveTasks,
     removeTask,
     openMarkdownDrawer,
     closeMarkdownDrawer,
@@ -290,6 +291,7 @@ const HomePage: React.FC = () => {
     syncTaskCreated,
     syncTaskUpdated,
     syncTaskFailed,
+    refreshActiveTasks,
     removeTask,
   });
 

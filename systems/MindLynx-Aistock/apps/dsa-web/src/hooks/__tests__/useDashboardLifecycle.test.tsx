@@ -30,11 +30,13 @@ describe('useDashboardLifecycle', () => {
   it('loads history, refreshes on interval, and reacts to visibility changes', () => {
     const loadInitialHistory = vi.fn().mockResolvedValue(undefined);
     const refreshHistory = vi.fn().mockResolvedValue(undefined);
+    const refreshActiveTasks = vi.fn().mockResolvedValue(undefined);
 
     renderHook(() =>
       useDashboardLifecycle({
         loadInitialHistory,
         refreshHistory,
+        refreshActiveTasks,
         syncTaskCreated: vi.fn(),
         syncTaskUpdated: vi.fn(),
         syncTaskFailed: vi.fn(),
@@ -43,11 +45,13 @@ describe('useDashboardLifecycle', () => {
     );
 
     expect(loadInitialHistory).toHaveBeenCalledTimes(1);
+    expect(refreshActiveTasks).toHaveBeenCalledTimes(1);
 
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
     expect(refreshHistory).toHaveBeenCalledWith(true);
+    expect(refreshActiveTasks).toHaveBeenCalledTimes(2);
 
     act(() => {
       Object.defineProperty(document, 'visibilityState', {
@@ -58,6 +62,7 @@ describe('useDashboardLifecycle', () => {
     });
 
     expect(refreshHistory).toHaveBeenCalledTimes(2);
+    expect(refreshActiveTasks).toHaveBeenCalledTimes(3);
   });
 
   it('cleans pending task removal timers on unmount', () => {
@@ -67,6 +72,7 @@ describe('useDashboardLifecycle', () => {
       useDashboardLifecycle({
         loadInitialHistory: vi.fn().mockResolvedValue(undefined),
         refreshHistory: vi.fn().mockResolvedValue(undefined),
+        refreshActiveTasks: vi.fn().mockResolvedValue(undefined),
         syncTaskCreated: vi.fn(),
         syncTaskUpdated: vi.fn(),
         syncTaskFailed: vi.fn(),
@@ -99,6 +105,7 @@ describe('useDashboardLifecycle', () => {
       useDashboardLifecycle({
         loadInitialHistory: vi.fn().mockResolvedValue(undefined),
         refreshHistory,
+        refreshActiveTasks: vi.fn().mockResolvedValue(undefined),
         syncTaskCreated: vi.fn(),
         syncTaskUpdated,
         syncTaskFailed: vi.fn(),
@@ -130,6 +137,7 @@ describe('useDashboardLifecycle', () => {
       useDashboardLifecycle({
         loadInitialHistory: vi.fn().mockResolvedValue(undefined),
         refreshHistory: vi.fn().mockResolvedValue(undefined),
+        refreshActiveTasks: vi.fn().mockResolvedValue(undefined),
         syncTaskCreated: vi.fn(),
         syncTaskUpdated,
         syncTaskFailed: vi.fn(),
@@ -160,6 +168,7 @@ describe('useDashboardLifecycle', () => {
       useDashboardLifecycle({
         loadInitialHistory: vi.fn().mockResolvedValue(undefined),
         refreshHistory: vi.fn().mockResolvedValue(undefined),
+        refreshActiveTasks: vi.fn().mockResolvedValue(undefined),
         syncTaskCreated: vi.fn(),
         syncTaskUpdated: vi.fn(),
         syncTaskFailed,
@@ -185,5 +194,29 @@ describe('useDashboardLifecycle', () => {
     });
 
     expect(removeTask).toHaveBeenCalledWith(failedTask.taskId);
+  });
+
+  it('reconciles active tasks when the SSE stream connects', () => {
+    const refreshActiveTasks = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useDashboardLifecycle({
+        loadInitialHistory: vi.fn().mockResolvedValue(undefined),
+        refreshHistory: vi.fn().mockResolvedValue(undefined),
+        refreshActiveTasks,
+        syncTaskCreated: vi.fn(),
+        syncTaskUpdated: vi.fn(),
+        syncTaskFailed: vi.fn(),
+        removeTask: vi.fn(),
+      }),
+    );
+
+    const taskStreamOptions = vi.mocked(useTaskStream).mock.calls[0]?.[0];
+
+    act(() => {
+      taskStreamOptions?.onConnected?.();
+    });
+
+    expect(refreshActiveTasks).toHaveBeenCalledTimes(2);
   });
 });

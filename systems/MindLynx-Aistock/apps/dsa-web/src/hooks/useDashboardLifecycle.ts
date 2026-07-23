@@ -5,6 +5,7 @@ import { useTaskStream } from './useTaskStream';
 type UseDashboardLifecycleOptions = {
   loadInitialHistory: () => Promise<void>;
   refreshHistory: (silent?: boolean) => Promise<void>;
+  refreshActiveTasks: () => Promise<void>;
   syncTaskCreated: (task: TaskInfo) => void;
   syncTaskUpdated: (task: TaskInfo) => void;
   syncTaskFailed: (task: TaskInfo) => void;
@@ -15,6 +16,7 @@ type UseDashboardLifecycleOptions = {
 export function useDashboardLifecycle({
   loadInitialHistory,
   refreshHistory,
+  refreshActiveTasks,
   syncTaskCreated,
   syncTaskUpdated,
   syncTaskFailed,
@@ -29,7 +31,8 @@ export function useDashboardLifecycle({
     }
 
     void loadInitialHistory();
-  }, [enabled, loadInitialHistory]);
+    void refreshActiveTasks();
+  }, [enabled, loadInitialHistory, refreshActiveTasks]);
 
   useEffect(() => {
     if (!enabled) {
@@ -38,10 +41,11 @@ export function useDashboardLifecycle({
 
     const intervalId = window.setInterval(() => {
       void refreshHistory(true);
+      void refreshActiveTasks();
     }, 30_000);
 
     return () => window.clearInterval(intervalId);
-  }, [enabled, refreshHistory]);
+  }, [enabled, refreshHistory, refreshActiveTasks]);
 
   useEffect(() => {
     if (!enabled) {
@@ -51,12 +55,13 @@ export function useDashboardLifecycle({
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         void refreshHistory(true);
+        void refreshActiveTasks();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [enabled, refreshHistory]);
+  }, [enabled, refreshHistory, refreshActiveTasks]);
 
   useEffect(() => {
     return () => {
@@ -78,6 +83,9 @@ export function useDashboardLifecycle({
     onTaskCreated: syncTaskCreated,
     onTaskStarted: syncTaskUpdated,
     onTaskProgress: syncTaskUpdated,
+    onConnected: () => {
+      void refreshActiveTasks();
+    },
     onTaskCompleted: (task) => {
       syncTaskUpdated(task);
       void refreshHistory(true);

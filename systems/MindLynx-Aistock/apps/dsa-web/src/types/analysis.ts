@@ -207,14 +207,15 @@ export interface DuplicateTaskError {
 
 /** History item summary */
 export interface HistoryItem {
-  id: number;  // Record primary key ID, always present for persisted history items
-  queryId: string;  // Linked analysis query ID
+  id: number;
+  queryId: string;
   stockCode: string;
   stockName?: string;
   reportType?: ReportType;
   sentimentScore?: number;
   operationAdvice?: string;
   createdAt: string;
+  marketPhaseSummary?: MarketPhaseSummary;
 }
 
 /** History list response */
@@ -285,3 +286,23 @@ export const getSentimentColor = (score: number): string => {
   if (score <= 80) return '#22c55e'; // green-500
   return '#10b981'; // emerald-500
 };
+
+export type MarketPhaseValue = 'premarket' | 'intraday' | 'lunch_break' | 'closing_auction' | 'postmarket' | 'non_trading' | 'unknown';
+export type AnalysisPhase = 'auto' | 'premarket' | 'intraday' | 'postmarket';
+
+export interface MarketPhaseSummary {
+  phase: MarketPhaseValue;
+  market?: string;
+  warnings?: string[];
+}
+
+export interface StockBarItem {
+  id: number;
+  stockCode: string;
+  stockName: string;
+  marketPhaseSummary?: MarketPhaseSummary;
+  sentimentScore?: number;
+  operationAdvice?: string;
+  lastAnalysisTime?: string;
+  analysisCount?: number;
+}
