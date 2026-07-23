@@ -39,6 +39,8 @@ FACTOR_NAMES = [
     "volume_acceleration",
     "consecutive_direction",
     "volatility_ratio",
+    "pattern_chart_elevated",
+    "concentration",
 ]
 
 FACTOR_DISPLAY_NAMES = {
@@ -54,6 +56,8 @@ FACTOR_DISPLAY_NAMES = {
     "volume_acceleration": "量能加速",
     "consecutive_direction": "连续方向",
     "volatility_ratio": "波动率比",
+    "pattern_chart_elevated": "高中间峰双底",
+    "concentration": "筹码集中度(90%)",
 }
 
 # Default rolling window for IR computation (trading days)

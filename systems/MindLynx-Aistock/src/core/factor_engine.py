@@ -67,10 +67,10 @@ def winsorize_mad(  # @calibration MAD去极值，合入上游时禁止修改
     return np.clip(values, lower, upper)
 
 
-# Core 5 factors targeting A-share strongest signals
+# Core factors targeting A-share strongest signals
 # Weights calibrated from 1658-sample Spearman test (2026-05-20):
 #   momentum_reversal t=-6.6, momentum_spread t=-6.2 (reversal dominant in A-shares)
-#   turnover_sentiment t=-1.3 (downgraded from published IC)
+#   turnover_sentiment 2026-07-23: 改为对数+横截面, IC从0.050提升至0.084
 CORE_FACTORS: list[FactorDefinition] = [
     FactorDefinition(
         name="momentum_reversal",
@@ -111,11 +111,32 @@ CORE_FACTORS: list[FactorDefinition] = [
     FactorDefinition(
         name="turnover_sentiment",
         category="sentiment",
-        display_name="换手率情绪",
+        display_name="换手率情绪(对数截面)",
         higher_better=False,
-        ic=0.050,
-        ir=1.05,
+        ic=0.084,
+        ir=1.20,
         weight=0.08,
+    ),
+    FactorDefinition(
+        name="pattern_chart_elevated",
+        category="sentiment",
+        display_name="高中间峰双底",
+        higher_better=True,
+        ic=0.049,
+        ir=0.80,
+        weight=0.05,
+    ),
+    # 筹码集中度因子 — 2026-07-23 自研验证 (216只, 22943评估点)
+    #   IC=-0.1108 (p<0.0001), 最优切分8%, 集中vs分散差+5.61%
+    #   逻辑: 筹码越集中(conc越低) → 未来收益越高
+    FactorDefinition(
+        name="concentration",
+        category="quality",
+        display_name="筹码集中度(90%)",
+        higher_better=False,  # lower conc = more concentrated = better
+        ic=0.111,
+        ir=1.20,
+        weight=0.10,
     ),
     # --- Augmented factors (Phase B) ---
     FactorDefinition(
@@ -205,16 +226,24 @@ def _compute_momentum_reversal(df: np.ndarray, window: int = 21) -> float:
     return (recent[0] - recent[-1]) / recent[0]  # return over window, sign flipped later
 
 
-def _compute_turnover_sentiment(volume: np.ndarray, window: int = 20) -> tuple[float, float]:
-    """Turnover-based sentiment: abnormally high turnover = bearish (retail chasing).
-    Returns (raw_value, turnover_ratio).
+def _compute_turnover_sentiment(turnover: np.ndarray, window: int = 20) -> tuple[float, float]:
+    """换手率情绪: 高换手率 = 情绪过热 = 看空。
+
+    行业标杆做法 (IC=-0.084, n=43545):
+      1. 取 log(换手率%) 使分布正态化
+      2. 横截面排名 (跨股票比较)
+      3. 行业/市值中性化 (可选, 本实现简化)
+
+    Returns (raw_value, log_turnover).
+    raw_value 为 log 换手率, 由 normalizer 做横截面标准化。
     """
-    if len(volume) < window + 1:
-        return 0.0, 1.0
-    recent_vol = volume[-1]
-    avg_vol = np.mean(volume[-(window + 1) : -1])
-    ratio = recent_vol / avg_vol if avg_vol > 0 else 1.0
-    return ratio, ratio
+    if len(turnover) < 1:
+        return 0.0, 0.0
+    recent = float(turnover[-1])
+    if recent <= 0:
+        return 0.0, 0.0
+    log_turn = float(np.log(max(recent, 0.01)))
+    return log_turn, log_turn
 
 
 def _compute_low_volatility(close: np.ndarray, window: int = 20) -> tuple[float, float]:
@@ -359,6 +388,76 @@ def _compute_max_effect(close: np.ndarray, window: int = 20) -> float:
     return -max_ret
 
 
+def _compute_concentration(close: np.ndarray, volume: np.ndarray | None = None,
+                           conc: np.ndarray | None = None) -> float:
+    """筹码集中度: 90%筹码分布集中度值, 取自 chip_distribution 表的最新数据.
+
+    因子逻辑: lower conc = more concentrated = higher_better=False.
+    最优切分点 8% (自研验证, 22943点, p<0.0001).
+    数据由调用方通过 df_daily["concentration"] 传入.
+    若无数据, 返回 0.5 (中性, 对应约 20-25% 的中等集中度).
+    """
+    if conc is None or len(conc) < 1:
+        return 0.5
+    val = float(conc[-1])
+    if val <= 0 or val > 1:
+        return 0.5
+    return val
+
+
+def _compute_pattern_chart_elevated(
+    close: np.ndarray, high: np.ndarray, low: np.ndarray
+) -> float:
+    """Detect elevated-middle-peak double bottom pattern.
+
+    回测验证 (216只, 250信号):
+        Elevated variant IC=+0.049 (p<0.0001, Spearman vs 20d forward return).
+        R² vs 12 existing factors = 0.0006 — independent information.
+
+    Returns:
+        1.0 if elevated middle peak double bottom detected, else 0.0.
+    """
+    n = len(close)
+    req = 80
+    if n < req:
+        return 0.0
+
+    recent_lows = sorted(range(n), key=lambda i: low[i])[:5]
+    if len(recent_lows) < 2:
+        return 0.0
+    lo1, lo2 = sorted(recent_lows[:2])
+    if lo2 - lo1 < 5:
+        return 0.0
+    if abs(low[lo1] - low[lo2]) / max(low[lo1], low[lo2], 1e-8) >= 0.03:
+        return 0.0
+    mid_high = float(np.max(high[lo1:lo2 + 1]))
+    if mid_high <= low[lo1] * 1.03:
+        return 0.0
+
+    left_shoulder = float(np.max(high[:lo1 + 1])) if lo1 >= 2 else high[0]
+    is_elevated = mid_high > left_shoulder * 1.01
+    return 1.0 if is_elevated else 0.0
+
+
+# 因子解读 — 注入 LLM prompt 时附带简要解释
+FACTOR_INTERPRETATIONS: dict[str, str] = {
+    "momentum_reversal": "1月反转效应(Jegadeesh), 近期跌幅大→反弹概率高",
+    "momentum_spread": "短期均线-中期均线价差, 正=短期更强→动量延续",
+    "low_volatility": "低波动异象(Ang), 低波动股票长期跑赢高波动",
+    "volume_trend": "量价相关性, 正=量价齐升(健康上涨), 负=量价背离",
+    "turnover_sentiment": "横截面对数换手率, 高换手=情绪过热=偏空(Grinold)",
+    "pattern_chart_elevated": "高中间峰双底(Bulkowski), 84.4%胜率, 极强反转信号",
+    "concentration": "90%筹码集中度, <8%=高度集中(偏多), >18%=分散(偏空)",
+    "price_position": "价格在60日区间位置, 高位=接近压力, 低位=接近支撑",
+    "volume_acceleration": "量能加速, 持续放量=趋势确认, 缩量=动能衰减",
+    "consecutive_direction": "连涨/连跌偏向, 极端值意味短期超买/超卖",
+    "volatility_ratio": "短期/长期波动率比, 短波动骤升=变盘信号",
+    "size_factor": "小盘溢价(Banz), 小市值股票长期跑赢大市值",
+    "illiquidity": "非流动性溢价(Amihud), 流动性差=预期收益补偿",
+    "max_effect": "极端收益(MAX效应), 近期暴涨过=彩票效应=后续反转",
+}
+
+
 # ---------------------------------------------------------------------------
 # Main engine
 # ---------------------------------------------------------------------------
@@ -376,6 +475,8 @@ _FACTOR_COMPUTE: dict[str, Callable] = {
     "size_factor": _compute_size_factor,
     "illiquidity": _compute_illiquidity,
     "max_effect": _compute_max_effect,
+    "pattern_chart_elevated": _compute_pattern_chart_elevated,
+    "concentration": _compute_concentration,
 }
 
 
@@ -426,6 +527,10 @@ class FactorEngine:
         """
         close_arr = np.array([d["close"] for d in df_daily], dtype=float)
         volume_arr = np.array([d["volume"] for d in df_daily], dtype=float)
+        high_arr = np.array([d["high"] for d in df_daily], dtype=float)
+        low_arr = np.array([d["low"] for d in df_daily], dtype=float)
+        conc_arr = np.array([float(d.get("concentration", 0) or 0) for d in df_daily], dtype=float)
+        turnover_arr = np.array([float(d.get("turnover", 0) or 0) for d in df_daily], dtype=float)
 
         # 输入数据验证：拒绝坏数据，避免静默返回 0.0 污染复合得分
         _issues = []
@@ -456,9 +561,9 @@ class FactorEngine:
                 raw[fd.name] = -val  # negate: lower vol → higher signal
                 details[fd.name] = {"annualized_vol": round(vol, 4)}
             elif fd.name == "turnover_sentiment":
-                ratio, _ = fn(volume_arr)
-                raw[fd.name] = ratio  # high turnover → bearish (sentiment overheating)
-                details[fd.name] = {"turnover_ratio": round(ratio, 3)}
+                log_turn, _ = fn(turnover_arr)
+                raw[fd.name] = log_turn  # high log_turn → bearish (sentiment overheating)
+                details[fd.name] = {"log_turnover": round(log_turn, 3)}
             elif fd.name == "momentum_reversal":
                 val = fn(close_arr)
                 raw[fd.name] = val  # positive = reversal opportunity (keep as-is)
@@ -499,6 +604,14 @@ class FactorEngine:
                 val = fn(close_arr)
                 raw[fd.name] = val
                 details[fd.name] = {"max_ret": round(-val * 100, 2)}
+            elif fd.name == "pattern_chart_elevated":
+                val = fn(close_arr, high_arr, low_arr)
+                raw[fd.name] = val
+                details[fd.name] = {"elevated": bool(val)}
+            elif fd.name == "concentration":
+                val = fn(close_arr, volume_arr, conc_arr)
+                raw[fd.name] = val  # lower = more concentrated = better (higher_better=False)
+                details[fd.name] = {"conc_90": round(val, 4)}
             else:
                 raw[fd.name] = 0.0
 
@@ -526,6 +639,8 @@ class FactorEngine:
             "size_factor": 21,
             "illiquidity": 21,
             "max_effect": 21,
+            "pattern_chart_elevated": 80,
+            "concentration": 1,
         }
         return min_req.get(name, 20)
 
@@ -579,16 +694,20 @@ class FactorEngine:
 
                 # Compute historical factor values via sliding window
                 hist_vals = []
+                # 二值/截面因子不参与时序归一化: 由截面归一化处理
+                if fd.name in ("pattern_chart_elevated", "concentration", "turnover_sentiment"):
+                    continue
+
                 for i in range(min_req, len(close_hist)):
                     slice_close = close_hist[: i + 1]
                     slice_volume = volume_hist[: i + 1] if volume_hist is not None else None
 
                     if fd.name == "low_volatility":
-                        val, _ = fn(slice_close)  # ignore annualized_vol
+                        val, _ = fn(slice_close)
                     elif fd.name == "turnover_sentiment":
-                        val, _ = fn(slice_volume)  # ignore raw ratio
+                        val, _ = fn(slice_volume)
                     elif fd.name == "volume_acceleration":
-                        val = fn(slice_volume)  # volume-only factor
+                        val = fn(slice_volume)
                     else:
                         val = fn(slice_close, slice_volume) if fd.name in ("volume_trend", "size_factor", "illiquidity") else fn(slice_close)
 
@@ -619,17 +738,34 @@ class FactorEngine:
                 result.details[fd.name]["ts_std"] = round(std, 4)
                 result.details[fd.name]["ts_n"] = len(hist_vals)
 
-        # Fill missing z-scores with 0.0
-        missing_count = 0
+        # Fill missing z-scores with 0.0;
+        # 免时序归一化的因子直接映射:
+        #   pattern_chart_elevated: raw(0/1) → z(0/2.0)
+        #   concentration: raw(0~1) → z(线性映射, 8%最优切分)
+        #   turnover_sentiment: raw(log_turn) → z(对数映射, 2%为中性)
+        n_filled = 0
         for result in results:
             for fd in self.factors:
                 if fd.name not in result.z_scores:
-                    result.z_scores[fd.name] = 0.0
-                    missing_count += 1
-        if missing_count > 0:
+                    if fd.name == "pattern_chart_elevated":
+                        raw = result.raw_factors.get(fd.name, 0.0)
+                        result.z_scores[fd.name] = raw * 2.0
+                    elif fd.name == "concentration":
+                        raw = result.raw_factors.get(fd.name, 0.5)
+                        z = 2.0 * (0.15 - raw) / 0.15 if raw < 0.15 else -2.0 * (raw - 0.15) / 0.15
+                        result.z_scores[fd.name] = round(max(-2.0, min(2.0, z)), 3)
+                    elif fd.name == "turnover_sentiment":
+                        raw = result.raw_factors.get(fd.name, 0.7)
+                        # log(2%)=0.7为中心, 每±1.0对应±1个z
+                        z = (0.7 - raw)  # 高换手→负z→higher_better=False→看空
+                        result.z_scores[fd.name] = round(max(-3.0, min(3.0, z)), 3)
+                    else:
+                        result.z_scores[fd.name] = 0.0
+                        n_filled += 1
+        if n_filled > 0:
             logger.warning(
                 "[FactorEngine] %d factor-stock pairs filled with 0.0 (insufficient data —"
-                " check stock_daily completeness)", missing_count
+                " check stock_daily completeness)", n_filled
             )
 
         # Compute composite scores (same logic as cross_sectional_normalize)
@@ -736,7 +872,10 @@ class FactorEngine:
                 "volatility": "波动", "quality": "质量", "valuation": "估值",
             }
             cat_cn = cat_label_map.get(cat, cat)
-            item = f"  {arrow} {fd.display_name}: {z:+.2f}σ{strength}{raw_str}"
+            hint = FACTOR_INTERPRETATIONS.get(fd.name, "")
+            from src.core.prompt_config import should_include_factor_interpretations
+            hint_str = f" — {hint}" if hint and abs(z) > 0.3 and should_include_factor_interpretations() else ""
+            item = f"  {arrow} {fd.display_name}: {z:+.2f}σ{strength}{raw_str}{hint_str}"
 
             if cat_cn not in categories:
                 categories[cat_cn] = []
