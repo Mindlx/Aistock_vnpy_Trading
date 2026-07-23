@@ -161,7 +161,7 @@ const RunSummary: React.FC<{ data: BacktestRunResponse }> = ({ data }) => (
 const BacktestPage: React.FC = () => {
   // Set page title
   useEffect(() => {
-    document.title = '策略回测 - Aistock';
+    document.title = '策略回测 - MLA';
   }, []);
 
   // Input state

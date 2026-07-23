@@ -15,7 +15,7 @@ const LoginPage: React.FC = () => {
 
   // Set page title
   useEffect(() => {
-    document.title = '登录 - Aistock';
+    document.title = '登录 - MLA';
   }, []);
   const [searchParams] = useSearchParams();
   const rawRedirect = searchParams.get('redirect') ?? '';
@@ -166,7 +166,7 @@ const LoginPage: React.FC = () => {
               <p className="mt-2 text-sm text-[var(--login-text-secondary)]">
                 {isFirstTime
                   ? '首次启用认证，请为系统工作台设置管理员密码。'
-                  : '访问 Aistock 量化决策引擎需要有效的身份凭证。'}
+                  : '访问 MLA 量化决策引擎需要有效的身份凭证。'}
               </p>
             </div>
 
@@ -249,7 +249,7 @@ const LoginPage: React.FC = () => {
           transition={{ delay: 0.6 }}
           className="mt-8 text-center font-mono text-xs uppercase tracking-wider text-[var(--login-text-muted)]"
         >
-          Secure Connection Established via Aistock-V3-TLS
+          Secure Connection Established via MLA-V3-TLS
         </motion.p>
       </div>
 

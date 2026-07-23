@@ -64,7 +64,7 @@ function formatNotificationStatus(notification: AlertNotificationItem): string {
 
 const AlertsPage: React.FC = () => {
   useEffect(() => {
-    document.title = '告警中心 - Aistock';
+    document.title = '告警中心 - MLA';
   }, []);
 
   const [rules, setRules] = useState<AlertRuleItem[]>([]);

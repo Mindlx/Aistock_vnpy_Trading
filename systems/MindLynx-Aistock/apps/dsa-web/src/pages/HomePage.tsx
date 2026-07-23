@@ -104,7 +104,7 @@ const HomePage: React.FC = () => {
   } = useHomeDashboardState();
 
   useEffect(() => {
-    document.title = '每日选股分析 - Aistock';
+    document.title = '每日选股分析 - MLA';
   }, []);
 
   useEffect(() => {

@@ -103,7 +103,7 @@ const ChatPage: React.FC = () => {
 
   // Set page title
   useEffect(() => {
-    document.title = '问股 - Aistock';
+    document.title = '问股 - MLA';
   }, []);
 
   useEffect(() => () => {
