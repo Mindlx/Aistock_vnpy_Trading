@@ -348,15 +348,24 @@ def _save_fusion_to_analysis_db(results: list[dict], date_str: str):
             if cursor.fetchone():
                 continue
             query_id = f"fusion_{date_str}_{code}"
-            # signal_name → operation_advice, position_advice → trend_prediction
+            # 从融合结果读取 ML 子系统计算的策略点位
+            ideal_buy = r.get("mindlynx_ideal_buy")
+            stop_loss = r.get("mindlynx_stop_loss")
+            take_profit = r.get("mindlynx_take_profit")
+            # 格式化策略点位描述
+            ideal_buy_desc = f"¥{ideal_buy:.2f}" if ideal_buy else None
+            stop_loss_desc = f"¥{stop_loss:.2f}" if stop_loss else None
+            take_profit_desc = f"¥{take_profit:.2f}" if take_profit else None
+
             cursor.execute(
                 """INSERT INTO analysis_history
                    (query_id, code, name, report_type, sentiment_score,
                     operation_advice, trend_prediction, analysis_summary,
-                    raw_result, created_at)
-                   VALUES (?, ?, ?, 'fusion', ?, ?, ?, ?, ?, ?)""",
+                    ideal_buy, stop_loss, take_profit, raw_result, created_at)
+                   VALUES (?, ?, ?, 'fusion', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (query_id, code, name, sentiment_score,
                  signal_name, position_advice, analysis_summary,
+                 ideal_buy_desc, stop_loss_desc, take_profit_desc,
                  json.dumps(raw, ensure_ascii=False), now),
             )
             inserted += 1
