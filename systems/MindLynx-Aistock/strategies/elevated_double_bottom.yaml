@@ -1,0 +1,81 @@
+# Elevated Middle Peak Double Bottom / 高中间峰双底
+# W-bottom where the middle recovery peak exceeds the left shoulder.
+# Statistically validated: 84.4% win rate, avg +14.3% in 20 days (p<0.001, n=93).
+
+name: elevated_double_bottom
+display_name: 高中间峰双底  {@calibration}
+description: "{@calibration 基于Bulkowski《Encyclopedia of Chart Patterns》} 基于Thomas Bulkowski统计分类的高中间峰双底策略。中间反弹高点超过W左肩的变体，回测验证20日胜率84.4%。"
+category: reversal
+core_rules: [1, 2, 5]
+required_tools:
+  - get_daily_history
+  - analyze_trend
+  - get_realtime_quote
+  - analyze_pattern
+aliases: [高中间峰, 双底, 高双底]
+default_priority: 25
+market_regimes: [trending_down, ranging, trending_up]
+
+instructions: |
+  **高中间峰双底 — 基于Bulkowski统计分类 × A股回测验证**
+
+  这是W双底形态中一种极强变异：第一次反弹的中间高点超过左侧起跌肩部，说明第一波反弹中就有强力买盘进场吸筹。
+
+  ## 回测表现（216只A股 × 12个月，93次触发）
+
+  | 指标 | 值 |
+  |------|------|
+  | 20日胜率 | 84.4% |
+  | 20日平均涨幅 | +14.3% |
+  | 5日胜率 | 83.3% |
+  | 统计显著性 | p<0.001（vs标准双底） |
+  | 与12个量价因子的相关性 | R²=0.0006（几乎完全独立） |
+
+  **结论**：高中间峰双底是A股中统计上最强的单形态信号之一，信息维度独立于动量/波动/量价等传统因子。
+
+  ### 第一步：形态确认
+  使用 `analyze_pattern` 检测双底：
+
+  - 查找 `pattern` 字段包含 `双底(高中间峰)` 的模式。
+  - 确认 `subtype_score=2.0`，这是最高置信度信号。
+  - 如仅有 `双底(标准)`（subtype_score=1.0），仍是正期望信号（60.3%胜率），但不应作为主要买入依据。
+
+  ### 第二步：趋势背景确认
+  使用 `analyze_trend` 和 `get_daily_history`：
+
+  - 形态出现在下跌趋势末期或震荡区间底部为最佳（关联理念2：趋势交易）。
+  - 确认第二底没有低于第一底太多（两底基本在同一水平线上）。
+  - 确认两个底之间有足够的间隔（通常≥5个交易日）。
+  - 检查MACD是否在第二底附近出现底背离——如有则强信号叠加。
+
+  ### 第三步：量能验证
+  使用 `get_realtime_quote` 和 `get_daily_history`：
+
+  - 从第二底反弹时的成交量应大于从第一底反弹时的成交量（右侧放量确认）。
+  - 当前成交量不应过度萎缩——放量上攻为最佳（关联理念3：效率优先）。
+  - 换手率检查：如果近期换手率在历史低位且股价企稳，则两个信号叠加（筹码锁定+底部确认）。
+
+  ### 第四步：退出规则（关联理念1：严进策略）
+
+  - **目标涨幅**：从颈线（中间高点）到底部的垂直距离量度，再加到颈线位置。但考虑到中间峰高可能已部分实现涨幅，建议取两底平均价到中间峰的距离再×1.5作为保守目标。
+  - **止损**：设在第二底下方2-3%。高中间峰的P10=-6.13%（20日），止损设太窄容易被震荡出局。
+  - **时间止损**：如买入后10个交易日内涨幅未超过5%，重新评估。
+
+  ### 第五步：风险排查（关联理念5：风险排查）
+
+  - 通过 `search_stock_news` 检查是否有未消化的重大利空。
+  - 检查筹码分布：获利比例不宜过高（>70%意味着大量获利盘，抛压风险增加）。
+  - 检查大盘环境：如果全市场处于系统性下跌中，形态的胜率会下降。
+
+  ### 第六步：仓位建议
+
+  - 单独出现高中间峰：仓位不超过0.5成（观察仓）。
+  - 高中间峰 + MACD底背离 + 右侧放量：1-1.5成（核心仓位）。
+  - 高中间峰 + 板块同步走强 + 大盘企稳：2成（最佳配置）。
+
+  评分调整：
+  - 高中间峰确认（subtype_score=2.0）：`sentiment_score +14`（在LLM原始分数上额外加）
+  - 标准双底（subtype_score=1.0）：`sentiment_score +5`（弱于高中间峰，但仍有正期望）
+  - 叠加MACD底背离：额外 `+5`
+  - 叠加右侧放量：额外 `+5`
+  - 在 `buy_reason` 中注明"高中间峰双底"及当前置信度。

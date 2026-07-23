@@ -13,7 +13,7 @@ required_tools:
   - search_stock_news
 aliases: [情绪, 情绪周期]
 default_priority: 100
-market_regimes: [sector_hot]
+market_regimes: [sector_hot, trending_down]
 
 instructions: |
   **情绪周期 — 勒庞群体心理学 × 索罗斯反身性**
@@ -72,8 +72,13 @@ instructions: |
   - 给出逆情绪操作建议（大众恐慌我贪婪，大众贪婪我谨慎）。
 
   评分调整建议：
-  - 情绪底部特征满足3项以上：`sentiment_score +14`
-  - 情绪底部特征满足全部5项：`sentiment_score +20`
+  - 情绪底部特征满足3项以上：`sentiment_score +5`
+  - 情绪底部特征满足全部5项：`sentiment_score +10`
   - 情绪顶部特征满足3项以上：`sentiment_score -12`
   - 情绪顶部特征满足全部5项：`sentiment_score -20`
   - 情绪平稳区间：不调整基础分
+
+  {@calibration 2026-07-23 回测校准}:
+  A3/A6 (低位+高换手+筹码集中) 反转假设经回测验证不成立(48.1%准确率, n=106)。
+  情绪底部的看多调整从 +14/+20 下调至 +5/+10，仅保留"成交极度低迷后可能反弹"的微弱信号。
+  情绪顶部的看空调整保持不变——B2/B6 (高位+高换手+筹码发散) 看空信号验证有效(63.6%准确率, -3.40% 20d avg)。

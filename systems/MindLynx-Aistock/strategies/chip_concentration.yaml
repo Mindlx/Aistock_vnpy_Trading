@@ -1,0 +1,48 @@
+# Chip Concentration Strategy / 筹码集中度
+# Concentration rate of 90%-level chip distribution.
+# Statistically validated: IC=-0.111 (p<0.0001, n=22943), optimal cutoff 8%.
+
+name: chip_concentration
+display_name: 筹码集中度  {@calibration}
+description: "{@calibration 自研验证(216只×22943评估点)} 基于筹码90%集中度的横截面因子。集中度<8%=高度集中(偏多), >18%=较分散(偏空)。IC=-0.111, 14因子中最强。"
+category: quality
+core_rules: [1, 5]
+required_tools:
+  - get_chip_distribution
+  - get_daily_history
+aliases: [筹码, 集中度, 筹码因子]
+default_priority: 35
+market_regimes: [trending_up, trending_down, ranging, sideways, volatile]
+
+instructions: |
+  **筹码集中度 — 基于 90% 筹码分布集中度的横截面因子**
+
+  这是当前因子引擎中 IC 最强的信号（-0.111, p<0.0001），
+  独立于动量/波动率/量价等所有传统因子维度（R²=0.0006）。
+
+  ### 核心信号解读
+
+  使用 `get_chip_distribution` 获取筹码数据，关注 `concentration` 字段：
+
+  - **集中度 < 8%**（高度集中）：筹码集中在少数持仓者手中，机构锁仓或主力重仓的信号。
+    在横截面排名中处于最集中的 ~20% 股票。20日平均超额收益 +2.1%（vs 分散侧 -3.5%）。
+    → 偏多信号，联合其他看多条件使用。
+
+  - **集中度 8-18%**（中等水平）：正常分布，不产生独立信号。
+
+  - **集中度 > 18%**（较分散）：筹码分布在散户手中，无主力主导。
+    横截面排名中处于最分散的 ~30% 股票。
+    → 偏空信号，特别在价格高位且换手率较高时需警惕。
+
+  ### 注意事项
+
+  - 集中度变化缓慢（周/月级别），不适合短线交易。
+  - 集中度信号独立于换手率——低换手+高集中=锁仓看多，
+    高换手+高集中=主力吸筹末期（最强看多组合，即 A3/A6 信号）。
+  - 因子层已自动将集中度纳入 composite_score（weight=0.10），
+    此处作为 LLM 分析框架，帮助理解信号含义。
+
+  评分调整建议：
+  - 高度集中（concentration < 8%）且 MA 多头排列：`sentiment_score +5`
+  - 高度集中 + 低位 + 放量（A3/A6 条件）：`sentiment_score +8`
+  - 较分散（concentration > 18%）+ 高位 + 高换手：`sentiment_score -5`
