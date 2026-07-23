@@ -10,13 +10,11 @@ API v1 Endpoints 模块初始化
 from api.v1.endpoints import (
     agent,
     alerts,
-    alphasift,
     analysis,
     auth,
     backtest,
     health,
     history,
-    intelligence,
     portfolio,
     stocks,
     system_config,
@@ -35,5 +33,4 @@ __all__ = [
     "usage",
     "portfolio",
     "alerts",
-    "intelligence",
 ]

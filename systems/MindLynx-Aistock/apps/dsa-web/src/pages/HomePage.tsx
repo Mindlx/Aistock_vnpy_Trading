@@ -96,7 +96,6 @@ const HomePage: React.FC = () => {
     syncTaskCreated,
     syncTaskUpdated,
     syncTaskFailed,
-    refreshActiveTasks,
     removeTask,
     openMarkdownDrawer,
     closeMarkdownDrawer,
@@ -104,7 +103,7 @@ const HomePage: React.FC = () => {
   } = useHomeDashboardState();
 
   useEffect(() => {
-    document.title = '每日选股分析 - MLA';
+    document.title = '每日选股分析 - DSA';
   }, []);
 
   useEffect(() => {
@@ -291,7 +290,6 @@ const HomePage: React.FC = () => {
     syncTaskCreated,
     syncTaskUpdated,
     syncTaskFailed,
-    refreshActiveTasks,
     removeTask,
   });
 

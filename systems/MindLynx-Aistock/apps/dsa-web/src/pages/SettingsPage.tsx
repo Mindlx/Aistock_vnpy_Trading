@@ -219,7 +219,7 @@ const SettingsPage: React.FC = () => {
 
   // Set page title
   useEffect(() => {
-    document.title = '系统设置 - MLA';
+    document.title = '系统设置 - DSA';
   }, []);
 
   const {

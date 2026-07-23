@@ -3,8 +3,7 @@ import { Badge } from '../common';
 import type { HistoryItem } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
 import { formatDateTime } from '../../utils/format';
-import { getMarketPhaseSummaryLabel } from '../../utils/marketPhase';
-import { truncateStockName } from '../../utils/stockName';
+import { truncateStockName, isStockNameTruncated } from '../../utils/stockName';
 
 interface HistoryListItemProps {
   item: HistoryItem;
@@ -45,7 +44,7 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
 }) => {
   const sentimentColor = item.sentimentScore !== undefined ? getSentimentColor(item.sentimentScore) : null;
   const stockName = item.stockName || item.stockCode;
-  const phaseLabel = getMarketPhaseSummaryLabel(item.marketPhaseSummary, 'zh')?.replace('市场阶段: ', '').replace('市场阶段：', '');
+  const isTruncated = isStockNameTruncated(stockName);
 
   return (
     <div className="flex items-start gap-2 group">
@@ -61,12 +60,11 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
       <button
         type="button"
         onClick={() => onClick(item.id)}
-        aria-label={`${stockName} ${item.stockCode} 历史记录`}
-        className={`home-history-item w-full min-w-0 flex-1 text-left p-2.5 group/item ${
+        className={`home-history-item flex-1 text-left p-2.5 group/item ${
           isViewing ? 'home-history-item-selected' : ''
         }`}
       >
-        <div className="relative z-10 flex items-center gap-2.5">
+        <div className={`flex items-center gap-2.5 relative z-10${isTruncated ? ' group-hover/item:z-20' : ''}`}>
           {sentimentColor && (
             <div
               className="w-1 h-8 rounded-full flex-shrink-0"
@@ -79,28 +77,31 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <span className="block w-full truncate text-sm font-semibold text-foreground tracking-tight">
-                  {truncateStockName(stockName)}
+                <span className="truncate text-sm font-semibold text-foreground tracking-tight">
+                  <span className="group-hover/item:hidden">
+                    {truncateStockName(stockName)}
+                  </span>
+                  <span className="hidden group-hover/item:inline">
+                    {stockName}
+                  </span>
                 </span>
               </div>
-              <div className="flex shrink-0 items-center gap-1" data-testid="history-card-actions">
-                {sentimentColor && (
-                  <Badge
-                    variant="default"
-                    size="sm"
-                    className="home-history-sentiment-badge shrink-0 shadow-none text-[11px] font-semibold leading-none transition-opacity duration-200"
-                    style={{
-                      color: sentimentColor,
-                      borderColor: `${sentimentColor}30`,
-                      backgroundColor: `${sentimentColor}10`,
-                    }}
-                  >
-                    {getOperationBadgeLabel(item.operationAdvice)} {item.sentimentScore}
-                  </Badge>
-                )}
-              </div>
+              {sentimentColor && (
+                <Badge
+                  variant="default"
+                  size="sm"
+                  className={`home-history-sentiment-badge shrink-0 shadow-none text-[11px] font-semibold leading-none transition-opacity duration-200${isTruncated ? ' group-hover/item:opacity-80' : ''}`}
+                  style={{
+                    color: sentimentColor,
+                    borderColor: `${sentimentColor}30`,
+                    backgroundColor: `${sentimentColor}10`,
+                  }}
+                >
+                  {getOperationBadgeLabel(item.operationAdvice)} {item.sentimentScore}
+                </Badge>
+              )}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-2" data-testid="history-card-meta">
+            <div className="flex items-center gap-2 mt-1">
               <span className="text-[11px] text-secondary-text font-mono">
                 {item.stockCode}
               </span>
@@ -108,14 +109,6 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
               <span className="text-[11px] text-muted-text">
                 {formatDateTime(item.createdAt)}
               </span>
-              {phaseLabel ? (
-                <>
-                  <span className="w-1 h-1 rounded-full bg-subtle-hover" />
-                  <Badge variant="default" size="sm" className="shrink-0 shadow-none text-[10px] leading-none">
-                    {phaseLabel}
-                  </Badge>
-                </>
-              ) : null}
             </div>
           </div>
         </div>

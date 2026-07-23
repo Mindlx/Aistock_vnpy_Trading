@@ -26,16 +26,6 @@ EXEMPT_PATHS = frozenset(
         "/openapi.json",
     }
 )
-EXEMPT_PATHS = frozenset({
-    "/api/v1/auth/login",
-    "/api/v1/auth/status",
-    "/api/health",
-    "/api/v1/health",
-    "/health",
-    "/docs",
-    "/redoc",
-    "/openapi.json",
-})
 
 
 def _path_exempt(path: str) -> bool:

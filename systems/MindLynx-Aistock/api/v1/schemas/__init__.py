@@ -19,20 +19,6 @@ from api.v1.schemas.alerts import (
     AlertTriggerItem,
     AlertTriggerListResponse,
 )
-from api.v1.schemas.intelligence import (
-    IntelligenceCreateDefaultsResponse,
-    IntelligenceFetchRequest,
-    IntelligenceFetchResponse,
-    IntelligenceFetchStatus,
-    IntelligenceItemListResponse,
-    IntelligenceItemResponse,
-    IntelligenceSourceCreateRequest,
-    IntelligenceSourceItem,
-    IntelligenceSourceListResponse,
-    IntelligenceSourceTestRequest,
-    IntelligenceSourceTestResponse,
-    IntelligenceSourceUpdateRequest,
-)
 from api.v1.schemas.analysis import (
     AnalysisResultResponse,
     AnalyzeRequest,
@@ -209,17 +195,4 @@ __all__ = [
     "AlertRuleUpdateRequest",
     "AlertTriggerItem",
     "AlertTriggerListResponse",
-    # intelligence
-    "IntelligenceSourceCreateRequest",
-    "IntelligenceSourceUpdateRequest",
-    "IntelligenceSourceItem",
-    "IntelligenceSourceListResponse",
-    "IntelligenceItemResponse",
-    "IntelligenceItemListResponse",
-    "IntelligenceFetchRequest",
-    "IntelligenceFetchResponse",
-    "IntelligenceFetchStatus",
-    "IntelligenceSourceTestRequest",
-    "IntelligenceSourceTestResponse",
-    "IntelligenceCreateDefaultsResponse",
 ]

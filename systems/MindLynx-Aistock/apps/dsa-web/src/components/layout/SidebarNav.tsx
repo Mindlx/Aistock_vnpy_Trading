@@ -1,16 +1,13 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Activity, BarChart3, Bell, BriefcaseBusiness, Home, LogOut, MessageSquareQuote, Search, Settings2, TrendingUp } from 'lucide-react';
+import { BarChart3, Bell, BriefcaseBusiness, Home, LogOut, MessageSquareQuote, Settings2 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentChatStore } from '../../stores/agentChatStore';
 import { cn } from '../../utils/cn';
-import { t } from '../../i18n/uiText';
-import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { StatusDot } from '../common/StatusDot';
 import { ThemeToggle } from '../theme/ThemeToggle';
-import { UiLanguageToggle } from '../i18n/UiLanguageToggle';
 
 type SidebarNavProps = {
   collapsed?: boolean;
@@ -32,15 +29,11 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'portfolio', label: '持仓', to: '/portfolio', icon: BriefcaseBusiness },
   { key: 'backtest', label: '回测', to: '/backtest', icon: BarChart3 },
   { key: 'alerts', label: '告警', to: '/alerts', icon: Bell },
-  { key: 'usage', label: '用量', to: '/usage', icon: Activity },
-  { key: 'decision_signals', label: '决策信号', to: '/decision-signals', icon: TrendingUp },
-  { key: 'screening', label: '选股', to: '/screening', icon: Search },
   { key: 'settings', label: '设置', to: '/settings', icon: Settings2 },
 ];
 
 export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNavigate }) => {
   const { authEnabled, logout } = useAuth();
-  const { language } = useUiLanguage();
   const completionBadge = useAgentChatStore((state) => state.completionBadge);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
@@ -51,64 +44,60 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
           <BarChart3 className="h-5 w-5" />
         </div>
         {!collapsed ? (
-          <p className="min-w-0 truncate text-sm font-semibold text-foreground">MLA</p>
+          <p className="min-w-0 truncate text-sm font-semibold text-foreground">DSA</p>
         ) : null}
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1.5" aria-label={t('nav.home', language)}>
-        {NAV_ITEMS.map(({ key, to, icon: Icon, exact, badge }) => {
-          const localizedLabel = t('nav.' + key, language);
-          return (
-            <NavLink
-              key={key}
-              to={to}
-              end={exact}
-              onClick={onNavigate}
-              aria-label={localizedLabel}
-              className={({ isActive }) =>
-                cn(
-                  'group relative flex items-center gap-3 border-y border-x-0 text-sm transition-all',
-                  'h-[var(--nav-item-height)]',
-                  collapsed ? 'justify-center px-0' : 'px-[var(--nav-item-padding-x)]',
-                  isActive
-                    ? 'border-[var(--nav-active-border)] bg-[var(--nav-active-bg)] text-[hsl(var(--primary))] font-medium'
-                    : 'border-transparent text-secondary-text hover:bg-[var(--nav-hover-bg)] hover:text-foreground'
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  {isActive && (
-                    <motion.div
-                      layoutId="activeIndicator"
-                      className="absolute top-0 bottom-0 left-0 w-[var(--nav-indicator-width)] bg-[var(--nav-indicator-bg)] shadow-[0_0_10px_var(--nav-indicator-shadow)]"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ duration: 0.2 }}
-                    />
-                  )}
-                  <Icon className={cn('ml-1 h-5 w-5 shrink-0', isActive ? 'text-[var(--nav-icon-active)]' : 'text-current')} />
-                  {!collapsed ? <span className="truncate">{localizedLabel}</span> : null}
-                  {badge === 'completion' && completionBadge ? (
-                    <StatusDot
-                      tone="info"
-                      data-testid="chat-completion-badge"
-                      className={cn(
-                        'absolute right-3 border-2 border-background shadow-[0_0_10px_var(--nav-indicator-shadow)]',
-                        collapsed ? 'right-2 top-2' : ''
-                      )}
-                      aria-label="New messages"
-                    />
-                  ) : null}
-                </>
-              )}
-            </NavLink>
-          );
-        })}
+      <nav className="flex flex-1 flex-col gap-1.5" aria-label="主导航">
+        {NAV_ITEMS.map(({ key, label, to, icon: Icon, exact, badge }) => (
+          <NavLink
+            key={key}
+            to={to}
+            end={exact}
+            onClick={onNavigate}
+            aria-label={label}
+            className={({ isActive }) =>
+              cn(
+                'group relative flex items-center gap-3 border-y border-x-0 text-sm transition-all',
+                'h-[var(--nav-item-height)]',
+                collapsed ? 'justify-center px-0' : 'px-[var(--nav-item-padding-x)]',
+                isActive
+                  ? 'border-[var(--nav-active-border)] bg-[var(--nav-active-bg)] text-[hsl(var(--primary))] font-medium'
+                  : 'border-transparent text-secondary-text hover:bg-[var(--nav-hover-bg)] hover:text-foreground'
+              )
+            }
+          >
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <motion.div
+                    layoutId="activeIndicator"
+                    className="absolute top-0 bottom-0 left-0 w-[var(--nav-indicator-width)] bg-[var(--nav-indicator-bg)] shadow-[0_0_10px_var(--nav-indicator-shadow)]"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.2 }}
+                  />
+                )}
+                <Icon className={cn('ml-1 h-5 w-5 shrink-0', isActive ? 'text-[var(--nav-icon-active)]' : 'text-current')} />
+                {!collapsed ? <span className="truncate">{label}</span> : null}
+                {badge === 'completion' && completionBadge ? (
+                  <StatusDot
+                    tone="info"
+                    data-testid="chat-completion-badge"
+                    className={cn(
+                      'absolute right-3 border-2 border-background shadow-[0_0_10px_var(--nav-indicator-shadow)]',
+                      collapsed ? 'right-2 top-2' : ''
+                    )}
+                    aria-label="问股有新消息"
+                  />
+                ) : null}
+              </>
+            )}
+          </NavLink>
+        ))}
       </nav>
 
-      <div className="mt-4 flex flex-col gap-1">
-        <UiLanguageToggle />
+      <div className="mt-4 mb-2">
         <ThemeToggle variant="nav" collapsed={collapsed} />
       </div>
 
