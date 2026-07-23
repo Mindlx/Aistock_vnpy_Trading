@@ -187,5 +187,17 @@
 | realtime_quotes | 5min | 盘中每5分钟轮询 |
 | financial_indicators | 24h | 16:00 工作日(Baostock TCP, 0 EM) |
 | capital_flows | 24h | 盘前 08:00 一次(EM), 盘中不刷新 |
-| news_events | 1h | EventMonitor 实时写入 + 盘前 EM 补一次 |
+ | news_events | 1h | EventMonitor 实时写入 + 盘前 EM 补一次 |
 | fundamentals | 7d | 周一 09:00(Baostock TCP, 0 EM) |
+
+---
+
+## 八、已知限制
+
+### 新闻摘要缺失
+
+数据源（东方财富免费 API `ak.stock_news_em`）不返回文章正文/摘要，`news_events.summary` 字段值与 `title` 相同。
+
+入库时 `summary == title` 置空，前端 `snippet` 不渲染。
+
+**待解决**：需要接入有摘要的数据源（Tushare 新闻接口、或爬取文章全文），或填充 `intelligence_items` 表。

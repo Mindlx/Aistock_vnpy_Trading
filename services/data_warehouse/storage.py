@@ -417,6 +417,9 @@ class DataLake:
             # 入库前清洗：去掉 <em> 等 HTML 标签
             clean_title = re.sub(r'<[^>]+>', '', raw_title).strip() if raw_title else ""
             clean_summary = re.sub(r'<[^>]+>', '', item.get("summary", "")).strip() if item.get("summary") else ""
+            # summary 与 title 相同时不重复存储（前端 snippet 判空后不渲染）
+            if clean_summary == clean_title:
+                clean_summary = ""
             if not clean_title:
                 continue
             # 去重：同股票同标题不再重复写入
