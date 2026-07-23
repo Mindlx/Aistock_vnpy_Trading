@@ -422,6 +422,30 @@ class HistoryService:
         latest_allowed = anchor_date + timedelta(days=1)
         earliest_allowed = anchor_date - timedelta(days=max(0, window_days - 1))
 
+        # 如果 news_intel 表无数据，尝试从数据湖 data_warehouse.db 查询
+        if not matched:
+            try:
+                import sqlite3, os
+                wh_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "data_warehouse.db")
+                if os.path.exists(wh_path):
+                    wh = sqlite3.connect(wh_path)
+                    wh_codes = wh.execute(
+                        "SELECT stock_code, title, summary, source, published_at FROM news_events "
+                        "WHERE stock_code=? ORDER BY published_at DESC LIMIT ?",
+                        (analysis.code, limit),
+                    ).fetchall()
+                    wh.close()
+                    if wh_codes:
+                        matched = [
+                            type("NewsItem", (), {
+                                "title": r[1], "snippet": r[2],
+                                "url": "", "published_date": anchor_date,
+                                "fetched_at": anchor_date,
+                            }) for r in wh_codes if r[1]
+                        ]
+            except Exception:
+                pass
+
         filtered = []
         for item in matched:
             if not item.published_date:
