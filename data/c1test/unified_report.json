@@ -1,6 +1,6 @@
 {
-  "run_id": "c1test-2026-07-22-125549",
-  "timestamp": "2026-07-22 12:55:49",
+  "run_id": "c1test-2026-07-23-200433",
+  "timestamp": "2026-07-23 20:04:33",
   "mode": "quick",
   "fusion": {
     "accuracy_pct": 52.8,
@@ -11,14 +11,14 @@
   },
   "subsystems": {
     "ly": {
-      "accuracy_pct": 50.3,
-      "correct": 517,
-      "total": 1028
+      "accuracy_pct": 48.0,
+      "correct": 494,
+      "total": 1029
     },
     "ml": {
-      "accuracy_pct": 60.8,
-      "correct": 740,
-      "total": 1218
+      "accuracy_pct": 60.6,
+      "correct": 761,
+      "total": 1256
     },
     "at": {
       "accuracy_pct": 52.1,
@@ -45,63 +45,63 @@
   },
   "ly_flat_zone_neutral": 72,
   "ly_independent": {
-    "correct": 516,
-    "total": 1027,
-    "accuracy": 50.2
+    "correct": 498,
+    "total": 1029,
+    "accuracy": 48.4
   },
   "ly_independent_l7": {
-    "correct": 517,
-    "total": 1028,
-    "accuracy": 50.3
+    "correct": 494,
+    "total": 1029,
+    "accuracy": 48.0
   },
   "ml": {
     "operation_advice": {
-      "direction_accuracy": 68.9,
-      "correct": 222,
-      "total": 322,
+      "direction_accuracy": 68.7,
+      "correct": 224,
+      "total": 326,
       "neutral": 57,
-      "no_direction": 953,
+      "no_direction": 987,
       "source": "analysis_history T+1 (与 sentiment 完全一致口径)"
     },
     "sentiment_score": {
-      "correct": 797,
-      "total": 1275,
-      "accuracy": 62.5,
+      "correct": 818,
+      "total": 1313,
+      "accuracy": 62.3,
       "source": "analysis_history + stock_daily T+1"
     },
     "fusion_equivalent": {
-      "correct": 740,
-      "total": 1218,
+      "correct": 761,
+      "total": 1256,
       "neutral": 57,
-      "accuracy": 60.8,
+      "accuracy": 60.6,
       "source": "analysis_history → v4.0 L7 ×0.8 → _sign(0.1) → T+1"
     },
     "strategy_breakdown": [
       {
         "skill_id": "consensus",
-        "correct": 798,
-        "total": 2848,
-        "accuracy": 28.0
+        "correct": 828,
+        "total": 2898,
+        "accuracy": 28.6
       }
     ],
     "internal_divergence": {
-      "agree_accuracy": 61.7,
-      "agree_total": 358,
+      "agree_accuracy": 61.0,
+      "agree_total": 374,
       "diverge_rate": 0.0,
       "diverge_total": 0,
       "diverge_sentiment_accuracy": 0,
       "diverge_op_accuracy": 0,
-      "sent_diverge_op_neutral": 860
+      "sent_diverge_op_neutral": 882
     }
   },
   "at_fusion_level": {
     "status": "ok",
-    "timestamp": "2026-07-22 12:55:49",
+    "timestamp": "2026-07-23 20:04:33",
     "fusion_level_note": "融合层面 AT 数据见 fusion.subsystems.at",
-    "correct": 46,
-    "total": 83,
-    "accuracy": 55.4,
-    "records_scanned": 494,
+    "correct": 47,
+    "total": 84,
+    "accuracy": 56.0,
+    "records_scanned": 512,
     "per_stock": [
       {
         "code": "000592",
@@ -176,10 +176,16 @@
         "accuracy": 50.0
       },
       {
+        "code": "605117",
+        "correct": 0,
+        "total": 1,
+        "accuracy": 0.0
+      },
+      {
         "code": "605368",
-        "correct": 2,
+        "correct": 3,
         "total": 5,
-        "accuracy": 40.0
+        "accuracy": 60.0
       },
       {
         "code": "688202",
@@ -191,18 +197,18 @@
   },
   "factor": {
     "status": "ok",
-    "timestamp": "2026-07-22 12:51:47",
-    "accuracy": 57.7,
-    "total_evaluations": 999,
+    "timestamp": "2026-07-23 20:00:32",
+    "accuracy": 55.1,
+    "total_evaluations": 1000,
     "stocks_evaluated": 19,
     "conclusion": "✅ 因子信号具有显著预测能力 (>55%)",
     "returncode": 0,
-    "stdout_preview": "============================================================\n  因子-only 回测基准 (Factor Backtest Baseline)\n  评估窗口: 20 交易日  步长: 5 天\n  归一化: time_series (每只股票自身上百天历史分布)\n============================================================\n\n代码             评估次数     正确      准确率\n-----------------------------------\n000060           50     35    70.0%\n000988           50     35    70.0%\n605117           50     34    68.0%\n600372           56     37    66.1%\n002230           50     32    64.0%\n000592           55     ",
+    "stdout_preview": "============================================================\n  因子-only 回测基准 (Factor Backtest Baseline)\n  评估窗口: 20 交易日  步长: 5 天\n  归一化: time_series (每只股票自身上百天历史分布)\n============================================================\n\n代码             评估次数     正确      准确率\n-----------------------------------\n605117           50     36    72.0%\n000988           50     34    68.0%\n000060           50     33    66.0%\n000592           56     35    62.5%\n300652           56     35    62.5%\n002230           50     ",
     "stderr_preview": ""
   },
   "walkforward": {
     "status": "ok",
-    "timestamp": "2026-07-22 12:51:30",
+    "timestamp": "2026-07-23 20:00:17",
     "date_range": "2026-05-30 ~ 2026-07-21",
     "trading_days": 38,
     "train_window": 20,
@@ -212,7 +218,7 @@
   },
   "weight_sweep": {
     "status": "ok",
-    "timestamp": "2026-07-22 12:51:30",
+    "timestamp": "2026-07-23 20:00:17",
     "ly_range": [
       0.2,
       0.3,
@@ -234,7 +240,7 @@
   },
   "simulate": {
     "status": "ok",
-    "timestamp": "2026-07-22 12:51:30",
+    "timestamp": "2026-07-23 20:00:17",
     "total_return": 89.03,
     "max_drawdown": 10.28,
     "win_rate": 78.7,
@@ -244,28 +250,26 @@
   },
   "changes": {
     "regressions": [
-      "LY 准确率下降 -8.7%",
-      "ML 准确率下降 -5.7%"
+      "LY 准确率下降 -6.8%"
     ],
     "improvements": [],
     "alerts": [
       "🔴 LY 准确率下降 ≥5%",
-      "🔴 ML 准确率下降 ≥5%",
       "🟡 AT 数据覆盖率仅 49.9% (222/445)"
     ],
     "vs_previous": {
       "fusion_accuracy": "+0.0%",
-      "ly_accuracy": "-8.7%",
-      "ml_accuracy": "-5.7%",
+      "ly_accuracy": "-6.8%",
+      "ml_accuracy": "-4.8%",
       "at_accuracy": "+0.0%"
     },
-    "alert_count": 2,
+    "alert_count": 1,
     "warning_count": 1,
     "pass_count": 0
   },
   "fusion_raw": {
     "status": "ok",
-    "timestamp": "2026-07-22 12:51:30",
+    "timestamp": "2026-07-23 20:00:17",
     "total_predictions": 543,
     "total_matched": 445,
     "total_unmatched": 98,

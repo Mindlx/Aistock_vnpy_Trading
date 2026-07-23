@@ -6,7 +6,6 @@
     python lynx_signal.py --schedule --time 15:30
 """
 import argparse
-import csv
 import json
 import os
 import sys
@@ -30,17 +29,17 @@ if _PROJECT_ROOT not in sys.path:
 warnings.filterwarnings("ignore")
 
 # ===== 配置 =====
-# 从 config/stock_pool.csv 自动加载（单源配置）
-_STOCK_POOL_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "stock_pool.csv"
-STOCK_CODES: list[str] = []
-STOCK_NAMES: dict[str, str] = {}
-if _STOCK_POOL_PATH.exists():
-    with open(_STOCK_POOL_PATH) as _f:
-        for _row in csv.DictReader(_f):
-            _code = _row["code"]
-            _name = _row["name"]
-            STOCK_CODES.append(_code)
-            STOCK_NAMES[_code] = _name
+STOCK_CODES = ['001390', '300652', '600372', '605368', '000592',
+               '603189', '603557', '688202', '601801', '300676',
+               '603127', '000999']
+
+# 股票名称映射
+STOCK_NAMES = {
+    '001390': '古麒绒材', '300652': '雷迪克', '600372': '中航机载',
+    '605368': '蓝天燃气', '000592': '平潭发展', '603189': '*ST网达',
+    '603557': '*ST起步', '688202': '美迪西', '601801': '皖新传媒',
+    '300676': '华大基因', '603127': '昭衍新药', '000999': '华润三九',
+}
 WECOM_WEBHOOK = os.getenv("WECOM_WEBHOOK_URL", "")
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -314,18 +313,10 @@ def predict_signal(df: pd.DataFrame, stock_code: str,
     }
 
 def _l7_score(prob_up: float) -> float:
-    """Map prob_up (0-1) to L7 score (-3~+3) — 线性缩放。
-
-    2026-07-09: 从锚点映射改为线性缩放，与 normalizer.normalize_lynx() 统一。
-    原锚点表校准在 12/18 只股票上降低了准确率 (49.4% vs raw 51.7%)，
-    因此退回直接使用 prob_up 的方向信息。
-
-    映射: prob_up (0~1) → L7 score (-3~+3)
-      prob_up=0   → -3.00
-      prob_up=0.5 →  0.00
-      prob_up=1.0 → +3.00
-    """
-    return round(prob_up * 6.0 - 3.0, 2)
+    """Map prob_up (0-1) to L7 score (-3~+3), 复用normalizer的分段线性映射"""
+    from src.normalizer import SignalNormalizer
+    score, _ = SignalNormalizer.normalize_lynx("", prob_up * 100)
+    return round(score, 2)
 
 def _l7_label(score: float) -> str:
     """L7 score → 中文标签，复用normalizer的L7_SIGNAL_NAMES"""
@@ -463,7 +454,8 @@ def push_wecom(signals: list[dict]):
         parts.append(_label)
         lines.append("｜".join(parts))
 
-    lines.append("📡 efinance｜RF+LGB集成")
+    lines.append("\n> 数据源: efinance")
+    lines.append("> 模型: RF+LGB集成")
     text = "\n".join(lines)
 
     result = _send(text)
@@ -477,27 +469,14 @@ def push_wecom(signals: list[dict]):
 
 # ===== 5.5 双模型集成 =====
 
-# IC权重：基于2026-05-29~2026-06-26测量
-# LGB Pearson IC=0.2244, RF Pearson IC=0.0226
-# 加权公式: wi = ICi / sum(ICi)
-# LGB_w = 0.2244/(0.2244+0.0226) ≈ 0.91
-# RF_w  = 0.0226/(0.2244+0.0226) ≈ 0.09
-_LGB_IC_WEIGHT = 1.0
-_RF_IC_WEIGHT = 0.0
-
 def predict_ensemble(df: pd.DataFrame, code: str, name: str) -> dict | None:
-    """同时跑RF和LGB，返回集成信号（供data_loader.py使用）
-
-    IC加权集成: 按实测Information Coefficient比例加权，
-    防止低IC模型稀释高IC模型信号。
-    """
+    """同时跑RF和LGB，返回集成信号（供data_loader.py使用）"""
     df_feat = compute_features(df)
     sig_rf = predict_signal(df_feat, code, name)
     sig_lgb = _predict_alpha(df, code, name)
 
     if sig_rf and sig_lgb:
-        prob_avg = (sig_rf['prob_up'] * _RF_IC_WEIGHT
-                    + sig_lgb['prob_up'] * _LGB_IC_WEIGHT)
+        prob_avg = (sig_rf['prob_up'] + sig_lgb['prob_up']) / 2.0
         score = _l7_score(prob_avg / 100.0)
         label = _l7_label(score)
         emoji = _l7_emoji(score)
@@ -582,11 +561,6 @@ def run(use_alpha: bool = False):
         else:
             # 双模型并行 + 集成
             df_feat = compute_features(df)
-            # WalkForward风格: 每次预测前用最新数据重训模型
-            trained = train_model(df, code)
-            if trained is None:
-                print(f"❌ 重训失败")
-                continue
             sig_rf = predict_signal(df_feat, code, name)
             sig_lgb = _predict_alpha(df, code, name)
 
@@ -658,7 +632,7 @@ def _bt_predict_at(df: pd.DataFrame, model, scaler, idx: int) -> float | None:
         return None
 
 
-def cmd_backtest(save_predictions: str | None = None) -> int:
+def cmd_backtest() -> int:
     """回测模式：Walk-forward 验证模型预测准确率。
 
     Walk-forward: 每 RETRAIN_INTERVAL 天用截至当天的数据训练模型，
@@ -674,7 +648,6 @@ def cmd_backtest(save_predictions: str | None = None) -> int:
     MIN_TRAIN = 60         # 最少 60 个交易日作为初始训练集
 
     all_results: list[dict] = []
-    all_predictions: list[dict] = []  # 逐笔预测 (用于离线分析)
     for code in STOCK_CODES:
         print(f"\n📡  {code} ({STOCK_NAMES.get(code, code)})...")
 
@@ -720,19 +693,12 @@ def cmd_backtest(save_predictions: str | None = None) -> int:
                 actual_dir = 1 if actual_ret > 0 else (-1 if actual_ret < 0 else 0)
                 correct = 1 if pred_dir == actual_dir else (0 if actual_dir != 0 else None)
 
-                # L7 映射后方向（融合等效）
-                l7_score = _l7_score(prob_up)
-                l7_dir = 1 if l7_score > 0 else (-1 if l7_score < 0 else 0)
-                l7_correct = 1 if l7_dir == actual_dir else (0 if actual_dir != 0 else None)
-
                 results.append({
                     "code": code, "date": str(df.iloc[i].get("日期", "")),
                     "prob_up": round(prob_up * 100, 1),
                     "pred_dir": pred_dir, "actual_ret": round(actual_ret, 2),
                     "actual_dir": actual_dir, "correct": correct,
-                    "l7_dir": l7_dir, "l7_correct": l7_correct,
                 })
-                all_predictions.append(results[-1])
 
         if results:
             total = len(results)
@@ -741,29 +707,20 @@ def cmd_backtest(save_predictions: str | None = None) -> int:
             eval_count = correct_count + wrong_count
             accuracy = correct_count / eval_count * 100 if eval_count > 0 else 0
 
-            # L7 映射后准确率 (使用当前 _l7_score 锚点)
-            l7_correct_count = sum(1 for r in results if r["l7_correct"] == 1)
-            l7_wrong_count = sum(1 for r in results if r["l7_correct"] == 0)
-            l7_eval_count = l7_correct_count + l7_wrong_count
-            l7_accuracy = l7_correct_count / l7_eval_count * 100 if l7_eval_count > 0 else 0
-
             high_conf = [r for r in results if r["prob_up"] >= 65 or r["prob_up"] <= 35]
             high_correct = sum(1 for r in high_conf if r["correct"] == 1)
             high_total = len(high_conf)
 
             print(f"  准确率 {accuracy:.1f}% ({correct_count}/{eval_count})"
-                  f" | L7映射 {l7_accuracy:.1f}% ({l7_correct_count}/{l7_eval_count})"
                   f" | 训练窗口 {train_windows} 次"
                   f" | 高置信 {high_correct}/{high_total} ({high_correct/high_total*100:.1f}%"
                   f" )" if high_total > 0 else
                   f"  准确率 {accuracy:.1f}% ({correct_count}/{eval_count})"
-                  f" | L7映射 {l7_accuracy:.1f}% ({l7_correct_count}/{l7_eval_count})"
                   f" | 训练窗口 {train_windows} 次")
 
             all_results.append({
                 "code": code, "name": STOCK_NAMES.get(code, code),
                 "accuracy": accuracy, "total": eval_count, "correct": correct_count,
-                "l7_accuracy": l7_accuracy, "l7_correct": l7_correct_count, "l7_total": l7_eval_count,
                 "high_conf_correct": high_correct, "high_conf_total": high_total,
                 "train_windows": train_windows,
             })
@@ -781,35 +738,21 @@ def cmd_backtest(save_predictions: str | None = None) -> int:
     correct_total = sum(r["correct"] for r in all_results)
     total_total = sum(r["total"] for r in all_results)
     overall_acc = correct_total / total_total * 100 if total_total > 0 else 0
-    l7_correct_total = sum(r["l7_correct"] for r in all_results)
-    l7_total_total = sum(r["l7_total"] for r in all_results)
-    l7_overall_acc = l7_correct_total / l7_total_total * 100 if l7_total_total > 0 else 0
-    print(f"\n  总体 OOS 准确率 (raw prob_up): {correct_total}/{total_total} ({overall_acc:.1f}%)")
-    print(f"  总体 OOS 准确率 (L7 映射后):   {l7_correct_total}/{l7_total_total} ({l7_overall_acc:.1f}%)")
+    print(f"\n  总体 OOS 准确率: {correct_total}/{total_total} ({overall_acc:.1f}%)")
     print(f"  ({sum(r['train_windows'] for r in all_results)} 次模型训练 / 10 只股票)\n")
 
-    print(f"  个股 OOS 准确率 (raw / L7):")
+    print(f"  个股 OOS 准确率:")
     all_results.sort(key=lambda r: -r["accuracy"])
     for r in all_results:
-        print(f"    {r['code']} {r['name']:8s}: {r['accuracy']:.1f}%({r['correct']}/{r['total']}) "
-              f"→ L7 {r['l7_accuracy']:.1f}%({r['l7_correct']}/{r['l7_total']})")
-        if r['high_conf_total'] > 0:
-            print(f"      高置信: {r['high_conf_correct']}/{r['high_conf_total']} "
-                  f"({r['high_conf_correct']/r['high_conf_total']*100:.1f}%)")
+        bar = "█" * int(r["accuracy"] / 5) + "░" * (20 - int(r["accuracy"] / 5))
+        hc_str = f" 高置信: {r['high_conf_correct']}/{r['high_conf_total']} ({r['high_conf_correct']/r['high_conf_total']*100:.1f}%)" if r['high_conf_total'] > 0 else ""
+        print(f"    {r['code']} {r['name']:8s}: {r['accuracy']:.1f}% ({r['correct']}/{r['total']}) {bar}")
+        if hc_str:
+            print(f"      {hc_str}")
 
     print(f"\n{'='*55}")
     print(f"  回测完成")
     print(f"{'='*55}")
-
-    # 保存逐笔预测
-    if save_predictions:
-        import json
-        save_path = Path(_PROJECT_ROOT) / save_predictions
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        save_path.write_text(
-            json.dumps(all_predictions, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        print(f"  💾 逐笔预测已保存: {save_path} ({len(all_predictions)} 条)")
     return 0
 
 
@@ -824,8 +767,6 @@ def _parse_args() -> argparse.Namespace:
                         help="回测模式：用历史数据验证模型预测准确率")
     parser.add_argument("--alpha", action="store_true",
                         help="使用Alpha158+LGB模型（替代RF+15TA）")
-    parser.add_argument("--save-predictions", type=str, default=None,
-                        help="保存逐笔预测到 JSON 文件, 用于离线分析 flat zone 等参数")
     return parser.parse_args()
 
 
@@ -863,5 +804,5 @@ if __name__ == "__main__":
     if args.schedule:
         exit(_schedule_loop(args.time, use_alpha=args.alpha))
     if args.backtest:
-        exit(cmd_backtest(save_predictions=args.save_predictions))
+        exit(cmd_backtest())
     exit(run(use_alpha=args.alpha))

@@ -4,7 +4,6 @@ import type { HistoryItem } from '../../types/analysis';
 import { Badge, Button, ScrollArea } from '../common';
 import { DashboardPanelHeader, DashboardStateBlock } from '../dashboard';
 import { HistoryListItem } from './HistoryListItem';
-import { useUiLanguage } from '../../contexts/UiLanguageContext';
 
 interface HistoryListProps {
   items: HistoryItem[];
@@ -19,9 +18,6 @@ interface HistoryListProps {
   onToggleItemSelection: (recordId: number) => void;
   onToggleSelectAll: () => void;
   onDeleteSelected: () => void;
-  title?: string;
-  emptyTitle?: string;
-  emptyDescription?: string;
   className?: string;
 }
 
@@ -42,12 +38,8 @@ export const HistoryList: React.FC<HistoryListProps> = ({
   onToggleItemSelection,
   onToggleSelectAll,
   onDeleteSelected,
-  title,
-  emptyTitle,
-  emptyDescription,
   className = '',
 }) => {
-  const { t } = useUiLanguage();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -102,7 +94,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
         <div className="mb-4 space-y-3">
           <DashboardPanelHeader
             className="mb-1"
-            title={title ?? t('history.defaultTitle')}
+            title="历史分析"
             titleClassName="text-sm font-medium"
             leading={(
               <svg className="h-4 w-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -113,7 +105,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
             actions={
               selectedCount > 0 ? (
                 <Badge variant="info" size="sm" className="history-selection-badge animate-in fade-in zoom-in duration-200">
-                  {t('common.selectedCount', { count: selectedCount })}
+                  已选 {selectedCount}
                 </Badge>
               ) : undefined
             }
@@ -132,10 +124,10 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                   checked={allVisibleSelected}
                   onChange={onToggleSelectAll}
                   disabled={isDeleting}
-                  aria-label={t('history.selectAllHistoryAria')}
+                  aria-label="全选当前已加载历史记录"
                   className="history-select-all-checkbox h-3.5 w-3.5 cursor-pointer bg-transparent accent-primary focus:ring-primary/30 disabled:opacity-50"
                 />
-                <span className="text-[11px] text-muted-text select-none">{t('common.selectAllCurrent')}</span>
+                <span className="text-[11px] text-muted-text select-none">全选当前</span>
               </label>
               <Button
                 variant="danger-subtle"
@@ -145,7 +137,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                 isLoading={isDeleting}
                 className="history-batch-delete-button disabled:!border-transparent disabled:!bg-transparent"
               >
-                {isDeleting ? t('common.deleting') : t('common.delete')}
+                {isDeleting ? '删除中' : '删除'}
               </Button>
             </div>
           )}
@@ -155,12 +147,12 @@ export const HistoryList: React.FC<HistoryListProps> = ({
           <DashboardStateBlock
             loading
             compact
-            title={t('history.loading')}
+            title="加载历史记录中..."
           />
         ) : items.length === 0 ? (
           <DashboardStateBlock
-            title={emptyTitle ?? t('history.defaultEmptyTitle')}
-            description={emptyDescription ?? t('history.defaultEmptyDescription')}
+            title="暂无历史分析记录"
+            description="完成首次分析后，这里会保留最近结果。"
             icon={(
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -182,7 +174,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
             ))}
 
             <div ref={loadMoreTriggerRef} className="h-4" />
-            
+
             {isLoadingMore && (
               <div className="flex justify-center py-4">
                 <div className="home-spinner h-5 w-5 animate-spin border-2" />
@@ -192,7 +184,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
             {!hasMore && items.length > 0 && (
               <div className="text-center py-5">
                 <div className="h-px bg-subtle w-full mb-3" />
-                <span className="text-[10px] text-secondary-text uppercase tracking-[0.2em]">{t('history.bottomReached')}</span>
+                <span className="text-[10px] text-secondary-text uppercase tracking-[0.2em]">已到底部</span>
               </div>
             )}
           </div>

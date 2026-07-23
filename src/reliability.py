@@ -42,7 +42,7 @@ class ReliabilityConfig:
 
     # Per-stock ML alpha overrides (static fallback, updated monthly by calibrate_alphas.py)
     STOCK_ALPHA_OVERRIDE: dict[str, float] = {
-        "000592": 0.3,
+        "000592": 0.4,
         "001390": 0.3,
         "300676": 0.3,
         "600372": 0.4,

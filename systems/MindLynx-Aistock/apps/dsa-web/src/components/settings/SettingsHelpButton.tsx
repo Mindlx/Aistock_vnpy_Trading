@@ -3,7 +3,6 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type React from 'react';
 import { createPortal } from 'react-dom';
 import type { SystemConfigFieldSchema } from '../../types/systemConfig';
-import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { getSettingsHelpContent } from '../../locales/settingsHelp';
 import { cn } from '../../utils/cn';
 import { Tooltip } from '../common';
@@ -99,19 +98,14 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
   docs: providedDocs,
   description,
 }) => {
-  const { language, t } = useUiLanguage();
-  const help = getSettingsHelpContent(helpKey ?? schema?.helpKey, description, language);
+  const help = getSettingsHelpContent(helpKey ?? schema?.helpKey, description);
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const titleId = useId();
-  const examples = providedExamples ?? help?.examples ?? schema?.examples ?? [];
+  const examples = providedExamples ?? schema?.examples ?? [];
   const docs = providedDocs?.length ? providedDocs : schema?.docs?.length ? schema.docs : help?.docs ?? [];
-  const showFieldKey = help?.showFieldKey ?? true;
-  const helpButtonLabel = language === 'en'
-    ? `View ${title} configuration help`
-    : `查看 ${title} 配置说明`;
 
   useEffect(() => {
     if (!open) {
@@ -181,13 +175,13 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
 
   return (
     <>
-      <Tooltip content={t('settings.helpTooltip')}>
+      <Tooltip content="查看配置说明">
         <span className="inline-flex">
           <button
             ref={buttonRef}
             type="button"
             className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-transparent text-muted-text transition-colors hover:border-[var(--settings-border)] hover:bg-[var(--settings-surface-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15"
-            aria-label={helpButtonLabel}
+            aria-label={`查看 ${title} 配置说明`}
             aria-expanded={open}
             aria-controls={open ? titleId : undefined}
             onClick={() => setOpen(true)}
@@ -203,7 +197,7 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
               <button
                 type="button"
                 className="absolute inset-0 cursor-default"
-                aria-label={t('settings.helpClose')}
+                aria-label="关闭配置说明"
                 tabIndex={-1}
                 onClick={() => setOpen(false)}
               />
@@ -221,11 +215,9 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
                 <div className="h-1 w-full bg-gradient-to-r from-cyan/80 via-primary/70 to-purple/70" />
                 <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
                   <div className="min-w-0">
-                    {showFieldKey ? (
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">
-                        {fieldKey}
-                      </p>
-                    ) : null}
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">
+                      {fieldKey}
+                    </p>
                     <h2 id={titleId} className="mt-1 text-lg font-semibold text-foreground">
                       {help.title || title}
                     </h2>
@@ -238,37 +230,35 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
                     type="button"
                     onClick={() => setOpen(false)}
                     className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-card/80 text-secondary-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15"
-                    aria-label={t('settings.helpClose')}
+                    aria-label="关闭配置说明"
                   >
                     <X aria-hidden="true" className="h-4 w-4" />
                   </button>
                 </div>
 
                 <div className="space-y-5 overflow-y-auto px-5 py-5">
-                  <HelpSection title={t('settings.helpPurpose')}>
+                  <HelpSection title="用途">
                     {help.usage ? <p className="text-sm leading-6 text-secondary-text">{help.usage}</p> : null}
                   </HelpSection>
 
-                  <HelpSection title={t('settings.helpValueNotes')}>
+                  <HelpSection title="取值说明">
                     <HelpList items={help.valueNotes} />
                   </HelpSection>
 
-                  {hasItems(examples) ? (
-                    <HelpSection title={t('settings.helpExamples')}>
-                      <CodeExamples examples={examples} />
-                    </HelpSection>
-                  ) : null}
+                  <HelpSection title="配置样例">
+                    <CodeExamples examples={examples} />
+                  </HelpSection>
 
-                  <HelpSection title={t('settings.helpImpact')}>
+                  <HelpSection title="影响范围">
                     <HelpList items={help.impact} />
                   </HelpSection>
 
-                  <HelpSection title={t('settings.helpNotes')}>
+                  <HelpSection title="注意事项">
                     <HelpList items={help.notes} />
                   </HelpSection>
 
                   {hasItems(docs) ? (
-                    <HelpSection title={t('settings.helpRelatedDocs')}>
+                    <HelpSection title="相关文档">
                       <div className="flex flex-wrap gap-2">
                         {docs.map((doc) => (
                           <a

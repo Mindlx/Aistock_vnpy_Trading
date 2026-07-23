@@ -8,7 +8,7 @@ import {
   StandaloneRouteBoundary,
 } from './components/layout/RouteBoundary';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { UiLanguageProvider, useUiLanguage } from './contexts/UiLanguageContext';
+import { UiLanguageProvider } from './contexts/UiLanguageContext';
 import { useAgentChatStore } from './stores/agentChatStore';
 import './App.css';
 
@@ -19,15 +19,14 @@ const LoginPage = lazy(() => import('./pages/LoginPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
-const DecisionSignalsPage = lazy(() => import('./pages/DecisionSignalsPage'));
 const AlertsPage = lazy(() => import('./pages/AlertsPage'));
 const TokenUsagePage = lazy(() => import('./pages/TokenUsagePage'));
+const DecisionSignalsPage = lazy(() => import('./pages/DecisionSignalsPage'));
 const StockScreeningPage = lazy(() => import('./pages/StockScreeningPage'));
 
 const AppContent: React.FC = () => {
   const location = useLocation();
   const { authEnabled, loggedIn, isLoading, loadError, refreshStatus } = useAuth();
-  const { t } = useUiLanguage();
 
   useEffect(() => {
     useAgentChatStore.getState().setCurrentRoute(location.pathname);
@@ -48,7 +47,7 @@ const AppContent: React.FC = () => {
           className="btn-primary"
           onClick={() => void refreshStatus()}
         >
-          {t('common.retry')}
+          重试
         </button>
       </div>
     );
@@ -82,11 +81,11 @@ const AppContent: React.FC = () => {
         <Route path="/" element={<HomePage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/portfolio" element={<PortfolioPage />} />
-        <Route path="/decision-signals" element={<DecisionSignalsPage />} />
-        <Route path="/screening" element={<StockScreeningPage />} />
         <Route path="/backtest" element={<BacktestPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/usage" element={<TokenUsagePage />} />
+        <Route path="/decision-signals" element={<DecisionSignalsPage />} />
+        <Route path="/screening" element={<StockScreeningPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
@@ -96,13 +95,13 @@ const AppContent: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <UiLanguageProvider>
-      <Router>
-        <AuthProvider>
+    <Router>
+      <AuthProvider>
+        <UiLanguageProvider>
           <AppContent />
-        </AuthProvider>
-      </Router>
-    </UiLanguageProvider>
+        </UiLanguageProvider>
+      </AuthProvider>
+    </Router>
   );
 };
 

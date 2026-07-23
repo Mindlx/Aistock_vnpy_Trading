@@ -1,5 +1,8 @@
 /**
- * Stock search suggestion list.
+ * SuggestionsList Component
+ *
+ * Stock search suggestion list
+ * Displays matched stock options
  */
 
 import type { CSSProperties } from 'react';
@@ -39,7 +42,7 @@ export function SuggestionsList({
         ...style,
         backgroundColor: 'hsl(var(--card) / 0.85)',
         borderColor: 'var(--border-accent)',
-        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3), -4px 0 15px -3px rgba(0, 0, 0, 0.2), 4px 0 15px -3px rgba(0, 0, 0, 0.2)',
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3), -4px 0 15px -3px rgba(0, 0, 0, 0.2), 4px 0 15px -3px rgba(0, 0, 0, 0.2)'
       }}
       role="listbox"
     >
@@ -49,16 +52,18 @@ export function SuggestionsList({
           role="option"
           aria-selected={index === highlightedIndex}
           className={cn(
-            'px-4 py-1 cursor-pointer flex items-center justify-between',
-            'hover:bg-[var(--autocomplete-hover-bg)]/25',
-            index === highlightedIndex && 'bg-[var(--autocomplete-hover-bg)]/25',
+            "px-4 py-1 cursor-pointer flex items-center justify-between",
+            "hover:bg-[var(--autocomplete-hover-bg)]/25",
+            index === highlightedIndex && "bg-[var(--autocomplete-hover-bg)]/25"
           )}
           onClick={() => onSelect(suggestion)}
           onMouseEnter={() => onMouseEnter(index)}
         >
           <div className="flex items-center gap-3">
+            {/* Market badge */}
             <MarketBadge market={suggestion.market} />
 
+            {/* Name and code */}
             <div className="flex flex-col">
               <span className="text-sm font-medium text-primary-text">
                 {suggestion.nameZh}
@@ -69,6 +74,7 @@ export function SuggestionsList({
             </div>
           </div>
 
+          {/* Match type badge */}
           <MatchTypeBadge matchType={suggestion.matchType} />
         </li>
       ))}
@@ -76,12 +82,13 @@ export function SuggestionsList({
   );
 }
 
+// Helper component: Market badge
 const MARKET_BADGE_CONFIG = {
   CN: { label: 'A股', className: 'border-danger/25 bg-danger/10 text-danger' },
   HK: { label: '港股', className: 'border-success/25 bg-success/10 text-success' },
   US: { label: '美股', className: 'border-cyan/25 bg-cyan/10 text-cyan' },
-  JP: { label: '日股', className: 'border-indigo-500/25 bg-indigo-500/10 text-indigo-500' },
-  KR: { label: '韩股', className: 'border-rose-500/25 bg-rose-500/10 text-rose-500' },
+  JP: { label: '日股', className: 'border-pink-500/25 bg-pink-500/10 text-pink-500' },
+  KR: { label: '韩股', className: 'border-blue-500/25 bg-blue-500/10 text-blue-500' },
   INDEX: { label: '指数', className: 'border-purple/25 bg-purple/10 text-purple' },
   ETF: { label: 'ETF', className: 'border-warning/25 bg-warning/10 text-warning' },
   BSE: { label: '北交所', className: 'border-orange-500/25 bg-orange-500/10 text-orange-500' },
@@ -95,12 +102,13 @@ function MarketBadge({ market }: { market: string }) {
   }
 
   return (
-    <Badge variant="default" size="sm" className={cn('min-w-[3rem] justify-center shadow-none', config.className)}>
+    <Badge variant="default" size="sm" className={cn("min-w-[3rem] justify-center shadow-none", config.className)}>
       {config.label}
     </Badge>
   );
 }
 
+// Helper component: Match type badge
 function MatchTypeBadge({ matchType }: { matchType: string }) {
   const configMap = {
     exact: { label: '精确', className: 'border-cyan/25 bg-cyan/10 text-cyan' },
@@ -112,7 +120,7 @@ function MatchTypeBadge({ matchType }: { matchType: string }) {
   const config = configMap[matchType as keyof typeof configMap] || configMap.fuzzy;
 
   return (
-    <Badge variant="default" size="sm" className={cn('shrink-0 shadow-none', config.className)}>
+    <Badge variant="default" size="sm" className={cn("shrink-0 shadow-none", config.className)}>
       {config.label}
     </Badge>
   );

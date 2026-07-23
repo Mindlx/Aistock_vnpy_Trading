@@ -2,16 +2,10 @@ import apiClient from './index';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from './error';
 import { toCamelCase } from './utils';
 import type {
-  AgentBackendStatusPreviewRequest,
-  AgentBackendStatusResponse,
   DiscoverLLMChannelModelsRequest,
   DiscoverLLMChannelModelsResponse,
   ExportSystemConfigResponse,
-  GenerationBackendStatusPreviewRequest,
-  GenerationBackendStatusResponse,
   ImportSystemConfigRequest,
-  SchedulerRunNowResponse,
-  SchedulerStatusResponse,
   SetupStatusResponse,
   SystemConfigConflictResponse,
   SystemConfigResponse,
@@ -19,8 +13,6 @@ import type {
   SystemConfigValidationErrorResponse,
   TestLLMChannelRequest,
   TestLLMChannelResponse,
-  TestGenerationBackendRequest,
-  TestGenerationBackendResponse,
   TestNotificationChannelRequest,
   TestNotificationChannelResponse,
   UpdateSystemConfigRequest,
@@ -103,7 +95,6 @@ function toSnakeTestChannelPayload(payload: TestLLMChannelRequest): Record<strin
     models: payload.models,
     enabled: payload.enabled ?? true,
     timeout_seconds: payload.timeoutSeconds ?? 20,
-    use_saved_secret: payload.useSavedSecret ?? false,
   };
   if (payload.capabilityChecks && payload.capabilityChecks.length > 0) {
     request.capability_checks = payload.capabilityChecks;
@@ -119,8 +110,8 @@ function toSnakeNotificationTestPayload(payload: TestNotificationChannelRequest)
       value: item.value,
     })),
     mask_token: payload.maskToken ?? '******',
-    title: payload.title ?? 'DSA 通知测试',
-    content: payload.content ?? '这是一条来自 DSA Web 设置页的通知测试消息。',
+    title: payload.title ?? 'MLA 通知测试',
+    content: payload.content ?? '这是一条来自 MLA Web 设置页的通知测试消息。',
     timeout_seconds: payload.timeoutSeconds ?? 20,
   };
 }
@@ -133,46 +124,6 @@ function toSnakeDiscoverModelsPayload(payload: DiscoverLLMChannelModelsRequest):
     api_key: payload.apiKey ?? '',
     models: payload.models,
     timeout_seconds: payload.timeoutSeconds ?? 20,
-    use_saved_secret: payload.useSavedSecret ?? false,
-  };
-}
-
-function toSnakeGenerationBackendStatusPreviewPayload(
-  payload: GenerationBackendStatusPreviewRequest = {},
-): Record<string, unknown> {
-  return {
-    items: (payload.items || []).map((item) => ({
-      key: item.key,
-      value: item.value,
-    })),
-    mask_token: payload.maskToken ?? '******',
-  };
-}
-
-function toSnakeGenerationBackendSmokePayload(payload: TestGenerationBackendRequest = {}): Record<string, unknown> {
-  const request: Record<string, unknown> = {
-    mode: payload.mode ?? 'json',
-    items: (payload.items || []).map((item) => ({
-      key: item.key,
-      value: item.value,
-    })),
-    mask_token: payload.maskToken ?? '******',
-  };
-  if (payload.backendId) {
-    request.backend_id = payload.backendId;
-  }
-  if (payload.timeoutSeconds !== undefined && payload.timeoutSeconds !== null) {
-    request.timeout_seconds = payload.timeoutSeconds;
-  }
-  return request;
-}
-
-function toSnakeAgentBackendPayload(
-  payload: AgentBackendStatusPreviewRequest = {},
-): Record<string, unknown> {
-  return {
-    items: (payload.items || []).map((item) => ({ key: item.key, value: item.value })),
-    mask_token: payload.maskToken ?? '******',
   };
 }
 
@@ -201,58 +152,6 @@ export const systemConfigApi = {
   async getSetupStatus(): Promise<SetupStatusResponse> {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/system/config/setup/status');
     return toCamelCase<SetupStatusResponse>(response.data);
-  },
-
-  async getGenerationBackendStatus(): Promise<GenerationBackendStatusResponse> {
-    const response = await apiClient.get<Record<string, unknown>>(
-      '/api/v1/system/config/generation-backends/status',
-    );
-    return toCamelCase<GenerationBackendStatusResponse>(response.data);
-  },
-
-  async previewGenerationBackendStatus(
-    payload: GenerationBackendStatusPreviewRequest = {},
-  ): Promise<GenerationBackendStatusResponse> {
-    const response = await apiClient.post<Record<string, unknown>>(
-      '/api/v1/system/config/generation-backends/status/preview',
-      toSnakeGenerationBackendStatusPreviewPayload(payload),
-    );
-    return toCamelCase<GenerationBackendStatusResponse>(response.data);
-  },
-
-  async testGenerationBackend(payload: TestGenerationBackendRequest = {}): Promise<TestGenerationBackendResponse> {
-    const response = await apiClient.post<Record<string, unknown>>(
-      '/api/v1/system/config/generation-backends/smoke-test',
-      toSnakeGenerationBackendSmokePayload(payload),
-    );
-    return toCamelCase<TestGenerationBackendResponse>(response.data);
-  },
-
-  async getAgentBackendStatus(): Promise<AgentBackendStatusResponse> {
-    const response = await apiClient.get<Record<string, unknown>>(
-      '/api/v1/system/config/agent-backends/status',
-    );
-    return toCamelCase<AgentBackendStatusResponse>(response.data);
-  },
-
-  async previewAgentBackendStatus(
-    payload: AgentBackendStatusPreviewRequest = {},
-  ): Promise<AgentBackendStatusResponse> {
-    const response = await apiClient.post<Record<string, unknown>>(
-      '/api/v1/system/config/agent-backends/status/preview',
-      toSnakeAgentBackendPayload(payload),
-    );
-    return toCamelCase<AgentBackendStatusResponse>(response.data);
-  },
-
-  async getSchedulerStatus(): Promise<SchedulerStatusResponse> {
-    const response = await apiClient.get<Record<string, unknown>>('/api/v1/system/scheduler/status');
-    return toCamelCase<SchedulerStatusResponse>(response.data);
-  },
-
-  async runSchedulerNow(): Promise<SchedulerRunNowResponse> {
-    const response = await apiClient.post<Record<string, unknown>>('/api/v1/system/scheduler/run-now');
-    return toCamelCase<SchedulerRunNowResponse>(response.data);
   },
 
   async validate(payload: ValidateSystemConfigRequest): Promise<ValidateSystemConfigResponse> {
@@ -335,36 +234,5 @@ export const systemConfigApi = {
 
       throw error;
     }
-  },
-
-  /**
-   * 获取自选队列股票代码列表
-   */
-  getWatchlist: async (): Promise<string[]> => {
-    const response = await apiClient.get<Record<string, unknown>>('/api/v1/stocks/watchlist');
-    const data = toCamelCase<{ stockCodes: string[] }>(response.data);
-    return data.stockCodes || [];
-  },
-
-  /**
-   * 添加股票到自选队列
-   */
-  addToWatchlist: async (stockCode: string): Promise<string[]> => {
-    const response = await apiClient.post<Record<string, unknown>>('/api/v1/stocks/watchlist/add', {
-      stock_code: stockCode,
-    });
-    const data = toCamelCase<{ stockCodes: string[] }>(response.data);
-    return data.stockCodes || [];
-  },
-
-  /**
-   * 从自选队列移除股票
-   */
-  removeFromWatchlist: async (stockCode: string): Promise<string[]> => {
-    const response = await apiClient.post<Record<string, unknown>>('/api/v1/stocks/watchlist/remove', {
-      stock_code: stockCode,
-    });
-    const data = toCamelCase<{ stockCodes: string[] }>(response.data);
-    return data.stockCodes || [];
   },
 };

@@ -27,17 +27,13 @@ export interface UseStockIndexResult {
  *
  * @returns Index state and data
  */
-export function useStockIndex(enabled = true): UseStockIndexResult {
+export function useStockIndex(): UseStockIndexResult {
   const [index, setIndex] = useState<StockIndexItem[]>([]);
-  const [loading, setLoading] = useState(enabled);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [fallback, setFallback] = useState(false);
 
   useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
     let mounted = true;
 
     async function load() {
@@ -61,14 +57,14 @@ export function useStockIndex(enabled = true): UseStockIndexResult {
     return () => {
       mounted = false;
     };
-  }, [enabled]);
+  }, []);
 
   return {
-    index: enabled ? index : [],
-    loading: enabled ? loading : false,
-    error: enabled ? error : null,
-    fallback: enabled ? fallback : false,  // Whether fallback
-    loaded: enabled ? !loading : false,
+    index,
+    loading,
+    error,
+    fallback,  // Whether fallback
+    loaded: !loading,
   };
 }
 

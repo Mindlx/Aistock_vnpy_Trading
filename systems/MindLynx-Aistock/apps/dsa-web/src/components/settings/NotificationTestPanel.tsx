@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type React from 'react';
 import { Send } from 'lucide-react';
-import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { getParsedApiError, type ParsedApiError } from '../../api/error';
 import { systemConfigApi } from '../../api/systemConfig';
 import type {
@@ -12,23 +11,21 @@ import type {
 import { ApiErrorAlert, Badge, Button, InlineAlert, Input, Select } from '../common';
 import { SettingsSectionCard } from './SettingsSectionCard';
 
-function getChannelOptions(language: 'zh' | 'en'): Array<{ value: NotificationTestChannel; label: string }> {
-  return [
-    { value: 'wechat', label: language === 'en' ? 'WeCom' : '企业微信' },
-    { value: 'feishu', label: language === 'en' ? 'Feishu Webhook' : '飞书 Webhook' },
-    { value: 'telegram', label: 'Telegram' },
-    { value: 'email', label: language === 'en' ? 'Email' : '邮件' },
-    { value: 'pushover', label: 'Pushover' },
-    { value: 'ntfy', label: 'ntfy' },
-    { value: 'gotify', label: 'Gotify' },
-    { value: 'pushplus', label: 'PushPlus' },
-    { value: 'serverchan3', label: 'ServerChan3' },
-    { value: 'custom', label: language === 'en' ? 'Custom Webhook' : '自定义 Webhook' },
-    { value: 'discord', label: 'Discord' },
-    { value: 'slack', label: 'Slack' },
-    { value: 'astrbot', label: 'AstrBot' },
-  ];
-}
+const CHANNEL_OPTIONS: Array<{ value: NotificationTestChannel; label: string }> = [
+  { value: 'wechat', label: '企业微信' },
+  { value: 'feishu', label: '飞书 Webhook' },
+  { value: 'telegram', label: 'Telegram' },
+  { value: 'email', label: '邮件' },
+  { value: 'pushover', label: 'Pushover' },
+  { value: 'ntfy', label: 'ntfy' },
+  { value: 'gotify', label: 'Gotify' },
+  { value: 'pushplus', label: 'PushPlus' },
+  { value: 'serverchan3', label: 'Server酱3' },
+  { value: 'custom', label: '自定义 Webhook' },
+  { value: 'discord', label: 'Discord' },
+  { value: 'slack', label: 'Slack' },
+  { value: 'astrbot', label: 'AstrBot' },
+];
 
 interface NotificationTestPanelProps {
   items: SystemConfigUpdateItem[];
@@ -47,30 +44,18 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
   maskToken,
   disabled = false,
 }) => {
-  const { language, t } = useUiLanguage();
   const [channel, setChannel] = useState<NotificationTestChannel>('wechat');
-  const [title, setTitle] = useState(t('settings.notificationTestTitleValue'));
-  const [content, setContent] = useState(t('settings.notificationTestContent'));
+  const [title, setTitle] = useState('MLA 通知测试');
+  const [content, setContent] = useState('这是一条来自 MLA Web 设置页的通知测试消息。');
   const [timeoutSeconds, setTimeoutSeconds] = useState('20');
   const [result, setResult] = useState<TestNotificationChannelResponse | null>(null);
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [isTesting, setIsTesting] = useState(false);
-  const [isTitleEdited, setIsTitleEdited] = useState(false);
-  const [isContentEdited, setIsContentEdited] = useState(false);
 
   const normalizedItems = useMemo(
     () => items.map((item) => ({ key: item.key, value: String(item.value ?? '') })),
     [items],
   );
-
-  useEffect(() => {
-    if (!isTitleEdited) {
-      setTitle(t('settings.notificationTestTitleValue'));
-    }
-    if (!isContentEdited) {
-      setContent(t('settings.notificationTestContent'));
-    }
-  }, [isTitleEdited, isContentEdited, t]);
 
   const runTest = async () => {
     setError(null);
@@ -81,8 +66,8 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
         channel,
         items: normalizedItems,
         maskToken,
-        title: title.trim() || t('settings.notificationTestTitleValue'),
-        content: content.trim() || t('settings.notificationTestContent'),
+        title: title.trim() || 'MLA 通知测试',
+        content: content.trim() || '这是一条来自 MLA Web 设置页的通知测试消息。',
         timeoutSeconds: clampTimeout(timeoutSeconds),
       });
       setResult(payload);
@@ -95,8 +80,8 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
 
   return (
     <SettingsSectionCard
-      title={t('settings.notificationTest')}
-      description={t('settings.notificationTestDescription')}
+      title="通知测试"
+      description="使用当前页面草稿发送一条真实测试通知；测试不会保存配置。"
       actions={(
         <Button
           type="button"
@@ -105,33 +90,30 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
           onClick={() => void runTest()}
           disabled={disabled || isTesting}
           isLoading={isTesting}
-          loadingText={t('settings.notificationTesting')}
+          loadingText="测试中..."
         >
           <Send className="h-4 w-4" />
-          {t('settings.notificationTestSend')}
+          发送测试
         </Button>
       )}
     >
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_120px]">
         <Select
-          label={t('settings.notificationTestChannel')}
+          label="渠道"
           value={channel}
-          options={getChannelOptions(language)}
+          options={CHANNEL_OPTIONS}
           disabled={disabled || isTesting}
           onChange={(value) => setChannel(value as NotificationTestChannel)}
         />
         <Input
-          label={t('settings.notificationTestTitle')}
+          label="标题"
           value={title}
           maxLength={80}
           disabled={disabled || isTesting}
-          onChange={(event) => {
-            setIsTitleEdited(true);
-            setTitle(event.target.value);
-          }}
+          onChange={(event) => setTitle(event.target.value)}
         />
         <Input
-          label={t('settings.notificationTestTimeout')}
+          label="超时秒数"
           type="number"
           min={1}
           max={120}
@@ -143,16 +125,13 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
       </div>
 
       <label className="block">
-        <span className="mb-2 block text-sm font-medium text-foreground">{t('settings.notificationTestBody')}</span>
+        <span className="mb-2 block text-sm font-medium text-foreground">正文</span>
         <textarea
           value={content}
           maxLength={1000}
           rows={4}
           disabled={disabled || isTesting}
-          onChange={(event) => {
-            setIsContentEdited(true);
-            setContent(event.target.value);
-          }}
+          onChange={(event) => setContent(event.target.value)}
           className="input-surface input-focus-glow min-h-[112px] w-full resize-y rounded-xl border bg-transparent px-4 py-3 text-sm leading-6 text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
         />
       </label>
@@ -163,7 +142,7 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
         <div className="space-y-3">
           <InlineAlert
             variant={result.success ? 'success' : 'danger'}
-            title={result.success ? t('settings.notificationTestSuccess') : t('settings.notificationTestFailure')}
+            title={result.success ? '测试成功' : '测试失败'}
             message={(
               <span>
                 {result.message}
@@ -184,7 +163,7 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={attempt.success ? 'success' : 'danger'}>
-                          {attempt.success ? t('common.success') : t('common.failure')}
+                          {attempt.success ? '成功' : '失败'}
                         </Badge>
                         <span className="text-sm font-medium text-foreground">
                           Attempt {index + 1}

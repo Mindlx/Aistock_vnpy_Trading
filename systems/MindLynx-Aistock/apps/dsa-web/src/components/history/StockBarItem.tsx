@@ -2,11 +2,11 @@ import type React from 'react';
 import { Badge, Button } from '../common';
 import type { StockBarItem as StockBarItemType } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
-import { buildDecisionActionLabelMap, getDecisionActionLabel } from '../../utils/decisionAction';
 import { formatDateTime } from '../../utils/format';
 import { getMarketPhaseSummaryLabel } from '../../utils/marketPhase';
 import { truncateStockName } from '../../utils/stockName';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
+import type { UiTextKey } from '../../i18n/uiText';
 
 interface StockBarItemProps {
   item: StockBarItemType;
@@ -17,6 +17,16 @@ interface StockBarItemProps {
   isMarketReview?: boolean;
 }
 
+const getOperationBadgeLabel = (advice: string | undefined, t: (key: UiTextKey) => string) => {
+  const normalized = advice?.trim();
+  if (!normalized) return null;
+  if (normalized.includes('减仓')) return t('history.operationReduce');
+  if (normalized.includes('卖')) return t('history.operationSell');
+  if (normalized.includes('观望') || normalized.includes('等待')) return t('history.operationHold');
+  if (normalized.includes('买') || normalized.includes('布局')) return t('history.operationBuy');
+  return normalized.split(/[，。；、\s]/)[0] || t('history.operationAdvice');
+};
+
 export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
   item,
   isViewing,
@@ -26,17 +36,9 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
   isMarketReview = false,
 }) => {
   const { language, t } = useUiLanguage();
-  const sentimentScore = typeof item.sentimentScore === 'number' ? item.sentimentScore : null;
-  const sentimentColor = sentimentScore !== null ? getSentimentColor(sentimentScore) : null;
+  const sentimentColor = item.sentimentScore !== undefined ? getSentimentColor(item.sentimentScore) : null;
   const stockName = item.stockName || item.stockCode;
-  const actionLabels = buildDecisionActionLabelMap(t);
-  const operationLabel = getDecisionActionLabel(
-    item.action,
-    item.actionLabel,
-    item.operationAdvice,
-    t('history.sentiment'),
-    actionLabels,
-  );
+  const operationLabel = getOperationBadgeLabel(item.operationAdvice, t);
   const phaseLabel = getMarketPhaseSummaryLabel(item.marketPhaseSummary, language)
     ?.replace('市场阶段: ', '')
     .replace('市场阶段：', '')
@@ -86,7 +88,7 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
                 >
                   {t('stockBar.market')}
                 </Badge>
-              ) : sentimentColor ? (
+              ) : operationLabel && sentimentColor ? (
                 <Badge
                   variant="default"
                   size="sm"
@@ -97,7 +99,7 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
                     backgroundColor: `${sentimentColor}10`,
                   }}
                 >
-                  {operationLabel} {sentimentScore}
+                  {operationLabel} {item.sentimentScore}
                 </Badge>
               ) : null}
               {onDelete && (
@@ -131,7 +133,7 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
                 </span>
               </>
             )}
-            {item.analysisCount > 1 && (
+            {(item.analysisCount ?? 0) > 1 && (
               <>
                 <span className="w-1 h-1 rounded-full bg-subtle-hover" />
                 <span className="text-[10px] text-muted-text">

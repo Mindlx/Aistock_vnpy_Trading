@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Agent API endpoints.
 """
@@ -6,33 +5,31 @@ Agent API endpoints.
 import asyncio
 import json
 import logging
-import threading
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from api.v1.schemas.system_config import AgentBackendStatusResponse
 from src.config import get_config
 from src.services.agent_model_service import list_agent_model_deployments
 
 # Tool name -> Chinese display name mapping
-TOOL_DISPLAY_NAMES: Dict[str, str] = {
-    "get_realtime_quote":         "获取实时行情",
-    "get_daily_history":          "获取历史K线",
-    "get_chip_distribution":      "分析筹码分布",
-    "get_analysis_context":       "获取分析上下文",
-    "get_stock_info":             "获取股票基本面",
-    "search_stock_news":          "搜索股票新闻",
+TOOL_DISPLAY_NAMES: dict[str, str] = {
+    "get_realtime_quote": "获取实时行情",
+    "get_daily_history": "获取历史K线",
+    "get_chip_distribution": "分析筹码分布",
+    "get_analysis_context": "获取分析上下文",
+    "get_stock_info": "获取股票基本面",
+    "search_stock_news": "搜索股票新闻",
     "search_comprehensive_intel": "搜索综合情报",
-    "analyze_trend":              "分析技术趋势",
-    "calculate_ma":               "计算均线系统",
-    "get_volume_analysis":        "分析量能变化",
-    "analyze_pattern":            "识别K线形态",
-    "get_market_indices":         "获取市场指数",
-    "get_sector_rankings":        "分析行业板块",
+    "analyze_trend": "分析技术趋势",
+    "calculate_ma": "计算均线系统",
+    "get_volume_analysis": "分析量能变化",
+    "analyze_pattern": "识别K线形态",
+    "get_market_indices": "获取市场指数",
+    "get_sector_rankings": "分析行业板块",
     "get_skill_backtest_summary": "获取技能回测概览",
     "get_strategy_backtest_summary": "获取策略回测概览",
     "get_stock_backtest_summary": "获取个股回测数据",
@@ -42,31 +39,29 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_ACTIVE_CODEX_STREAMS: Dict[str, threading.Event] = {}
-_ACTIVE_CODEX_STREAMS_LOCK = threading.Lock()
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     message: str
-    session_id: Optional[str] = None
-    request_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
-    skills: Optional[List[str]] = Field(
+    session_id: str | None = None
+    skills: list[str] | None = Field(
         default=None,
         validation_alias=AliasChoices("skills", "strategies"),
     )
-    context: Optional[Dict[str, Any]] = None  # Previous analysis context for data reuse
+    context: dict[str, Any] | None = None  # Previous analysis context for data reuse
 
     @property
-    def effective_skills(self) -> Optional[List[str]]:
+    def effective_skills(self) -> list[str] | None:
         """Return skill ids from the unified request shape."""
         return self.skills
+
 
 class ChatResponse(BaseModel):
     success: bool
     content: str
     session_id: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class SkillInfo(BaseModel):
@@ -74,13 +69,14 @@ class SkillInfo(BaseModel):
     name: str
     description: str
 
+
 class SkillsResponse(BaseModel):
-    skills: List[SkillInfo]
+    skills: list[SkillInfo]
     default_skill_id: str = ""
 
 
 class StrategiesResponse(BaseModel):
-    strategies: List[SkillInfo]
+    strategies: list[SkillInfo]
     default_strategy_id: str = ""
 
 
@@ -89,49 +85,21 @@ class AgentModelDeployment(BaseModel):
     model: str
     provider: str
     source: str
-    api_base: Optional[str] = None
-    deployment_name: Optional[str] = None
+    api_base: str | None = None
+    deployment_name: str | None = None
     is_primary: bool = False
     is_fallback: bool = False
 
 
 class AgentModelsResponse(BaseModel):
-    models: List[AgentModelDeployment]
+    models: list[AgentModelDeployment]
 
 
 @router.get("/models", response_model=AgentModelsResponse)
 async def get_agent_models():
     """Get configured Agent model deployments for frontend selection."""
     config = get_config()
-    from src.agent.agent_backend import AgentBackendConfigError, resolve_agent_backend_id
-
-    try:
-        selected_backend = resolve_agent_backend_id(config)
-    except AgentBackendConfigError:
-        return AgentModelsResponse(models=[])
-    if selected_backend == "codex_app_server":
-        return AgentModelsResponse(models=[])
-    return AgentModelsResponse(
-        models=[AgentModelDeployment(**item) for item in list_agent_model_deployments(config)]
-    )
-
-
-@router.get("/status", response_model=AgentBackendStatusResponse)
-async def get_agent_status():
-    """Return the current effective Chat backend status for the Chat page."""
-    payload = await asyncio.to_thread(_get_agent_chat_status, get_config())
-    return _agent_status_response(payload)
-
-
-def _agent_status_response(payload: Dict[str, Any]) -> AgentBackendStatusResponse:
-    return AgentBackendStatusResponse(
-        backend=payload["backend"],
-        available=payload["available"],
-        experimental=payload["experimental"],
-        version=payload.get("version"),
-        error_code=payload.get("error_code"),
-        message=payload.get("message"),
-    )
+    return AgentModelsResponse(models=[AgentModelDeployment(**item) for item in list_agent_model_deployments(config)])
 
 
 def _build_skills_response(config) -> SkillsResponse:
@@ -140,11 +108,7 @@ def _build_skills_response(config) -> SkillsResponse:
 
     skill_manager = get_skill_manager(config)
     available_skills = sorted(
-        [
-            skill
-            for skill in skill_manager.list_skills()
-            if getattr(skill, "user_invocable", True)
-        ],
+        [skill for skill in skill_manager.list_skills() if getattr(skill, "user_invocable", True)],
         key=lambda skill: (
             int(getattr(skill, "default_priority", 100)),
             skill.display_name,
@@ -152,8 +116,7 @@ def _build_skills_response(config) -> SkillsResponse:
         ),
     )
     skills = [
-        SkillInfo(id=skill.name, name=skill.display_name, description=skill.description)
-        for skill in available_skills
+        SkillInfo(id=skill.name, name=skill.display_name, description=skill.description) for skill in available_skills
     ]
     return SkillsResponse(
         skills=skills,
@@ -178,28 +141,19 @@ async def get_strategies():
         default_strategy_id=payload.default_skill_id,
     )
 
+
 @router.post("/chat", response_model=ChatResponse)
 async def agent_chat(request: ChatRequest):
     """
-    Chat with the AI Agent without progress events.
-
-    Codex Agent callers must use ``/chat/stream``, which provides progress
-    events and request cancellation. The default LiteLLM Agent keeps this
-    endpoint's existing behavior.
+    Chat with the AI Agent.
     """
     config = get_config()
-    backend_id = _select_agent_chat_backend(config)
-    if backend_id == "codex_app_server":
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": "capability_unsupported",
-                "message": "Codex Agent requires the Chat interface with progress and stop support",
-            },
-        )
-    
+
+    if not config.is_agent_available():
+        raise HTTPException(status_code=400, detail="Agent mode is not enabled")
+
     session_id = request.session_id or str(uuid.uuid4())
-    
+
     try:
         skills = request.effective_skills
         executor = _build_executor(config, skills or None)
@@ -215,17 +169,11 @@ async def agent_chat(request: ChatRequest):
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: executor.chat(message=request.message, session_id=session_id,
-                                  context=ctx),
+            lambda: executor.chat(message=request.message, session_id=session_id, context=ctx),
         )
 
-        return ChatResponse(
-            success=result.success,
-            content=result.content,
-            session_id=session_id,
-            error=result.error,
-        )
-            
+        return ChatResponse(success=result.success, content=result.content, session_id=session_id, error=result.error)
+
     except Exception as e:
         logger.error(f"Agent chat API failed: {e}")
         logger.exception("Agent chat error details:")
@@ -236,19 +184,21 @@ class SessionItem(BaseModel):
     session_id: str
     title: str
     message_count: int
-    created_at: Optional[str] = None
-    last_active: Optional[str] = None
+    created_at: str | None = None
+    last_active: str | None = None
+
 
 class SessionsResponse(BaseModel):
-    sessions: List[SessionItem]
+    sessions: list[SessionItem]
+
 
 class SessionMessagesResponse(BaseModel):
     session_id: str
-    messages: List[Dict[str, Any]]
+    messages: list[dict[str, Any]]
 
 
 @router.get("/chat/sessions", response_model=SessionsResponse)
-async def list_chat_sessions(limit: int = 50, user_id: Optional[str] = None):
+async def list_chat_sessions(limit: int = 50, user_id: str | None = None):
     """获取聊天会话列表
 
     Args:
@@ -260,6 +210,7 @@ async def list_chat_sessions(limit: int = 50, user_id: Optional[str] = None):
             ``feishu_ou_abc``.
     """
     from src.storage import get_db
+
     sessions = get_db().get_chat_sessions(
         limit=limit,
         session_prefix=user_id,
@@ -272,6 +223,7 @@ async def list_chat_sessions(limit: int = 50, user_id: Optional[str] = None):
 async def get_chat_session_messages(session_id: str, limit: int = 100):
     """获取单个会话的完整消息"""
     from src.storage import get_db
+
     messages = get_db().get_conversation_messages(session_id, limit=limit)
     return SessionMessagesResponse(session_id=session_id, messages=messages)
 
@@ -280,6 +232,7 @@ async def get_chat_session_messages(session_id: str, limit: int = 100):
 async def delete_chat_session(session_id: str):
     """删除指定会话"""
     from src.storage import get_db
+
     count = get_db().delete_conversation_session(session_id)
     return {"deleted": count}
 
@@ -288,7 +241,7 @@ class SendChatRequest(BaseModel):
     """Request body for sending chat content to notification channels."""
 
     content: str = Field(..., min_length=1, max_length=50000)
-    title: Optional[str] = None
+    title: str | None = None
 
 
 @router.post("/chat/send")
@@ -313,39 +266,17 @@ async def send_chat_to_notification(request: SendChatRequest):
     return {"success": True}
 
 
-def _build_executor(config, skills: Optional[List[str]] = None):
-    """Build and return the backend-neutral Chat executor (sync helper)."""
-    from src.agent.factory import build_agent_chat_executor
+def _build_executor(config, skills: list[str] | None = None):
+    """Build and return a configured AgentExecutor (sync helper)."""
+    from src.agent.factory import build_agent_executor
 
-    return build_agent_chat_executor(config, skills=skills)
-
-
-def _get_agent_chat_status(config) -> Dict[str, Any]:
-    from src.services.agent_backend_status_service import AgentBackendStatusService
-
-    return AgentBackendStatusService(config=config).get_status()
-
-
-def _select_agent_chat_backend(config) -> str:
-    """Select the runtime backend without repeating the compatibility probe."""
-    from src.services.agent_backend_status_service import evaluate_agent_backend_config
-
-    evaluation = evaluate_agent_backend_config(config)
-    if not evaluation["available"]:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": evaluation["error_code"],
-                "message": evaluation["message"],
-            },
-        )
-    return evaluation["backend"]
+    return build_agent_executor(config, skills=skills)
 
 
 async def _run_research_in_background(
     agent,
     question: str,
-    context: Optional[Dict[str, Any]],
+    context: dict[str, Any] | None,
     *,
     timeout: int,
 ):
@@ -362,16 +293,18 @@ async def _run_research_in_background(
 # Deep research endpoint
 # ============================================================
 
+
 class ResearchRequest(BaseModel):
     question: str
-    stock_code: Optional[str] = None
+    stock_code: str | None = None
+
 
 class ResearchResponse(BaseModel):
     success: bool
     content: str
-    sources: List[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
     token_usage: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @router.post("/research", response_model=ResearchResponse)
@@ -385,15 +318,15 @@ async def agent_research(request: ResearchRequest):
         raise HTTPException(status_code=400, detail="Agent mode is not enabled")
 
     question = request.question
-    context: Optional[Dict[str, Any]] = None
+    context: dict[str, Any] | None = None
     if request.stock_code:
         question = f"[Stock: {request.stock_code}] {question}"
         context = {"stock_code": request.stock_code}
 
     try:
-        from src.agent.research import ResearchAgent
         from src.agent.factory import get_tool_registry
         from src.agent.llm_adapter import LLMToolAdapter
+        from src.agent.research import ResearchAgent
 
         registry = get_tool_registry()
         llm_adapter = LLMToolAdapter(config)
@@ -426,7 +359,7 @@ async def agent_research(request: ResearchRequest):
         return ResearchResponse(
             success=result.success,
             content=result.report,
-            sources=[f"Sub-question {i+1}: {q}" for i, q in enumerate(result.sub_questions)],
+            sources=[f"Sub-question {i + 1}: {q}" for i, q in enumerate(result.sub_questions)],
             token_usage=result.total_tokens,
             error=result.error if not result.success else None,
         )
@@ -442,36 +375,19 @@ async def agent_chat_stream(request: ChatRequest):
     Chat with the AI Agent, streaming progress via SSE.
     Each SSE event is a JSON object with a 'type' field:
       - thinking: AI is deciding next action
-      - stage_start: an agent or orchestrator stage has begun
-      - stage_done: an agent or orchestrator stage finished
       - tool_start: a tool call has begun
       - tool_done: a tool call finished
       - generating: final answer being generated
-      - pipeline_timeout: analysis stopped because the stage/pipeline budget expired
-      - pipeline_budget_skipped: analysis stopped before an unstarted stage
-        because the remaining budget was too low for useful work
       - done: analysis complete, contains 'content' and 'success'
       - error: error occurred, contains 'message'
     """
     config = get_config()
-    backend_id = _select_agent_chat_backend(config)
+    if not config.is_agent_available():
+        raise HTTPException(status_code=400, detail="Agent mode is not enabled")
 
     session_id = request.session_id or str(uuid.uuid4())
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
-    cancel_event = threading.Event()
-    request_id = request.request_id or str(uuid.uuid4())
-    if backend_id == "codex_app_server":
-        with _ACTIVE_CODEX_STREAMS_LOCK:
-            if request_id in _ACTIVE_CODEX_STREAMS:
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "error": "request_conflict",
-                        "message": "This Agent request is already running",
-                    },
-                )
-            _ACTIVE_CODEX_STREAMS[request_id] = cancel_event
 
     # Pass explicit skills into context for the orchestrator.
     # Direct assignment so caller-provided skills always take precedence.
@@ -481,130 +397,64 @@ async def agent_chat_stream(request: ChatRequest):
         stream_ctx["skills"] = skills
 
     def progress_callback(event: dict):
-        if backend_id == "codex_app_server" and cancel_event.is_set():
-            return
         # Enrich tool events with display names
         if event.get("type") in ("tool_start", "tool_done"):
             tool = event.get("tool", "")
             event["display_name"] = TOOL_DISPLAY_NAMES.get(tool, tool)
         asyncio.run_coroutine_threadsafe(queue.put(event), loop)
 
-    def run_sync(executor, turn):
+    def run_sync():
         try:
-            execute_kwargs = {
-                "progress_callback": progress_callback,
-            }
-            if backend_id == "codex_app_server":
-                execute_kwargs["cancel_event"] = cancel_event
-            result = executor.execute_turn(
-                turn,
-                **execute_kwargs,
+            executor = _build_executor(config, skills or None)
+            result = executor.chat(
+                message=request.message,
+                session_id=session_id,
+                progress_callback=progress_callback,
+                context=stream_ctx,
             )
-            event = {
-                "type": "done",
-                "success": result.success,
-                "content": result.content,
-                "error": result.error,
-                "total_steps": result.total_steps,
-                "session_id": session_id,
-            }
-            event.update({
-                "backend": getattr(result, "backend", "") or backend_id,
-                "error_code": getattr(result, "error_code", None),
-                "request_id": request_id,
-            })
-            asyncio.run_coroutine_threadsafe(queue.put(event), loop)
+            asyncio.run_coroutine_threadsafe(
+                queue.put(
+                    {
+                        "type": "done",
+                        "success": result.success,
+                        "content": result.content,
+                        "error": result.error,
+                        "total_steps": result.total_steps,
+                        "session_id": session_id,
+                    }
+                ),
+                loop,
+            )
         except Exception as exc:
-            logger.error("Agent stream error: %s", exc)
-            event = {
-                "type": "error",
-                "message": "Agent Chat failed" if backend_id == "codex_app_server" else str(exc),
-                "error_code": getattr(exc, "code", "unknown_backend_error"),
-                "backend": backend_id,
-                "request_id": request_id,
-            }
-            asyncio.run_coroutine_threadsafe(queue.put(event), loop)
+            logger.error(f"Agent stream error: {exc}")
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"type": "error", "message": str(exc)}),
+                loop,
+            )
 
     async def event_generator():
-        fut = None
+        # Start executor in a thread so we don't block the event loop
+        fut = loop.run_in_executor(None, run_sync)
         try:
-            try:
-                executor = await asyncio.to_thread(_build_executor, config, skills or None)
-                turn = await asyncio.to_thread(
-                    executor.prepare_turn,
-                    message=request.message,
-                    session_id=session_id,
-                    context=stream_ctx,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.error("Agent request preparation failed: %s", exc, exc_info=True)
-                event = {
-                    "type": "error",
-                    "message": "Agent request was not accepted",
-                    "error_code": "request_not_accepted",
-                    "backend": backend_id,
-                    "request_id": request_id,
-                }
-                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
-                return
-
-            accepted_event = {
-                "type": "accepted",
-                "backend": backend_id,
-                "request_id": request_id,
-                "session_id": session_id,
-            }
-            yield "data: " + json.dumps(accepted_event, ensure_ascii=False) + "\n\n"
-
-            # Backend execution starts only after the accepted event has been
-            # yielded, so Web state and server persistence share one commit point.
-            fut = loop.run_in_executor(None, run_sync, executor, turn)
             while True:
                 try:
-                    if backend_id == "codex_app_server":
-                        # Codex owns one authoritative backend deadline.  A
-                        # second API timeout would race it and could emit a
-                        # terminal event before process cleanup finishes.
-                        event = await queue.get()
-                    else:
-                        event = await asyncio.wait_for(queue.get(), timeout=300.0)
-                except asyncio.TimeoutError:
-                    event = {"type": "error", "message": "分析超时"}
-                    yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+                    event = await asyncio.wait_for(queue.get(), timeout=300.0)
+                except TimeoutError:
+                    yield "data: " + json.dumps({"type": "error", "message": "分析超时"}, ensure_ascii=False) + "\n\n"
                     break
                 yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
                 if event.get("type") in ("done", "error"):
                     break
         finally:
-            if backend_id == "codex_app_server" and (fut is None or not fut.done()):
-                cancel_event.set()
             try:
-                if backend_id == "codex_app_server" and fut is not None:
-                    while not fut.done():
-                        try:
-                            await asyncio.shield(fut)
-                        except asyncio.CancelledError:
-                            # Client disconnect cancellation must not abandon the
-                            # owned Codex/tool worker before it actually exits.
-                            cancel_event.set()
-                    if not fut.cancelled():
-                        fut.result()
-                elif fut is not None:
-                    await asyncio.wait_for(fut, timeout=5.0)
+                await asyncio.wait_for(fut, timeout=5.0)
             except asyncio.CancelledError:
                 pass
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Cleanup taking longer than 5s is treated as an expected timeout; no warning.
                 logger.debug("agent executor cleanup timed out after 5s for session %s", session_id)
             except Exception as exc:
                 logger.warning("agent executor cleanup error (ignored): %s", exc, exc_info=True)
-            finally:
-                if backend_id == "codex_app_server":
-                    with _ACTIVE_CODEX_STREAMS_LOCK:
-                        if _ACTIVE_CODEX_STREAMS.get(request_id) is cancel_event:
-                            _ACTIVE_CODEX_STREAMS.pop(request_id, None)
 
     return StreamingResponse(
         event_generator(),
@@ -615,20 +465,3 @@ async def agent_chat_stream(request: ChatRequest):
             "Connection": "keep-alive",
         },
     )
-
-
-@router.post("/chat/stream/{request_id}/cancel")
-async def cancel_agent_chat_stream(request_id: str):
-    """Signal cancellation while the original Codex SSE remains open."""
-    with _ACTIVE_CODEX_STREAMS_LOCK:
-        cancel_event = _ACTIVE_CODEX_STREAMS.get(request_id)
-    if cancel_event is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": "request_not_active",
-                "message": "This Agent request is no longer running",
-            },
-        )
-    cancel_event.set()
-    return {"accepted": True, "request_id": request_id}

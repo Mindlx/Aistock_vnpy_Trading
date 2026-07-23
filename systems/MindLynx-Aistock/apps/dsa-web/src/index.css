@@ -243,7 +243,7 @@
   --chat-avatar-ai-bg: hsl(var(--primary) / 0.1);
   --chat-avatar-ai-fg: hsl(var(--foreground)/ 0.8 );
   --chat-avatar-ai-border: hsl(var(--primary) / 0.2);
-  
+
   --chat-bubble-user-bg: hsl(var(--primary) / 0.1);
   --chat-bubble-user-border: hsl(var(--primary) / 0.2);
   --chat-bubble-ai-bg: hsl(var(--card) / 0.85);
@@ -506,7 +506,7 @@
   --chat-avatar-ai-bg: hsl(var(--primary) / 0.8);
   --chat-avatar-ai-fg: hsl(var(--foreground) / 0.9);
   --chat-avatar-ai-border: hsl(0 0% 100% / 0.1); /* Low opacity white for dark mode */
-  
+
   --chat-bubble-user-bg: hsl(var(--primary) / 0.1);
   --chat-bubble-user-border: hsl(var(--primary) / 0.2);
   --chat-bubble-ai-bg: hsl(var(--card) / 0.72);
@@ -1913,13 +1913,6 @@ textarea {
   padding: 4px 6px;
 }
 
-.home-markdown-prose :where(table) {
-  display: block;
-  width: 100%;
-  overflow-x: auto;
-  white-space: nowrap;
-}
-
 .home-markdown-prose :where(th) {
   background: hsl(var(--elevated) / 0.92);
   color: hsl(var(--foreground));
@@ -2108,13 +2101,17 @@ textarea {
 .settings-nav-item-active {
   border-color: hsl(var(--primary) / 0.36);
   background: hsl(var(--primary) / 0.12);
-  box-shadow: inset 3px 0 0 hsl(var(--primary) / 0.74);
+  box-shadow:
+    3px 4px 0 hsl(var(--primary) / 0.08),
+    10px 14px 26px hsl(214 24% 38% / 0.12);
 }
 
 .dark .settings-nav-item-active {
   border-color: hsl(var(--primary) / 0.34);
   background: hsl(var(--primary) / 0.12);
-  box-shadow: inset 3px 0 0 hsl(var(--primary) / 0.68);
+  box-shadow:
+    2px 3px 0 hsl(var(--primary) / 0.06),
+    8px 12px 22px hsl(190 100% 50% / 0.07);
 }
 
 .settings-button-primary {
@@ -2195,10 +2192,6 @@ textarea {
 /* Touch action utilities */
 .touch-pan-y {
   touch-action: pan-y;
-}
-
-.touch-pan-x {
-  touch-action: pan-x pan-y;
 }
 
 .shell-page-frame::before {
@@ -2649,7 +2642,6 @@ textarea {
 .backtest-summary {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 1rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
@@ -2660,11 +2652,6 @@ textarea {
 }
 .backtest-summary .label {
   color: var(--text-secondary-text);
-}
-.backtest-summary .label.message {
-  flex-basis: 100%;
-  line-height: 1.4;
-  white-space: normal;
 }
 .backtest-summary .value {
   color: hsl(var(--foreground));

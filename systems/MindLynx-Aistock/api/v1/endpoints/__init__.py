@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ===================================
 API v1 Endpoints 模块初始化
@@ -9,20 +8,21 @@ API v1 Endpoints 模块初始化
 """
 
 from api.v1.endpoints import (
-    health,
-    analysis,
-    history,
-    stocks,
-    backtest,
-    system_config,
-    auth,
     agent,
-    usage,
-    portfolio,
     alerts,
-    decision_signals,
     alphasift,
+    analysis,
+    auth,
+    backtest,
+    health,
+    history,
+    intelligence,
+    portfolio,
+    stocks,
+    system_config,
+    usage,
 )
+
 __all__ = [
     "health",
     "analysis",
@@ -35,6 +35,5 @@ __all__ = [
     "usage",
     "portfolio",
     "alerts",
-    "decision_signals",
-    "alphasift",
+    "intelligence",
 ]

@@ -1,44 +1,38 @@
-# -*- coding: utf-8 -*-
 """Alert API schemas."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from api.v1.schemas.history import AnalysisContextPackOverview
-from api.v1.schemas.market_phase import MarketPhaseSummary
-
-
-TargetScopeValue = Literal["single_symbol", "watchlist", "portfolio_holdings", "portfolio_account", "market"]
+TargetScopeValue = Literal["single_symbol"]
 SeverityValue = Literal["info", "warning", "critical"]
 DryRunStatusValue = Literal["triggered", "not_triggered", "evaluation_error"]
-TargetRecordStatusValue = Literal["triggered", "skipped", "degraded", "failed"]
 
 
 class AlertRuleCreateRequest(BaseModel):
-    name: Optional[str] = Field(None, max_length=64)
+    name: str | None = Field(None, max_length=64)
     target_scope: TargetScopeValue = "single_symbol"
     target: str = Field(..., min_length=1, max_length=64)
     alert_type: str = Field(..., min_length=1, max_length=32)
-    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
     severity: SeverityValue = "warning"
     enabled: bool = True
-    cooldown_policy: Optional[Dict[str, Any]] = None
-    notification_policy: Optional[Dict[str, Any]] = None
+    cooldown_policy: dict[str, Any] | None = None
+    notification_policy: dict[str, Any] | None = None
 
 
 class AlertRuleUpdateRequest(BaseModel):
-    name: Optional[str] = Field(None, max_length=64)
-    target_scope: Optional[TargetScopeValue] = None
-    target: Optional[str] = Field(None, min_length=1, max_length=64)
-    alert_type: Optional[str] = Field(None, min_length=1, max_length=32)
-    parameters: Optional[Dict[str, Any]] = None
-    severity: Optional[SeverityValue] = None
-    enabled: Optional[bool] = None
-    cooldown_policy: Optional[Dict[str, Any]] = None
-    notification_policy: Optional[Dict[str, Any]] = None
+    name: str | None = Field(None, max_length=64)
+    target_scope: TargetScopeValue | None = None
+    target: str | None = Field(None, min_length=1, max_length=64)
+    alert_type: str | None = Field(None, min_length=1, max_length=32)
+    parameters: dict[str, Any] | None = None
+    severity: SeverityValue | None = None
+    enabled: bool | None = None
+    cooldown_policy: dict[str, Any] | None = None
+    notification_policy: dict[str, Any] | None = None
 
 
 class AlertRuleItem(BaseModel):
@@ -47,21 +41,21 @@ class AlertRuleItem(BaseModel):
     target_scope: str
     target: str
     alert_type: str
-    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
     severity: str
     enabled: bool
     source: str
-    cooldown_policy: Optional[Dict[str, Any]] = None
-    notification_policy: Optional[Dict[str, Any]] = None
-    last_triggered_at: Optional[str] = None
-    cooldown_until: Optional[str] = None
-    cooldown_active: Optional[bool] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    cooldown_policy: dict[str, Any] | None = None
+    notification_policy: dict[str, Any] | None = None
+    last_triggered_at: str | None = None
+    cooldown_until: str | None = None
+    cooldown_active: bool | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class AlertRuleListResponse(BaseModel):
-    items: List[AlertRuleItem] = Field(default_factory=list)
+    items: list[AlertRuleItem] = Field(default_factory=list)
     total: int
     page: int
     page_size: int
@@ -71,57 +65,30 @@ class AlertDeleteResponse(BaseModel):
     deleted: int
 
 
-class AlertRuleTargetResult(BaseModel):
-    target: str
-    display_target: Optional[str] = None
-    status: DryRunStatusValue
-    record_status: Optional[TargetRecordStatusValue] = None
-    triggered: bool
-    observed_value: Optional[Any] = None
-    threshold: Optional[Any] = None
-    message: str
-
-
 class AlertRuleTestResponse(BaseModel):
     rule_id: int
-    target_scope: Optional[str] = None
     status: DryRunStatusValue
     triggered: bool
-    observed_value: Optional[Any] = None
+    observed_value: Any | None = None
     message: str
-    evaluated_count: int = 0
-    triggered_count: int = 0
-    degraded_count: int = 0
-    skipped_count: int = 0
-    target_results: List[AlertRuleTargetResult] = Field(default_factory=list)
 
 
 class AlertTriggerItem(BaseModel):
     id: int
-    rule_id: Optional[int] = None
+    rule_id: int | None = None
     target: str
-    observed_value: Optional[float] = None
-    threshold: Optional[float] = None
-    reason: Optional[str] = None
-    data_source: Optional[str] = None
-    data_timestamp: Optional[str] = None
-    triggered_at: Optional[str] = None
+    observed_value: float | None = None
+    threshold: float | None = None
+    reason: str | None = None
+    data_source: str | None = None
+    data_timestamp: str | None = None
+    triggered_at: str | None = None
     status: str
-    diagnostics: Optional[str] = None
-    market_phase_summary: Optional[MarketPhaseSummary] = None
-    analysis_context_pack_overview: Optional[AnalysisContextPackOverview] = None
-    analysis_visibility_source: Optional[str] = Field(
-        None,
-        description=(
-            "公开摘要来源：alert_trigger_market_context / analysis_history_snapshot / "
-            "evaluator_snapshot / legacy_text / null"
-        ),
-    )
-    decision_signal_summary: Optional[Dict[str, Any]] = None
+    diagnostics: str | None = None
 
 
 class AlertTriggerListResponse(BaseModel):
-    items: List[AlertTriggerItem] = Field(default_factory=list)
+    items: list[AlertTriggerItem] = Field(default_factory=list)
     total: int
     page: int
     page_size: int
@@ -129,19 +96,19 @@ class AlertTriggerListResponse(BaseModel):
 
 class AlertNotificationItem(BaseModel):
     id: int
-    trigger_id: Optional[int] = None
+    trigger_id: int | None = None
     channel: str
     attempt: int
     success: bool
-    error_code: Optional[str] = None
+    error_code: str | None = None
     retryable: bool
-    latency_ms: Optional[int] = None
-    diagnostics: Optional[str] = None
-    created_at: Optional[str] = None
+    latency_ms: int | None = None
+    diagnostics: str | None = None
+    created_at: str | None = None
 
 
 class AlertNotificationListResponse(BaseModel):
-    items: List[AlertNotificationItem] = Field(default_factory=list)
+    items: list[AlertNotificationItem] = Field(default_factory=list)
     total: int
     page: int
     page_size: int

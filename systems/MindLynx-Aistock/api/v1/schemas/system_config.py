@@ -1,15 +1,12 @@
-# -*- coding: utf-8 -*-
 """System configuration API schemas."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 LLMCapabilityCheck = Literal["json", "tools", "vision", "stream"]
-GenerationBackendSmokeMode = Literal["text", "json"]
-GenerationBackendHealthStatus = Literal["not_tested", "passed", "failed", "skipped"]
 NotificationTestChannel = Literal[
     "wechat",
     "feishu",
@@ -45,22 +42,22 @@ class SystemConfigFieldSchema(BaseModel):
     """Metadata schema for a single config field."""
 
     key: str = Field(..., description="Configuration key name")
-    title: Optional[str] = Field(None, description="Display title")
-    description: Optional[str] = Field(None, description="Field description")
+    title: str | None = Field(None, description="Display title")
+    description: str | None = Field(None, description="Field description")
     category: Literal["base", "data_source", "ai_model", "notification", "system", "agent", "backtest", "uncategorized"]
     data_type: Literal["string", "integer", "number", "boolean", "array", "json", "time"]
     ui_control: Literal["text", "password", "number", "select", "textarea", "switch", "time"]
     is_sensitive: bool
     is_required: bool
     is_editable: bool
-    default_value: Optional[str] = None
-    options: List[str | SystemConfigOption] = Field(default_factory=list)
-    validation: Dict[str, Any] = Field(default_factory=dict)
+    default_value: str | None = None
+    options: list[str | SystemConfigOption] = Field(default_factory=list)
+    validation: dict[str, Any] = Field(default_factory=dict)
     display_order: int
-    help_key: Optional[str] = Field(None, description="Stable localization key for detailed help content")
-    examples: List[str] = Field(default_factory=list, description="Safe example values for help panels")
-    docs: List[SystemConfigDocLink] = Field(default_factory=list, description="Related documentation links")
-    warning_codes: List[str] = Field(default_factory=list, description="Stable warning identifiers for help panels")
+    help_key: str | None = Field(None, description="Stable localization key for detailed help content")
+    examples: list[str] = Field(default_factory=list, description="Safe example values for help panels")
+    docs: list[SystemConfigDocLink] = Field(default_factory=list, description="Related documentation links")
+    warning_codes: list[str] = Field(default_factory=list, description="Stable warning identifiers for help panels")
 
 
 class SystemConfigCategorySchema(BaseModel):
@@ -68,16 +65,16 @@ class SystemConfigCategorySchema(BaseModel):
 
     category: str
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     display_order: int
-    fields: List[SystemConfigFieldSchema]
+    fields: list[SystemConfigFieldSchema]
 
 
 class SystemConfigSchemaResponse(BaseModel):
     """Metadata response for dynamic frontend rendering."""
 
     schema_version: str
-    categories: List[SystemConfigCategorySchema]
+    categories: list[SystemConfigCategorySchema]
 
 
 class SystemConfigItem(BaseModel):
@@ -89,7 +86,7 @@ class SystemConfigItem(BaseModel):
     value: str
     raw_value_exists: bool
     is_masked: bool
-    schema_: Optional[SystemConfigFieldSchema] = Field(default=None, alias="schema")
+    schema_: SystemConfigFieldSchema | None = Field(default=None, alias="schema")
 
 
 class SystemConfigResponse(BaseModel):
@@ -97,8 +94,8 @@ class SystemConfigResponse(BaseModel):
 
     config_version: str
     mask_token: str
-    items: List[SystemConfigItem]
-    updated_at: Optional[str] = None
+    items: list[SystemConfigItem]
+    updated_at: str | None = None
 
 
 class SetupStatusCheck(BaseModel):
@@ -110,7 +107,7 @@ class SetupStatusCheck(BaseModel):
     required: bool
     status: Literal["configured", "inherited", "optional", "needs_action"]
     message: str
-    next_step: Optional[str] = None
+    next_step: str | None = None
 
 
 class SetupStatusResponse(BaseModel):
@@ -118,54 +115,9 @@ class SetupStatusResponse(BaseModel):
 
     is_complete: bool
     ready_for_smoke: bool
-    required_missing_keys: List[str] = Field(default_factory=list)
-    next_step_key: Optional[str] = None
-    checks: List[SetupStatusCheck] = Field(default_factory=list)
-
-
-class GenerationBackendStatus(BaseModel):
-    """Cheap status for one generation backend.
-
-    ``health_status`` and ``last_error_*`` describe the current status request
-    or the explicit smoke-test request only; they are not persisted history.
-    """
-
-    backend_id: str
-    backend_type: Literal["litellm", "local_cli"]
-    provider_id: str
-    available: bool
-    health_status: GenerationBackendHealthStatus = "not_tested"
-    supports_json: bool
-    supports_tools: bool
-    supports_stream: bool
-    supports_vision: bool
-    is_primary: bool
-    fallback_target: Optional[str] = None
-    max_concurrency: int
-    usage_available: bool
-    last_error_code: Optional[str] = None
-    last_error_message: Optional[str] = None
-
-
-class GenerationBackendStatusResponse(BaseModel):
-    """Generation backend status payload."""
-
-    primary_backend_id: str
-    fallback_backend_id: Optional[str] = None
-    primary: GenerationBackendStatus
-    fallback: Optional[GenerationBackendStatus] = None
-    backends: List[GenerationBackendStatus] = Field(default_factory=list)
-
-
-class AgentBackendStatusResponse(BaseModel):
-    """Compatibility status for the selected Agent Chat backend."""
-
-    backend: str
-    available: bool
-    experimental: bool
-    version: Optional[str] = None
-    error_code: Optional[str] = None
-    message: Optional[str] = None
+    required_missing_keys: list[str] = Field(default_factory=list)
+    next_step_key: str | None = None
+    checks: list[SetupStatusCheck] = Field(default_factory=list)
 
 
 class ExportSystemConfigResponse(BaseModel):
@@ -173,7 +125,7 @@ class ExportSystemConfigResponse(BaseModel):
 
     content: str
     config_version: str
-    updated_at: Optional[str] = None
+    updated_at: str | None = None
 
 
 class SystemConfigUpdateItem(BaseModel):
@@ -183,46 +135,13 @@ class SystemConfigUpdateItem(BaseModel):
     value: str
 
 
-class GenerationBackendStatusPreviewRequest(BaseModel):
-    """Unsaved-draft preview request for generation backend status."""
-
-    items: List[SystemConfigUpdateItem] = Field(default_factory=list)
-    mask_token: str = "******"
-
-
-class AgentBackendStatusPreviewRequest(BaseModel):
-    """Unsaved-draft preview request for Agent Chat backend status."""
-
-    items: List[SystemConfigUpdateItem] = Field(default_factory=list)
-    mask_token: str = "******"
-
-
-class TestGenerationBackendRequest(BaseModel):
-    """Explicit generation backend smoke-test request."""
-
-    backend_id: Optional[str] = None
-    mode: GenerationBackendSmokeMode = "json"
-    items: List[SystemConfigUpdateItem] = Field(default_factory=list)
-    mask_token: str = "******"
-    timeout_seconds: Optional[float] = Field(default=None, ge=1.0, le=3600.0)
-
-
-class TestGenerationBackendResponse(BaseModel):
-    """Generation backend smoke-test result."""
-
-    success: bool
-    mode: GenerationBackendSmokeMode
-    message: str
-    status: GenerationBackendStatus
-
-
 class UpdateSystemConfigRequest(BaseModel):
     """Update request payload."""
 
     config_version: str
     mask_token: str = "******"
     reload_now: bool = True
-    items: List[SystemConfigUpdateItem] = Field(..., min_length=1)
+    items: list[SystemConfigUpdateItem] = Field(..., min_length=1)
 
 
 class UpdateSystemConfigResponse(BaseModel):
@@ -233,14 +152,14 @@ class UpdateSystemConfigResponse(BaseModel):
     applied_count: int
     skipped_masked_count: int
     reload_triggered: bool
-    updated_keys: List[str]
-    warnings: List[str] = Field(default_factory=list)
+    updated_keys: list[str]
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ValidateSystemConfigRequest(BaseModel):
     """Validation request payload."""
 
-    items: List[SystemConfigUpdateItem] = Field(..., min_length=1)
+    items: list[SystemConfigUpdateItem] = Field(..., min_length=1)
 
 
 class ImportSystemConfigRequest(BaseModel):
@@ -258,15 +177,15 @@ class ConfigValidationIssue(BaseModel):
     code: str
     message: str
     severity: Literal["error", "warning"]
-    expected: Optional[str] = None
-    actual: Optional[str] = None
+    expected: str | None = None
+    actual: str | None = None
 
 
 class ValidateSystemConfigResponse(BaseModel):
     """Validation result payload."""
 
     valid: bool
-    issues: List[ConfigValidationIssue]
+    issues: list[ConfigValidationIssue]
 
 
 class TestLLMChannelRequest(BaseModel):
@@ -276,11 +195,10 @@ class TestLLMChannelRequest(BaseModel):
     protocol: str = "openai"
     base_url: str = ""
     api_key: str = ""
-    models: List[str] = Field(default_factory=list)
+    models: list[str] = Field(default_factory=list)
     enabled: bool = True
     timeout_seconds: float = 20.0
-    capability_checks: List[LLMCapabilityCheck] = Field(default_factory=list)
-    use_saved_secret: bool = False
+    capability_checks: list[LLMCapabilityCheck] = Field(default_factory=list)
 
 
 class LLMCapabilityCheckResult(BaseModel):
@@ -288,11 +206,11 @@ class LLMCapabilityCheckResult(BaseModel):
 
     status: Literal["passed", "failed", "skipped"]
     message: str
-    error_code: Optional[str] = None
+    error_code: str | None = None
     stage: str
     retryable: bool = False
-    latency_ms: Optional[int] = None
-    details: Dict[str, Any] = Field(default_factory=dict)
+    latency_ms: int | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class TestLLMChannelResponse(BaseModel):
@@ -300,15 +218,15 @@ class TestLLMChannelResponse(BaseModel):
 
     success: bool
     message: str
-    error: Optional[str] = None
-    error_code: Optional[str] = None
-    stage: Optional[str] = None
-    retryable: Optional[bool] = None
-    details: Dict[str, Any] = Field(default_factory=dict)
-    resolved_protocol: Optional[str] = None
-    resolved_model: Optional[str] = None
-    latency_ms: Optional[int] = None
-    capability_results: Dict[str, LLMCapabilityCheckResult] = Field(default_factory=dict)
+    error: str | None = None
+    error_code: str | None = None
+    stage: str | None = None
+    retryable: bool | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    resolved_protocol: str | None = None
+    resolved_model: str | None = None
+    latency_ms: int | None = None
+    capability_results: dict[str, LLMCapabilityCheckResult] = Field(default_factory=dict)
 
 
 class NotificationTestAttempt(BaseModel):
@@ -317,19 +235,19 @@ class NotificationTestAttempt(BaseModel):
     channel: NotificationTestChannel
     success: bool
     message: str
-    target: Optional[str] = None
-    error_code: Optional[str] = None
+    target: str | None = None
+    error_code: str | None = None
     stage: str = "notification_send"
     retryable: bool = False
-    latency_ms: Optional[int] = None
-    http_status: Optional[int] = None
+    latency_ms: int | None = None
+    http_status: int | None = None
 
 
 class TestNotificationChannelRequest(BaseModel):
     """Request payload for testing one notification channel."""
 
     channel: NotificationTestChannel
-    items: List[SystemConfigUpdateItem] = Field(default_factory=list)
+    items: list[SystemConfigUpdateItem] = Field(default_factory=list)
     mask_token: str = "******"
     title: str = Field(default="DSA 通知测试", min_length=1, max_length=80)
     content: str = Field(default="这是一条来自 DSA Web 设置页的通知测试消息。", min_length=1, max_length=1000)
@@ -341,11 +259,11 @@ class TestNotificationChannelResponse(BaseModel):
 
     success: bool
     message: str
-    error_code: Optional[str] = None
-    stage: Optional[str] = None
+    error_code: str | None = None
+    stage: str | None = None
     retryable: bool = False
-    latency_ms: Optional[int] = None
-    attempts: List[NotificationTestAttempt] = Field(default_factory=list)
+    latency_ms: int | None = None
+    attempts: list[NotificationTestAttempt] = Field(default_factory=list)
 
 
 class DiscoverLLMChannelModelsRequest(BaseModel):
@@ -355,9 +273,8 @@ class DiscoverLLMChannelModelsRequest(BaseModel):
     protocol: str = "openai"
     base_url: str = ""
     api_key: str = ""
-    models: List[str] = Field(default_factory=list)
+    models: list[str] = Field(default_factory=list)
     timeout_seconds: float = 20.0
-    use_saved_secret: bool = False
 
 
 class DiscoverLLMChannelModelsResponse(BaseModel):
@@ -365,14 +282,14 @@ class DiscoverLLMChannelModelsResponse(BaseModel):
 
     success: bool
     message: str
-    error: Optional[str] = None
-    error_code: Optional[str] = None
-    stage: Optional[str] = None
-    retryable: Optional[bool] = None
-    details: Dict[str, Any] = Field(default_factory=dict)
-    resolved_protocol: Optional[str] = None
-    models: List[str] = Field(default_factory=list)
-    latency_ms: Optional[int] = None
+    error: str | None = None
+    error_code: str | None = None
+    stage: str | None = None
+    retryable: bool | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    resolved_protocol: str | None = None
+    models: list[str] = Field(default_factory=list)
+    latency_ms: int | None = None
 
 
 class SystemConfigValidationErrorResponse(BaseModel):
@@ -380,7 +297,7 @@ class SystemConfigValidationErrorResponse(BaseModel):
 
     error: str
     message: str
-    issues: List[ConfigValidationIssue]
+    issues: list[ConfigValidationIssue]
 
 
 class SystemConfigConflictResponse(BaseModel):

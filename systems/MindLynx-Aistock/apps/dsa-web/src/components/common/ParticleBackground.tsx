@@ -86,7 +86,7 @@ export const ParticleBackground = () => {
           c.moveTo(particles[i].x, particles[i].y);
           c.lineTo(mouse.x, mouse.y);
           c.stroke();
-          
+
           const force = (250 - distMouse) / 250;
           particles[i].x += (dxMouse / distMouse) * force * 2.0;
           particles[i].y += (dyMouse / distMouse) * force * 2.0;

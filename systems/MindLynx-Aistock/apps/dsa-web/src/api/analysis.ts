@@ -11,7 +11,6 @@ import type {
   TaskStatus,
   TaskListResponse,
 } from '../types/analysis';
-import type { RunFlowSnapshot } from '../types/runFlow';
 
 // ============ API Interfaces ============
 
@@ -28,12 +27,10 @@ export const analysisApi = {
       report_type: data.reportType || 'detailed',
       force_refresh: data.forceRefresh || false,
       async_mode: data.asyncMode || false,
-      analysis_phase: data.analysisPhase || 'auto',
       stock_name: data.stockName,
       original_query: data.originalQuery,
       selection_source: data.selectionSource,
       skills: data.skills,
-      report_language: data.reportLanguage,
       ...(data.notify !== undefined && { notify: data.notify }),
     };
 
@@ -64,12 +61,10 @@ export const analysisApi = {
       report_type: data.reportType || 'detailed',
       force_refresh: data.forceRefresh || false,
       async_mode: true,
-      analysis_phase: data.analysisPhase || 'auto',
       stock_name: data.stockName,
       original_query: data.originalQuery,
       selection_source: data.selectionSource,
       skills: data.skills,
-      report_language: data.reportLanguage,
       ...(data.notify !== undefined && { notify: data.notify }),
     };
 
@@ -104,7 +99,6 @@ export const analysisApi = {
       '/api/v1/analysis/market-review',
       {
         send_notification: data.sendNotification ?? true,
-        report_language: data.reportLanguage,
       },
       {
         validateStatus: (status) => status === 202 || status === 409,
@@ -160,18 +154,6 @@ export const analysisApi = {
     const data = toCamelCase<TaskListResponse>(response.data);
 
     return data;
-  },
-
-  /**
-   * Get a run-flow snapshot for an active analysis task.
-   * @param taskId Task ID
-   */
-  getTaskFlow: async (taskId: string): Promise<RunFlowSnapshot> => {
-    const response = await apiClient.get<Record<string, unknown>>(
-      `/api/v1/analysis/tasks/${encodeURIComponent(taskId)}/flow`
-    );
-
-    return toCamelCase<RunFlowSnapshot>(response.data);
   },
 
   /**
