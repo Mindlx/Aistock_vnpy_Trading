@@ -110,6 +110,14 @@ class StockAnalysisPipeline(DataMixin, NotificationMixin):
         self.progress_callback = progress_callback
         self.analysis_skills = list(analysis_skills) if analysis_skills is not None else None
 
+        # Fallback: populate with default active skill IDs if not explicitly provided
+        if not self.analysis_skills:
+            try:
+                from src.agent.skills.defaults import get_default_active_skill_ids
+                self.analysis_skills = get_default_active_skill_ids()
+            except ImportError:
+                self.analysis_skills = []
+
         # 初始化各模块
         self.db = get_db()
         self.fetcher_manager = DataFetcherManager()
