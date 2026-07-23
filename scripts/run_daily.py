@@ -421,6 +421,64 @@ def write_at_signal(ta_results: List[Dict[str, Any]], date: str):
     print(f"  📡 at_signal.json 已写入 (准实时文件交换区)")
 
 
+def _save_market_review(results: list[dict], date_str: str):
+    """生成大盘复盘 MARKET 记录写入 stock_analysis.db"""
+    try:
+        import sqlite3
+        from datetime import datetime
+        valid = [r for r in results if r.get("valid", False)]
+        bull = sum(1 for r in valid if r.get("signal") in ("strong_bullish", "bullish", "cautious_bullish"))
+        neut = sum(1 for r in valid if r.get("signal") == "neutral")
+        bear = sum(1 for r in valid if r.get("signal") in ("cautious_bearish", "bearish", "strong_bearish"))
+        disagree = sum(1 for r in valid if r.get("has_disagreement"))
+        degraded = sum(1 for r in valid if r.get("is_degraded"))
+
+        lines = [f"## {date_str} 大盘复盘（融合）", ""]
+        lines.append("### 📊 信号分布")
+        lines.append(f"| 信号 | 数量 |")
+        lines.append(f"|------|:----:|")
+        if bull: lines.append(f"| 看多 | {bull} |")
+        if neut: lines.append(f"| 中性 | {neut} |")
+        if bear: lines.append(f"| 看空 | {bear} |")
+        lines.append(f"| **合计** | **{len(valid)}** |")
+        lines.append("")
+        if disagree:
+            lines.append(f"⚠️ 存在分歧股票: {disagree} 只")
+        if degraded:
+            lines.append(f"⚠️ 降级运行: {degraded} 只")
+
+        ly_ok = sum(1 for r in valid if r.get("lynx_valid"))
+        ml_ok = sum(1 for r in valid if r.get("mindlynx_valid"))
+        at_ok = sum(1 for r in valid if r.get("tradingagent_valid"))
+        lines.append("")
+        lines.append("### 📡 子系统状态")
+        lines.append(f"LY {ly_ok}/{len(valid)} | ML {ml_ok}/{len(valid)} | AT {at_ok}/{len(valid)}")
+
+        db_path = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.db"
+        conn = sqlite3.connect(str(db_path))
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+        query_id = f"market_review_fusion_{date_str}"
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM analysis_history WHERE code='MARKET' AND DATE(created_at)=?",
+            (date_str,),
+        )
+        if not cursor.fetchone():
+            cursor.execute(
+                """INSERT INTO analysis_history
+                   (query_id, code, name, report_type, sentiment_score,
+                    operation_advice, analysis_summary, created_at)
+                   VALUES (?, 'MARKET', '大盘复盘', 'market_review',
+                    50, '观望', ?, ?)""",
+                (query_id, "\n".join(lines), now),
+            )
+            conn.commit()
+            print(f"  📊 大盘复盘已写入 ({len(valid)} 只股票)")
+        conn.close()
+    except Exception as e:
+        print(f"  ⚠️ 大盘复盘写入失败: {e}")
+
+
 def main():
     args = parse_args()
 
@@ -544,6 +602,9 @@ def main():
         "fusion_output", "data/fusion_output"
     )
     save_fusion_output(results, today, output_dir, config)
+
+    # ── 桥接：大盘复盘写入 stock_analysis.db ──
+    _save_market_review(results, today)
 
     # ── 审核模式：保存到staging + 等待确认 ──
     if args.review_mode:
