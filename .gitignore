@@ -65,3 +65,4 @@ data/stock_analysis.db-shm
 data/stock_analysis.db-wal
 *.db-shm
 *.db-wal
+systems/MindLynx-Aistock/data/stock_analysis.db
