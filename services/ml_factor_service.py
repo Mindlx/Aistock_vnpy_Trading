@@ -1,6 +1,6 @@
 """
-ml 因子层实时服务 — 直接从 stock_daily DB 读取 OHLCV 数据，
-调用 FactorEngine 计算 12 因子 composite_score。
+ml 因子层实时服务 — 从 data_warehouse.db 读取日K线数据，
+调用 FactorEngine 计算 13 因子 composite_score。
 完全绕过 LLM 层，纯数学计算。
 
 用法:
@@ -23,17 +23,15 @@ from pathlib import Path
 import numpy as np
 from typing import Any, Dict, Optional
 
-# ml 子系统路径
-ML_ROOT = Path(__file__).resolve().parent.parent / "systems" / "MindLynx-Aistock"
-DB_PATH = ML_ROOT / "data" / "stock_analysis.db"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = PROJECT_ROOT / "data" / "data_warehouse.db"
 OUTPUT_PATH = Path("data/realtime/ml_signal.json")
 
 # 确保 data/realtime/ 存在
 OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# 所有代码以融合系统的 .venv 运行，但需要将 ml 源码加入路径
-# 注意：import 是 from src.core.xxx，所以根路径是 ML_ROOT 本身
-sys.path.insert(0, str(ML_ROOT))
+# 将 ml 子系统源码加入路径 for FactorEngine 导入
+sys.path.insert(0, str(PROJECT_ROOT / "systems" / "MindLynx-Aistock"))
 
 
 class MLFactorService:
@@ -77,29 +75,35 @@ class MLFactorService:
     @property
     def db_cols(self) -> list:
         if self._db_cols is None:
-            meta = self.db.execute("PRAGMA table_info(stock_daily)").fetchall()
+            meta = self.db.execute("PRAGMA table_info(daily_ohlcv)").fetchall()
             self._db_cols = [c[1] for c in meta]
         return self._db_cols
 
     def compute_all(self) -> Dict[str, Any]:
         """计算所有股票的因子得分（含横截面归一化）"""
-        # 第一步：计算所有股票的原始因子
-        raw_results: list = []  # FactorResult 对象列表
-        code_map: dict[str, Any] = {}  # code → FactorResult
-        stock_data: dict[str, dict] = {}  # code → {close, volume} for time_series
+        raw_results: list = []
+        code_map: dict[str, Any] = {}
+        stock_data: dict[str, dict] = {}
 
         for code in self.STOCK_CODES:
             try:
                 rows = self.db.execute(
-                    f"SELECT * FROM stock_daily WHERE code=? ORDER BY date", (code,)
+                    "SELECT * FROM daily_ohlcv WHERE stock_code=? ORDER BY date", (code,)
                 ).fetchall()
                 if not rows:
                     continue
                 daily = [dict(zip(self.db_cols, r)) for r in rows]
+                # 补充筹码集中度 (从 chip_distribution 取最新值)
+                chip_row = self.db.execute(
+                    "SELECT concentration FROM chip_distribution WHERE stock_code=? "
+                    "ORDER BY date DESC LIMIT 1", (code,)
+                ).fetchone()
+                conc = float(chip_row[0]) if chip_row and chip_row[0] else 0.5
+                for d in daily:
+                    d["concentration"] = conc
                 result = self.engine.compute_for_stock(code, daily)
                 raw_results.append(result)
                 code_map[code] = result
-                # Prepare stock_data for time_series_normalize
                 stock_data[code] = {
                     "close": np.array([d.get("close", 0) or 0 for d in daily], dtype=float),
                     "volume": np.array([d.get("volume", 0) or 0 for d in daily], dtype=float),
@@ -131,7 +135,7 @@ class MLFactorService:
     def _compute_one(self, code: str) -> Optional[Dict[str, Any]]:
         """计算单只股票的因子 composite_score 和 L7 映射"""
         rows = self.db.execute(
-            f"SELECT * FROM stock_daily WHERE code=? ORDER BY date", (code,)
+            "SELECT * FROM daily_ohlcv WHERE stock_code=? ORDER BY date", (code,)
         ).fetchall()
         if not rows:
             return None
