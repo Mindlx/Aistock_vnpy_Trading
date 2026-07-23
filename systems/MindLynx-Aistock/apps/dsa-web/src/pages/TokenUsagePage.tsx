@@ -1,178 +1,299 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { UsageSummaryResponse } from '../types/usage';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, Clock3, Cpu, Database, Gauge, RefreshCw } from 'lucide-react';
+import { usageApi, type UsageDashboard, type UsageModelBreakdown, type UsagePeriod } from '../api/usage';
+import type { ParsedApiError } from '../api/error';
+import { ApiErrorAlert, AppPage, Card, EmptyState, PageHeader, StatCard } from '../components/common';
+import { useUiLanguage } from '../contexts/UiLanguageContext';
+import type { UiLanguage, UiTextKey, UiTextParams } from '../i18n/uiText';
+import { cn } from '../utils/cn';
 
-const BASE = '/api/v1/usage';
+type Translate = (key: UiTextKey, params?: UiTextParams) => string;
 
-type Period = 'today' | 'month' | 'all';
+const PERIOD_OPTIONS: UsagePeriod[] = ['today', 'month', 'all'];
 
-const PERIOD_LABELS: Record<Period, string> = {
-  today: '今日',
-  month: '本月',
-  all: '全部',
+const PERIOD_LABEL_KEYS: Record<UsagePeriod, UiTextKey> = {
+  today: 'usage.period.today',
+  month: 'usage.period.month',
+  all: 'usage.period.all',
 };
 
-async function fetchUsageSummary(period: Period): Promise<UsageSummaryResponse> {
-  const res = await fetch(`${BASE}/summary?period=${period}`);
-  if (!res.ok) throw new Error(`获取用量数据失败: ${res.statusText}`);
-  return res.json() as Promise<UsageSummaryResponse>;
+const CALL_TYPE_LABEL_KEYS: Record<string, UiTextKey> = {
+  analysis: 'usage.callType.analysis',
+  agent: 'usage.callType.agent',
+  market_review: 'usage.callType.marketReview',
+};
+
+function getLocale(language: UiLanguage): string {
+  return language === 'en' ? 'en-US' : 'zh-CN';
 }
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
+function formatNumber(value: number | null | undefined, language: UiLanguage): string {
+  return new Intl.NumberFormat(getLocale(language)).format(value ?? 0);
 }
 
-export default function TokenUsagePage() {
-  const [period, setPeriod] = useState<Period>('month');
-  const [data, setData] = useState<UsageSummaryResponse | null>(null);
+function formatDateTime(value: string, language: UiLanguage): string {
+  if (!value) {
+    return '-';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(getLocale(language), {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function getCallTypeLabel(callType: string, t: Translate): string {
+  const key = CALL_TYPE_LABEL_KEYS[callType];
+  return key ? t(key) : t('usage.callType.unknown', { type: callType || '-' });
+}
+
+function buildParsedError(error: unknown, t: Translate): ParsedApiError {
+  if (error && typeof error === 'object' && 'parsedError' in error) {
+    const parsedError = (error as { parsedError?: ParsedApiError }).parsedError;
+    if (parsedError) {
+      return parsedError;
+    }
+  }
+
+  const message = error instanceof Error ? error.message : t('usage.error.message');
+  return {
+    title: t('usage.error.title'),
+    message,
+    rawMessage: message,
+    category: 'http_error',
+  };
+}
+
+const ModelUsageCard: React.FC<{ model: UsageModelBreakdown; language: UiLanguage; t: Translate }> = ({ model, language, t }) => {
+  return (
+    <Card padding="sm" className="rounded-lg">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-semibold text-foreground">{model.model}</h3>
+          <p className="mt-1 text-xs text-secondary-text">{t('usage.calls', { count: formatNumber(model.calls, language) })}</p>
+        </div>
+        <span className="rounded-full border border-cyan/20 bg-cyan/10 px-2 py-1 text-xs text-cyan">
+          {formatNumber(model.totalTokens, language)} tokens
+        </span>
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+        <div>
+          <p className="text-xs text-secondary-text">Prompt</p>
+          <p className="mt-1 font-medium text-foreground">{formatNumber(model.promptTokens, language)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-secondary-text">Completion</p>
+          <p className="mt-1 font-medium text-foreground">{formatNumber(model.completionTokens, language)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-secondary-text">{t('usage.maxSingleCall')}</p>
+          <p className="mt-1 font-medium text-foreground">{formatNumber(model.maxTotalTokens, language)}</p>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
+const TokenUsagePage: React.FC = () => {
+  const { language, t } = useUiLanguage();
+  const [period, setPeriod] = useState<UsagePeriod>('month');
+  const [dashboard, setDashboard] = useState<UsageDashboard | null>(null);
+  const [error, setError] = useState<ParsedApiError | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const requestSeqRef = useRef(0);
 
-  const load = useCallback(async () => {
+  const loadDashboard = useCallback(async () => {
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchUsageSummary(period);
-      setData(result);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '未知错误');
+      const data = await usageApi.getDashboard({ period, limit: 50 });
+      if (requestSeq !== requestSeqRef.current) {
+        return;
+      }
+      setDashboard(data);
+    } catch (err) {
+      if (requestSeq !== requestSeqRef.current) {
+        return;
+      }
+      setError(buildParsedError(err, t));
     } finally {
-      setLoading(false);
+      if (requestSeq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
-  }, [period]);
+  }, [period, t]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadDashboard();
+    return () => {
+      requestSeqRef.current += 1;
+    };
+  }, [loadDashboard]);
+
+  const largestCallTypeTotal = useMemo(() => {
+    return Math.max(...(dashboard?.byCallType.map((item) => item.totalTokens) ?? [0]), 1);
+  }, [dashboard]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-6">
-      <h1 className="text-xl font-semibold text-foreground">Token 用量</h1>
+    <AppPage>
+      <div className="space-y-5">
+        <PageHeader
+          eyebrow={t('usage.eyebrow')}
+          title={t('usage.title')}
+          description={t('usage.description')}
+          actions={(
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex rounded-xl border border-border/70 bg-card/70 p-1">
+                {PERIOD_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setPeriod(option)}
+                    className={cn(
+                      'rounded-lg px-3 py-1.5 text-sm transition-colors',
+                      period === option
+                        ? 'bg-cyan text-background shadow-soft-card'
+                        : 'text-secondary-text hover:bg-hover hover:text-foreground'
+                    )}
+                  >
+                    {t(PERIOD_LABEL_KEYS[option])}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="btn-secondary inline-flex items-center gap-2"
+                onClick={() => void loadDashboard()}
+                disabled={loading}
+              >
+                <RefreshCw className={cn('h-4 w-4', loading ? 'animate-spin' : '')} />
+                {t('usage.refresh')}
+              </button>
+            </div>
+          )}
+        />
 
-      {/* Period selector */}
-      <div className="flex gap-2" data-testid="period-selector">
-        {(Object.entries(PERIOD_LABELS) as [Period, string][]).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            data-testid={`period-${key}`}
-            onClick={() => setPeriod(key)}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-              period === key
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'bg-card-bg text-secondary-text hover:bg-hover hover:text-foreground border border-border'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+        {error ? <ApiErrorAlert error={error} actionLabel={t('common.retry')} onAction={() => void loadDashboard()} /> : null}
+
+        {loading && !dashboard ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="h-28 animate-pulse rounded-2xl border border-border/70 bg-card/60" />
+            ))}
+          </div>
+        ) : null}
+
+        {dashboard ? (
+          <>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <StatCard label={t('usage.totalTokens')} value={formatNumber(dashboard.totalTokens, language)} hint={t('usage.dateRange', { from: dashboard.fromDate, to: dashboard.toDate })} icon={<Database className="h-5 w-5" />} tone="primary" />
+              <StatCard label={t('usage.totalCalls')} value={formatNumber(dashboard.totalCalls, language)} hint={t('usage.totalCallsHint')} icon={<Activity className="h-5 w-5" />} />
+              <StatCard label={t('usage.promptTokens')} value={formatNumber(dashboard.totalPromptTokens, language)} hint={t('usage.promptTokensHint')} icon={<Cpu className="h-5 w-5" />} />
+              <StatCard label={t('usage.completionTokens')} value={formatNumber(dashboard.totalCompletionTokens, language)} hint={t('usage.completionTokensHint')} icon={<Gauge className="h-5 w-5" />} />
+            </div>
+
+            {dashboard.totalCalls === 0 ? (
+              <EmptyState title={t('usage.emptyTitle')} description={t('usage.emptyDescription')} />
+            ) : (
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+                <section className="space-y-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground">{t('usage.modelUsage')}</h2>
+                    <p className="mt-1 text-sm text-secondary-text">{t('usage.modelUsageDescription')}</p>
+                  </div>
+                  <div className="grid gap-4">
+                    {dashboard.byModel.map((model) => (
+                      <ModelUsageCard key={model.model} model={model} language={language} t={t} />
+                    ))}
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <Card title={t('usage.callTypeTitle')} subtitle={t('usage.breakdown')} className="rounded-lg">
+                    <div className="space-y-4">
+                      {dashboard.byCallType.map((item) => (
+                        <div key={item.callType}>
+                          <div className="flex items-center justify-between gap-3 text-sm">
+                            <span className="font-medium text-foreground">{getCallTypeLabel(item.callType, t)}</span>
+                            <span className="text-secondary-text">{formatNumber(item.totalTokens, language)} tokens</span>
+                          </div>
+                          <div className="mt-2 h-2 overflow-hidden rounded-full bg-border/70">
+                            <div
+                              className="h-full rounded-full bg-cyan"
+                              style={{ width: `${Math.max(4, (item.totalTokens / largestCallTypeTotal) * 100)}%` }}
+                            />
+                          </div>
+                          <p className="mt-1 text-xs text-secondary-text">
+                            {t('usage.callTypeDetail', {
+                              calls: formatNumber(item.calls, language),
+                              prompt: formatNumber(item.promptTokens, language),
+                              completion: formatNumber(item.completionTokens, language),
+                            })}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                </section>
+              </div>
+            )}
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">{t('usage.recentCalls')}</h2>
+                  <p className="mt-1 text-sm text-secondary-text">{t('usage.recentCallsDescription')}</p>
+                </div>
+                <Clock3 className="h-5 w-5 text-secondary-text" />
+              </div>
+              <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/75 shadow-soft-card">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-border/70 text-sm">
+                    <thead className="bg-surface-2/70 text-left text-xs uppercase tracking-[0.16em] text-secondary-text">
+                      <tr>
+                        <th className="px-4 py-3 font-medium">{t('usage.table.time')}</th>
+                        <th className="px-4 py-3 font-medium">{t('usage.table.type')}</th>
+                        <th className="px-4 py-3 font-medium">{t('usage.table.model')}</th>
+                        <th className="px-4 py-3 text-right font-medium">Prompt</th>
+                        <th className="px-4 py-3 text-right font-medium">Completion</th>
+                        <th className="px-4 py-3 text-right font-medium">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {dashboard.recentCalls.length ? dashboard.recentCalls.map((item) => (
+                        <tr key={item.id} className="hover:bg-hover/60">
+                          <td className="whitespace-nowrap px-4 py-3 text-secondary-text">{formatDateTime(item.calledAt, language)}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-foreground">{getCallTypeLabel(item.callType, t)}</td>
+                          <td className="min-w-56 px-4 py-3">
+                            <div className="max-w-[18rem] truncate font-medium text-foreground">{item.model}</div>
+                            {item.stockCode ? <div className="text-xs text-secondary-text">{item.stockCode}</div> : null}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right text-secondary-text">{formatNumber(item.promptTokens, language)}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right text-secondary-text">{formatNumber(item.completionTokens, language)}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right font-medium text-foreground">{formatNumber(item.totalTokens, language)}</td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-8 text-center text-secondary-text">{t('usage.noRecentCalls')}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </>
+        ) : null}
       </div>
-
-      {/* Content */}
-      {loading ? (
-        <div className="flex items-center justify-center py-16 text-secondary-text" data-testid="loading-state">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          <span className="ml-3">加载中...</span>
-        </div>
-      ) : error ? (
-        <div className="rounded-lg border border-border bg-card-bg p-6 text-center" data-testid="error-state">
-          <p className="text-sm text-red-500">{error}</p>
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="mt-3 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-          >
-            重试
-          </button>
-        </div>
-      ) : data ? (
-        <>
-          {/* Summary cards */}
-          <div className="grid grid-cols-2 gap-4">
-            <div
-              className="rounded-xl border border-border bg-card-bg p-5 shadow-sm"
-              data-testid="total-calls-card"
-            >
-              <p className="text-sm text-secondary-text">总调用次数</p>
-              <p className="mt-1 text-3xl font-bold text-foreground">{formatTokens(data.total_calls)}</p>
-              <p className="mt-1 text-xs text-secondary-text">
-                {data.from_date} ~ {data.to_date}
-              </p>
-            </div>
-            <div
-              className="rounded-xl border border-border bg-card-bg p-5 shadow-sm"
-              data-testid="total-tokens-card"
-            >
-              <p className="text-sm text-secondary-text">总 Token 消耗</p>
-              <p className="mt-1 text-3xl font-bold text-foreground">{formatTokens(data.total_tokens)}</p>
-              <p className="mt-1 text-xs text-secondary-text">
-                约 ¥{((data.total_tokens / 1_000_000) * 2).toFixed(2)}（按 ¥2/M tokens 估算）
-              </p>
-            </div>
-          </div>
-
-          {/* By call type */}
-          <div className="rounded-xl border border-border bg-card-bg p-5 shadow-sm" data-testid="call-type-section">
-            <h2 className="mb-3 text-base font-semibold text-foreground">按调用类型</h2>
-            <table className="w-full text-left text-sm" data-testid="call-type-table">
-              <thead>
-                <tr className="border-b border-border text-secondary-text">
-                  <th className="pb-2 font-medium">类型</th>
-                  <th className="pb-2 font-medium">调用次数</th>
-                  <th className="pb-2 font-medium">Token 数</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.by_call_type.map((item) => (
-                  <tr key={item.call_type} className="border-b border-border/50 last:border-0">
-                    <td className="py-2.5 text-foreground">{item.call_type}</td>
-                    <td className="py-2.5 text-foreground">{item.calls}</td>
-                    <td className="py-2.5 text-foreground">{formatTokens(item.total_tokens)}</td>
-                  </tr>
-                ))}
-                {data.by_call_type.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="py-6 text-center text-secondary-text">
-                      暂无数据
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* By model */}
-          <div className="rounded-xl border border-border bg-card-bg p-5 shadow-sm" data-testid="model-section">
-            <h2 className="mb-3 text-base font-semibold text-foreground">按模型</h2>
-            <table className="w-full text-left text-sm" data-testid="model-table">
-              <thead>
-                <tr className="border-b border-border text-secondary-text">
-                  <th className="pb-2 font-medium">模型</th>
-                  <th className="pb-2 font-medium">调用次数</th>
-                  <th className="pb-2 font-medium">Token 数</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.by_model.map((item) => (
-                  <tr key={item.model} className="border-b border-border/50 last:border-0">
-                    <td className="py-2.5 font-mono text-sm text-foreground">{item.model}</td>
-                    <td className="py-2.5 text-foreground">{item.calls}</td>
-                    <td className="py-2.5 text-foreground">{formatTokens(item.total_tokens)}</td>
-                  </tr>
-                ))}
-                {data.by_model.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="py-6 text-center text-secondary-text">
-                      暂无数据
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
-      ) : null}
-    </div>
+    </AppPage>
   );
-}
+};
+
+export default TokenUsagePage;

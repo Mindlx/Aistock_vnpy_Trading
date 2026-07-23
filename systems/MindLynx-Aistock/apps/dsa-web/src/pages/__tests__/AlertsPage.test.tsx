@@ -35,6 +35,12 @@ vi.mock('../../api/alerts', () => ({
   },
 }));
 
+vi.mock('../../api/portfolio', () => ({
+  portfolioApi: {
+    getAccounts: vi.fn().mockResolvedValue({ accounts: [] }),
+  },
+}));
+
 const parsedError = {
   title: '加载失败',
   message: '告警 API 不可用',
@@ -105,6 +111,7 @@ describe('AlertsPage', () => {
   it('loads rules, trigger history, and notification empty state', async () => {
     render(<AlertsPage />);
 
+    expect(screen.getByText('管理事件告警、日线技术指标、自选股、持仓/账户联动和大盘红绿灯规则，执行一次性测试，并查看后台评估任务记录的触发历史。')).toBeInTheDocument();
     expect(await screen.findByText('茅台价格突破')).toBeInTheDocument();
     expect(await screen.findByText('600519 price above 1800')).toBeInTheDocument();
     expect(await screen.findByText('暂无通知尝试记录')).toBeInTheDocument();
@@ -129,6 +136,48 @@ describe('AlertsPage', () => {
     expect(screen.getByText(/600519 price above 1800/)).toBeInTheDocument();
     expect(screen.getByText(/观察值：1801/)).toBeInTheDocument();
     expect(screen.queryByText(/realtime_quote/)).not.toBeInTheDocument();
+  });
+
+  it('renders batch dry-run summary and target results', async () => {
+    testRule.mockResolvedValueOnce({
+      ruleId: 1,
+      targetScope: 'watchlist',
+      status: 'triggered',
+      triggered: true,
+      observedValue: 11,
+      message: 'Evaluated 2 targets',
+      evaluatedCount: 2,
+      triggeredCount: 1,
+      degradedCount: 1,
+      skippedCount: 0,
+      targetResults: [
+        {
+          target: '600519',
+          displayTarget: '自选股 - 600519',
+          status: 'triggered',
+          recordStatus: 'triggered',
+          triggered: true,
+          observedValue: 11,
+          message: 'triggered',
+        },
+        {
+          target: '000001',
+          displayTarget: '自选股 - 000001',
+          status: 'not_triggered',
+          recordStatus: 'degraded',
+          triggered: false,
+          observedValue: null,
+          message: 'degraded',
+        },
+      ],
+    });
+    render(<AlertsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试' }));
+
+    expect(await screen.findByText(/评估 2 · 触发 1 · 降级 1 · 跳过 0/)).toBeInTheDocument();
+    expect(screen.getByText('自选股 - 600519')).toBeInTheDocument();
+    expect(screen.getByText(/not_triggered \/ degraded/)).toBeInTheDocument();
   });
 
   it('creates a rule through the page form and reloads rules', async () => {
