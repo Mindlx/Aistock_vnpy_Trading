@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading/systems/MindLynx-Aistock
-ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/systems/MindLynx-Aistock/.venv/bin/python main.py --schedule
+ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python main.py --schedule
 Restart=always
 RestartSec=10
 StandardOutput=journal
