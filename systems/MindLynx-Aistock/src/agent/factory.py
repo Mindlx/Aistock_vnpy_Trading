@@ -25,6 +25,7 @@ Usage::
 
 import copy
 import logging
+import os
 from dataclasses import dataclass
 
 from src.config import AGENT_MAX_STEPS_DEFAULT
@@ -178,6 +179,13 @@ def get_tool_registry():
     for tool_fn in ALL_DATA_TOOLS + ALL_ANALYSIS_TOOLS + ALL_SEARCH_TOOLS + ALL_MARKET_TOOLS + ALL_BACKTEST_TOOLS:
         registry.register(tool_fn)
 
+    # B-version: 设置 USE_COMPACT_TOOLS=1 启用压缩工具描述
+    if os.environ.get("USE_COMPACT_TOOLS", "") == "1":
+        from src.agent.tools.tools_compact import patch_tool_descriptions
+        all_tools = registry.list_tools()
+        patch_tool_descriptions(all_tools)
+        logger.info("[AgentFactory] USE_COMPACT_TOOLS=1 — tool descriptions compacted")
+
     _TOOL_REGISTRY = registry
     logger.info(
         "[AgentFactory] ToolRegistry cached (%d tools)", len(registry._tools) if hasattr(registry, "_tools") else -1
@@ -277,7 +285,7 @@ def resolve_skill_prompt_state(config=None, skills: list[str] | None = None) -> 
         skills_to_activate=skills_to_activate,
         explicit_skill_selection=explicit_skill_selection,
         use_legacy_default_prompt=use_legacy_default_prompt,
-        skill_instructions=skill_manager.get_skill_instructions(compact=getattr(config, "agent_skill_compact", False)),
+        skill_instructions=skill_manager.get_skill_instructions(compact=getattr(config, "agent_skill_compact", False) or os.environ.get("USE_COMPACT_PROMPT", "") == "1"),
         default_skill_policy=get_default_trading_skill_policy(
             explicit_skill_selection=not use_legacy_default_prompt,
         ),
@@ -362,7 +370,7 @@ def _build_orchestrator(config, registry, llm_adapter, skill_manager, *, technic
     return AgentOrchestrator(
         tool_registry=registry,
         llm_adapter=llm_adapter,
-        skill_instructions=skill_manager.get_skill_instructions(compact=getattr(config, "agent_skill_compact", False)),
+        skill_instructions=skill_manager.get_skill_instructions(compact=getattr(config, "agent_skill_compact", False) or os.environ.get("USE_COMPACT_PROMPT", "") == "1"),
         technical_skill_policy=technical_skill_policy,
         max_steps=getattr(config, "agent_max_steps", AGENT_MAX_STEPS_DEFAULT),
         mode=mode,
