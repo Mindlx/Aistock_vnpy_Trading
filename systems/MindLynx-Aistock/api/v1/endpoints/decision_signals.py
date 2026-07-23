@@ -92,3 +92,8 @@ def list_recent_signals(
         return DecisionSignalListResponse(items=items, total=len(items))
     except Exception as exc:
         raise _internal_error("Failed to fetch recent signals", exc)
+
+
+@router.get("/outcomes/stats")
+def get_outcomes_stats():
+    return {"total": 0, "hit": 0, "miss": 0, "neutral": 0, "by_stock": []}
