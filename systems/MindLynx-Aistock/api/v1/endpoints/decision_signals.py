@@ -97,3 +97,8 @@ def list_recent_signals(
 @router.get("/outcomes/stats")
 def get_outcomes_stats():
     return {"total": 0, "hit": 0, "miss": 0, "neutral": 0, "by_stock": []}
+
+
+@router.get("")
+def list_signals():
+    return {"items": [], "total": 0}
