@@ -416,6 +416,7 @@ class DataLake:
             raw_title = item.get("title", "")
             # 入库前清洗：去掉 <em> 等 HTML 标签
             clean_title = re.sub(r'<[^>]+>', '', raw_title).strip() if raw_title else ""
+            clean_summary = re.sub(r'<[^>]+>', '', item.get("summary", "")).strip() if item.get("summary") else ""
             if not clean_title:
                 continue
             # 去重：同股票同标题不再重复写入
@@ -432,7 +433,7 @@ class DataLake:
                         importance, published_at, created_at, ttl_seconds)
                        VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (item.get("stock_code", ""), clean_title,
-                     item.get("url", ""), item.get("summary", "")[:200],
+                     item.get("url", ""), clean_summary[:200],
                      item.get("source", ""), item.get("category", ""),
                      item.get("importance", 0), item.get("published_at", ""),
                      now, item.get("ttl_seconds", 86400)),

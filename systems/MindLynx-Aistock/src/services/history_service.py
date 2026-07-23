@@ -448,7 +448,8 @@ class HistoryService:
                             if clean in seen:
                                 continue
                             seen.add(clean)
-                            deduped.append((clean, r[2] or ""))
+                            clean_snippet = re.sub(r'<[^>]+>', '', r[2] or "").strip() if r[2] else ""
+                            deduped.append((clean, clean_snippet))
                         matched = [
                             type("NewsItem", (), {
                                 "title": t, "snippet": s,
