@@ -519,14 +519,25 @@ class HistoryService:
 
         # Rebuild AnalysisResult from raw_result
         raw_result = parse_json_field(record.raw_result)
+
+        if getattr(record, "report_type", None) == "market_review":
+            markdown_report = self._extract_market_review_content(record, raw_result)
+            if markdown_report:
+                return markdown_report
+            # 没有 raw_result 时直接用 analysis_summary
+            if not raw_result and record.analysis_summary:
+                return record.analysis_summary
+            logger.error(f"get_markdown_report: market review report is empty for {record_id}")
+            raise MarkdownReportGenerationError(
+                f"market review report is empty for record {record_id}",
+                record_id=record_id,
+            )
+
         if not raw_result:
             logger.error(f"get_markdown_report: raw_result is empty for {record_id}")
             raise MarkdownReportGenerationError(
                 f"raw_result is empty or invalid for record {record_id}", record_id=record_id
             )
-
-        if getattr(record, "report_type", None) == "market_review":
-            markdown_report = self._extract_market_review_content(record, raw_result)
             if markdown_report:
                 return markdown_report
             logger.error(f"get_markdown_report: market review report is empty for {record_id}")
