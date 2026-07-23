@@ -23,19 +23,39 @@ function resolveWindowBackgroundColor() {
 }
 
 const isWindows = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
 const appRootDev = path.resolve(__dirname, '..', '..');
-const GITHUB_OWNER = 'Mindlx';
-const GITHUB_REPO = 'blue-aistock';
+const GITHUB_OWNER = 'ZhuLinsen';
+const GITHUB_REPO = 'daily_stock_analysis';
 const RELEASES_PAGE_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases`;
 const LATEST_RELEASE_API_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 const DESKTOP_UPDATE_BACKUP_DIR = '.dsa-desktop-update-backup';
 const DESKTOP_UPDATE_BACKUP_MANIFEST_FILE = 'runtime-state.json';
+const DESKTOP_BACKEND_DEFAULT_HOST = '127.0.0.1';
+const PUBLIC_BIND_HOSTS = Object.freeze(new Set(['0.0.0.0', '::', '[::]', '*']));
+const MAC_DESKTOP_CLI_PATH_ENTRIES = Object.freeze([
+  '/opt/homebrew/bin',
+  '/usr/local/bin',
+  '/opt/homebrew/sbin',
+  '/usr/local/sbin',
+]);
+const MAC_DESKTOP_SYSTEM_PATH_ENTRIES = Object.freeze([
+  '/usr/bin',
+  '/bin',
+  '/usr/sbin',
+  '/sbin',
+]);
+const DESKTOP_BACKEND_PATH_DELIMITER = isWindows ? ';' : ':';
 const DESKTOP_UPDATE_RUNTIME_RELATIVE_FILES = Object.freeze([
   '.env',
   path.join('data', 'stock_analysis.db'),
   path.join('data', 'stock_analysis.db-wal'),
   path.join('data', 'stock_analysis.db-shm'),
+  path.join('data', 'alphasift', 'hotspots.json'),
+  path.join('data', 'alphasift', 'hotspot.history.jsonl'),
+  path.join('data', 'alphasift', 'hotspot_details'),
+  path.join('data', 'alphasift', 'snapshot.last_good.json'),
   path.join('logs', 'desktop.log'),
 ]);
 
@@ -380,10 +400,13 @@ function resolveEnvExamplePath() {
   return path.join(appRootDev, '.env.example');
 }
 
+function resolvePackagedExeDir() {
+  return path.dirname(app.getPath('exe'));
+}
+
 function resolveAppDir() {
-  if (app.isPackaged) {
-    // exe 所在目录
-    return path.dirname(app.getPath('exe'));
+  if (app.isPackaged && !isMac) {
+    return resolvePackagedExeDir();
   }
   return app.getPath('userData');
 }
@@ -441,6 +464,26 @@ function normalizeBackupFileList(manifest) {
   return DESKTOP_UPDATE_RUNTIME_RELATIVE_FILES.slice();
 }
 
+function copyRuntimeStatePathSync(source, target) {
+  const stats = fs.statSync(source);
+  if (stats.isDirectory()) {
+    fs.rmSync(target, { recursive: true, force: true });
+    fs.mkdirSync(target, { recursive: true });
+    fs.readdirSync(source, { withFileTypes: true }).forEach((entry) => {
+      copyRuntimeStatePathSync(path.join(source, entry.name), path.join(target, entry.name));
+    });
+    return;
+  }
+
+  if (!stats.isFile()) {
+    throw new Error(`unsupported runtime state path type: ${source}`);
+  }
+
+  ensureDirectory(path.dirname(target));
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.copyFileSync(source, target);
+}
+
 function backupPackagedRuntimeState() {
   if (!isWindowsNsisInstalledApp()) {
     return;
@@ -456,8 +499,7 @@ function backupPackagedRuntimeState() {
     if (!fs.existsSync(absolutePath)) {
       return;
     }
-    ensureDirectory(path.dirname(backupPath));
-    fs.copyFileSync(absolutePath, backupPath);
+    copyRuntimeStatePathSync(absolutePath, backupPath);
     backedUpFiles.push(relativePath);
   });
 
@@ -523,8 +565,7 @@ function restorePackagedRuntimeStateFromBackup() {
         if (!fs.existsSync(source)) {
           return;
         }
-        ensureDirectory(path.dirname(target));
-        fs.copyFileSync(source, target);
+        copyRuntimeStatePathSync(source, target);
         result.restored.push(relativePath);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -561,6 +602,52 @@ function restorePackagedRuntimeStateFromBackup() {
   return result;
 }
 
+function migrateMacPackagedRuntimeState() {
+  const result = {
+    sourceDir: null,
+    targetDir: null,
+    migrated: [],
+    skipped: [],
+    failed: [],
+  };
+
+  if (!app.isPackaged || !isMac) {
+    return result;
+  }
+
+  const sourceDir = resolvePackagedExeDir();
+  const targetDir = resolveAppDir();
+  result.sourceDir = sourceDir;
+  result.targetDir = targetDir;
+
+  if (sourceDir === targetDir || !fs.existsSync(sourceDir)) {
+    return result;
+  }
+
+  DESKTOP_UPDATE_RUNTIME_RELATIVE_FILES.forEach((relativePath) => {
+    const source = path.join(sourceDir, relativePath);
+    const target = path.join(targetDir, relativePath);
+
+    if (!fs.existsSync(source)) {
+      return;
+    }
+    if (fs.existsSync(target)) {
+      result.skipped.push(relativePath);
+      return;
+    }
+
+    try {
+      copyRuntimeStatePathSync(source, target);
+      result.migrated.push(relativePath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      result.failed.push(`${relativePath} (${message})`);
+    }
+  });
+
+  return result;
+}
+
 function resolveBackendPath() {
   if (process.env.DSA_BACKEND_PATH) {
     return process.env.DSA_BACKEND_PATH;
@@ -579,6 +666,235 @@ function resolveBackendPath() {
   return null;
 }
 
+function extendMacDesktopBackendPath(rawPath) {
+  if (!isMac) {
+    return rawPath;
+  }
+
+  const seen = new Set();
+  const entries = String(rawPath || '')
+    .split(DESKTOP_BACKEND_PATH_DELIMITER)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .filter((entry) => {
+      if (seen.has(entry)) {
+        return false;
+      }
+      seen.add(entry);
+      return true;
+    });
+
+  [...MAC_DESKTOP_CLI_PATH_ENTRIES, ...MAC_DESKTOP_SYSTEM_PATH_ENTRIES].forEach((entry) => {
+    if (!seen.has(entry)) {
+      entries.push(entry);
+      seen.add(entry);
+    }
+  });
+
+  return entries.join(DESKTOP_BACKEND_PATH_DELIMITER);
+}
+
+function normalizeBackendHost(value, fallback = '') {
+  const normalized = String(value || '').trim();
+  return normalized || fallback;
+}
+
+function normalizeBackendBindHost(value, fallback = DESKTOP_BACKEND_DEFAULT_HOST) {
+  const host = normalizeBackendHost(value, fallback);
+  const lowerHost = host.toLowerCase();
+  if (lowerHost === '*') {
+    return '0.0.0.0';
+  }
+  if (lowerHost === '[::]') {
+    return '::';
+  }
+  return host;
+}
+
+function hasOwnValue(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function parseQuotedEnvValue(value, quote) {
+  let result = '';
+  for (let index = 1; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === quote) {
+      if (quote === '"') {
+        return result.replace(/\\([nrt"\\$])/g, (_match, escaped) => {
+          if (escaped === 'n') {
+            return '\n';
+          }
+          if (escaped === 'r') {
+            return '\r';
+          }
+          if (escaped === 't') {
+            return '\t';
+          }
+          return escaped;
+        });
+      }
+      return result.replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+    }
+    result += char;
+  }
+
+  return value.trim();
+}
+
+function parseEnvScalarValue(rawValue) {
+  const value = String(rawValue || '').trimStart();
+  if (!value) {
+    return '';
+  }
+
+  const quote = value[0];
+  if (quote === '"' || quote === "'") {
+    return parseQuotedEnvValue(value, quote);
+  }
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === '#' && (index === 0 || /\s/.test(value[index - 1]))) {
+      return value.slice(0, index).trim();
+    }
+  }
+
+  return value.trim();
+}
+
+function expandEnvReferences(value, values = {}, sourceEnv = process.env) {
+  return String(value || '').replace(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}/g,
+    (_match, name, defaultValue) => {
+      if (hasOwnValue(sourceEnv, name)) {
+        return String(sourceEnv[name]);
+      }
+      if (hasOwnValue(values, name)) {
+        return String(values[name]);
+      }
+      return defaultValue === undefined ? '' : defaultValue;
+    }
+  );
+}
+
+function readEnvFileValues(envFile, sourceEnv = process.env) {
+  if (!envFile || !fs.existsSync(envFile)) {
+    return {};
+  }
+
+  let content = '';
+  try {
+    content = fs.readFileSync(envFile, 'utf-8');
+  } catch (_error) {
+    return {};
+  }
+
+  const values = {};
+  for (const line of content.split(/\r?\n/)) {
+    const match = line.match(/^\uFEFF?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) {
+      continue;
+    }
+    values[match[1]] = expandEnvReferences(
+      parseEnvScalarValue(match[2]),
+      values,
+      sourceEnv
+    );
+  }
+
+  return values;
+}
+
+function readEnvFileValue(envFile, key, sourceEnv = process.env) {
+  const values = readEnvFileValues(envFile, sourceEnv);
+  return hasOwnValue(values, key) ? values[key] : null;
+}
+
+function resolveBackendBindHost({
+  envFile,
+  sourceEnv = process.env,
+  fallback = DESKTOP_BACKEND_DEFAULT_HOST,
+} = {}) {
+  const sourceHost = normalizeBackendHost(sourceEnv.WEBUI_HOST);
+  if (sourceHost) {
+    return normalizeBackendBindHost(sourceHost, fallback);
+  }
+
+  const envFileHost = normalizeBackendHost(readEnvFileValue(envFile, 'WEBUI_HOST', sourceEnv));
+  return normalizeBackendBindHost(envFileHost || fallback, fallback);
+}
+
+function resolveDesktopConnectHost(bindHost) {
+  const host = normalizeBackendBindHost(bindHost, DESKTOP_BACKEND_DEFAULT_HOST);
+  if (PUBLIC_BIND_HOSTS.has(host.toLowerCase())) {
+    return DESKTOP_BACKEND_DEFAULT_HOST;
+  }
+  return host;
+}
+
+function formatUrlHost(host) {
+  const normalized = normalizeBackendHost(host, DESKTOP_BACKEND_DEFAULT_HOST);
+  if (normalized.startsWith('[') && normalized.endsWith(']')) {
+    return normalized;
+  }
+  return normalized.includes(':') ? `[${normalized}]` : normalized;
+}
+
+function buildBackendUrl(host, port, pathname = '/') {
+  const url = new URL(`http://${formatUrlHost(host)}:${port}/`);
+  url.pathname = pathname;
+  return url.toString();
+}
+
+function buildBackendArgs({ host, port }) {
+  return [
+    '--serve-only',
+    '--host',
+    normalizeBackendBindHost(host, DESKTOP_BACKEND_DEFAULT_HOST),
+    '--port',
+    String(port),
+  ];
+}
+
+function buildBackendEnvironment({
+  envFile,
+  dbPath,
+  logDir,
+  port = null,
+  host = null,
+  sourceEnv = process.env,
+}) {
+  const selectedPort = Number(port);
+  const selectedHost = normalizeBackendBindHost(
+    normalizeBackendHost(host) || resolveBackendBindHost({ envFile, sourceEnv }),
+    DESKTOP_BACKEND_DEFAULT_HOST
+  );
+  const env = {
+    ...sourceEnv,
+    DSA_DESKTOP_MODE: 'true',
+    ENV_FILE: envFile,
+    DATABASE_PATH: dbPath,
+    LOG_DIR: logDir,
+    PYTHONUTF8: '1',
+    PYTHONIOENCODING: 'utf-8',
+    WEBUI_HOST: selectedHost,
+    WEBUI_ENABLED: 'false',
+    BOT_ENABLED: 'false',
+    DINGTALK_STREAM_ENABLED: 'false',
+    FEISHU_STREAM_ENABLED: 'false',
+  };
+
+  if (Number.isInteger(selectedPort) && selectedPort >= 1 && selectedPort <= 65535) {
+    env.WEBUI_PORT = String(selectedPort);
+  }
+
+  if (isMac) {
+    env.PATH = extendMacDesktopBackendPath(sourceEnv.PATH);
+  }
+
+  return env;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -592,13 +908,13 @@ function ensureDirectory(dirPath) {
 }
 
 function initLogging() {
-  const appDir = app.isPackaged ? path.dirname(app.getPath('exe')) : app.getPath('userData');
+  const appDir = resolveAppDir();
   logFilePath = path.join(appDir, 'logs', 'desktop.log');
-
+  
   // 确保日志目录存在
   const logDir = path.dirname(logFilePath);
   ensureDirectory(logDir);
-
+  
   logLine('Desktop app starting');
 }
 
@@ -663,7 +979,8 @@ function ensureEnvFile(envPath) {
   fs.writeFileSync(envPath, '# Configure your API keys and stock list here.\n', 'utf-8');
 }
 
-function findAvailablePort(startPort = 8000, endPort = 8100) {
+function findAvailablePort(startPort = 8000, endPort = 8100, host = DESKTOP_BACKEND_DEFAULT_HOST) {
+  const bindHost = normalizeBackendBindHost(host, DESKTOP_BACKEND_DEFAULT_HOST);
   return new Promise((resolve, reject) => {
     const tryPort = (port) => {
       if (port > endPort) {
@@ -678,7 +995,7 @@ function findAvailablePort(startPort = 8000, endPort = 8100) {
       server.once('listening', () => {
         server.close(() => resolve(port));
       });
-      server.listen(port, '127.0.0.1');
+      server.listen(port, bindHost);
     };
 
     tryPort(startPort);
@@ -843,27 +1160,18 @@ function waitForHealth(
   });
 }
 
-function startBackend({ port, envFile, dbPath, logDir }) {
+function startBackend({ port, envFile, dbPath, logDir, host = null }) {
   const backendPath = resolveBackendPath();
   backendStartError = null;
   const launchStartedAt = Date.now();
+  const bindHost = normalizeBackendBindHost(
+    normalizeBackendHost(host) || resolveBackendBindHost({ envFile }),
+    DESKTOP_BACKEND_DEFAULT_HOST
+  );
 
-  const env = {
-    ...process.env,
-    DSA_DESKTOP_MODE: 'true',
-    ENV_FILE: envFile,
-    DATABASE_PATH: dbPath,
-    LOG_DIR: logDir,
-    PYTHONUTF8: '1',
-    PYTHONIOENCODING: 'utf-8',
-    SCHEDULE_ENABLED: 'false',
-    WEBUI_ENABLED: 'false',
-    BOT_ENABLED: 'false',
-    DINGTALK_STREAM_ENABLED: 'false',
-    FEISHU_STREAM_ENABLED: 'false',
-  };
+  const env = buildBackendEnvironment({ envFile, dbPath, logDir, port, host: bindHost });
 
-  const args = ['--serve-only', '--host', '127.0.0.1', '--port', String(port)];
+  const args = buildBackendArgs({ host: bindHost, port });
   let launchMode = '';
   let launchCommand = '';
   let launchCwd = '';
@@ -937,28 +1245,33 @@ function startBackend({ port, envFile, dbPath, logDir }) {
 
 function waitForBackendExit(processRef, timeoutMs = 5000) {
   if (!processRef || processRef.exitCode !== null || processRef.signalCode) {
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
 
   return new Promise((resolve) => {
     let settled = false;
     let timer = null;
+    let onExit = null;
 
-    const done = () => {
+    const done = (exited) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(timer);
-      processRef.removeListener('exit', done);
-      resolve();
+      if (onExit) {
+        processRef.removeListener('exit', onExit);
+      }
+      resolve(exited || processRef.exitCode !== null || Boolean(processRef.signalCode));
     };
 
+    onExit = () => done(true);
+
     timer = setTimeout(() => {
-      done();
+      done(false);
     }, timeoutMs);
 
-    processRef.once('exit', done);
+    processRef.once('exit', onExit);
   });
 }
 
@@ -966,19 +1279,39 @@ function __setBackendProcessForTest(processRef = null) {
   backendProcess = processRef;
 }
 
+function clearBackendProcessIfCurrent(processRef) {
+  if (backendProcess === processRef) {
+    backendProcess = null;
+  }
+}
+
 function stopBackend() {
-  if (!backendProcess || backendProcess.killed) {
+  if (!backendProcess) {
     return Promise.resolve();
   }
   const processToStop = backendProcess;
+  if (processToStop.exitCode !== null || processToStop.signalCode) {
+    clearBackendProcessIfCurrent(processToStop);
+    return Promise.resolve();
+  }
+
+  const waitAndClear = () => waitForBackendExit(processToStop, 10000)
+    .then((exited) => {
+      if (!exited) {
+        return;
+      }
+      clearBackendProcessIfCurrent(processToStop);
+    });
 
   if (isWindows) {
     spawn('taskkill', ['/PID', String(processToStop.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {
     });
-    return waitForBackendExit(processToStop, 10000);
+    return waitAndClear();
   }
 
-  processToStop.kill('SIGTERM');
+  if (!processToStop.killed) {
+    processToStop.kill('SIGTERM');
+  }
   setTimeout(() => {
     if (processToStop.killed || processToStop.exitCode !== null || processToStop.signalCode) {
       return;
@@ -989,15 +1322,15 @@ function stopBackend() {
     }
   }, 3000);
 
-  return waitForBackendExit(processToStop, 10000);
+  return waitAndClear();
 }
 
 function resolveDesktopVersion() {
   return String(app.getVersion() || '').trim();
 }
 
-function buildMainPageUrl(port, timestamp = Date.now()) {
-  const url = new URL(`http://127.0.0.1:${port}/`);
+function buildMainPageUrl(port, timestamp = Date.now(), host = DESKTOP_BACKEND_DEFAULT_HOST) {
+  const url = new URL(buildBackendUrl(host, port, '/'));
   url.searchParams.set('desktop_version', resolveDesktopVersion() || 'unknown');
   url.searchParams.set('cache_bust', String(timestamp));
   return url.toString();
@@ -1174,8 +1507,8 @@ async function installDownloadedUpdate() {
       }
     }
 
-    logLine('[update] quit and install requested');
-    updater.quitAndInstall(false, true);
+    logLine('[update] silent quit and install requested');
+    updater.quitAndInstall(true, true);
     return true;
   } catch (error) {
     if (backupRoot) {
@@ -1236,6 +1569,13 @@ function configureElectronAutoUpdater() {
 
   updater.autoDownload = true;
   updater.autoInstallOnAppQuit = false;
+  if (isWindows && app.isPackaged) {
+    const installDirectory = path.dirname(app.getPath('exe'));
+    if (installDirectory) {
+      updater.installDirectory = installDirectory;
+      logLine(`[update] auto updater install directory set to ${updater.installDirectory}`);
+    }
+  }
 
   updater.on('checking-for-update', () => {
     setDesktopUpdateState({
@@ -1403,7 +1743,17 @@ ipcMain.handle('desktop:open-release-page', async (_event, releaseUrl) => {
 
 async function createWindow() {
   const restoreResult = isWindowsNsisInstalledApp() ? restorePackagedRuntimeStateFromBackup() : null;
+  const macMigrationResult = migrateMacPackagedRuntimeState();
   initLogging();
+  if (macMigrationResult.migrated.length) {
+    logLine(`[migration] migrated macOS runtime files from ${macMigrationResult.sourceDir} to ${macMigrationResult.targetDir}: ${macMigrationResult.migrated.join(', ')}`);
+  }
+  if (macMigrationResult.skipped.length) {
+    logLine(`[migration] skipped existing macOS runtime files: ${macMigrationResult.skipped.join(', ')}`);
+  }
+  if (macMigrationResult.failed.length) {
+    logLine(`[migration] failed to migrate macOS runtime files: ${macMigrationResult.failed.join(', ')}`);
+  }
   const restoreFailed = Boolean(restoreResult && restoreResult.failed.length);
   const restoreIssueDetails = restoreResult
     ? restoreResult.failed.join('；')
@@ -1484,8 +1834,12 @@ async function createWindow() {
   ensureEnvFile(envPath);
   logStartup(`Env file ready: ${envPath}`);
 
+  const backendBindHost = resolveBackendBindHost({ envFile: envPath });
+  const backendConnectHost = resolveDesktopConnectHost(backendBindHost);
+  logStartup(`Backend bind host=${backendBindHost}; desktop connect host=${backendConnectHost}`);
+
   const portFindStartedAt = Date.now();
-  const port = await findAvailablePort(8000, 8100);
+  const port = await findAvailablePort(8000, 8100, backendBindHost);
   logStartup(`Using port ${port} (selected in ${Date.now() - portFindStartedAt}ms)`);
   logStartup(`App directory=${appDir}`);
 
@@ -1493,7 +1847,7 @@ async function createWindow() {
   const logDir = path.join(appDir, 'logs');
 
   try {
-    const launchInfo = startBackend({ port, envFile: envPath, dbPath, logDir });
+    const launchInfo = startBackend({ port, envFile: envPath, dbPath, logDir, host: backendBindHost });
     logStartup(`Backend launch mode=${launchInfo.mode}`);
     logStartup(`Backend launch command=${launchInfo.command}`);
     logStartup(`Backend launch cwd=${launchInfo.cwd}`);
@@ -1505,7 +1859,7 @@ async function createWindow() {
     return;
   }
 
-  const healthUrl = `http://127.0.0.1:${port}/api/health`;
+  const healthUrl = buildBackendUrl(backendConnectHost, port, '/api/health');
   let lastHealthProgressLogAt = 0;
   const healthProgressLogIntervalMs = 2000;
 
@@ -1570,7 +1924,7 @@ async function createWindow() {
     );
     logStartup(`Backend ready in ${healthInfo.elapsedMs}ms (${healthInfo.attempts} probes)`);
     const mainPageStartedAt = Date.now();
-    const mainPageUrl = buildMainPageUrl(port);
+    const mainPageUrl = buildMainPageUrl(port, Date.now(), backendConnectHost);
     await mainWindow.loadURL(mainPageUrl);
     logStartup(`Main page loadURL resolved in ${Date.now() - mainPageStartedAt}ms url=${mainPageUrl}`);
     logStartup(`Main UI loaded in ${Date.now() - startupStartedAt}ms`);
@@ -1613,17 +1967,32 @@ module.exports = {
   UPDATE_MODE,
   UPDATE_STATUS,
   buildUpdateState,
+  backupPackagedRuntimeState,
+  buildBackendArgs,
   checkForDesktopUpdates,
   compareVersions,
   evaluateReleaseUpdate,
+  buildBackendUrl,
+  buildBackendEnvironment,
+  extendMacDesktopBackendPath,
   extractReleaseMetadata,
   fetchLatestReleaseJson,
+  findAvailablePort,
   buildMainPageUrl,
+  migrateMacPackagedRuntimeState,
   normalizeVersionString,
   parseSemver,
+  readEnvFileValue,
+  resolveAppDir,
+  resolveBackendBindHost,
+  resolveDesktopConnectHost,
   restorePackagedRuntimeStateFromBackup,
   sanitizeReleaseUrl,
+  startBackend,
   stopBackend,
+  __getBackendProcessForTest() {
+    return backendProcess;
+  },
   __setBackendProcessForTest,
   __setMainWindowForTest(mainWindowRef = null) {
     mainWindow = mainWindowRef;

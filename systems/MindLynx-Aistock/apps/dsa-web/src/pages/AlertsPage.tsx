@@ -40,6 +40,41 @@ function testVariant(result: AlertRuleTestResponse): 'success' | 'warning' | 'da
   return result.triggered ? 'success' : 'warning';
 }
 
+function renderTestResultMessage(result: AlertRuleTestResponse): React.ReactNode {
+  const targetResults = result.targetResults ?? [];
+  return (
+    <div className="space-y-2">
+      <div>
+        {result.message}
+        {' · 状态：'}
+        {result.status}
+        {' · 触发：'}
+        {result.triggered ? '是' : '否'}
+        {' · 观察值：'}
+        {result.observedValue == null ? '--' : String(result.observedValue)}
+      </div>
+      {result.evaluatedCount != null && result.evaluatedCount > 1 ? (
+        <div className="text-xs">
+          评估 {result.evaluatedCount} · 触发 {result.triggeredCount ?? 0} · 降级 {result.degradedCount ?? 0} · 跳过 {result.skippedCount ?? 0}
+        </div>
+      ) : null}
+      {targetResults.length > 1 ? (
+        <div className="grid gap-1 text-xs">
+          {targetResults.slice(0, 20).map((item) => (
+            <div key={`${item.target}-${item.status}`} className="flex flex-wrap justify-between gap-2">
+              <span>{item.displayTarget ?? item.target}</span>
+              <span>
+                {item.status}
+                {item.recordStatus ? ` / ${item.recordStatus}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const notificationChannelLabel: Record<string, string> = {
   __cooldown__: '业务冷却',
   __cooldown_read_failed__: '冷却读取失败',
@@ -228,7 +263,7 @@ const AlertsPage: React.FC = () => {
       <PageHeader
         eyebrow="Alert Center"
         title="告警中心"
-        description="管理现有三类事件告警规则，执行一次性测试，并查看后台评估任务记录的触发历史。"
+        description="管理事件告警、日线技术指标、自选股、持仓/账户联动和大盘红绿灯规则，执行一次性测试，并查看后台评估任务记录的触发历史。"
       />
 
       {createError ? <ApiErrorAlert error={createError} onDismiss={() => setCreateError(null)} /> : null}
@@ -276,17 +311,7 @@ const AlertsPage: React.FC = () => {
             <InlineAlert
               title="测试结果"
               variant={testVariant(testResult)}
-              message={(
-                <span>
-                  {testResult.message}
-                  {' · 状态：'}
-                  {testResult.status}
-                  {' · 触发：'}
-                  {testResult.triggered ? '是' : '否'}
-                  {' · 观察值：'}
-                  {testResult.observedValue == null ? '--' : String(testResult.observedValue)}
-                </span>
-              )}
+              message={renderTestResultMessage(testResult)}
             />
           ) : null}
         </div>

@@ -157,10 +157,11 @@ def alphasift_start_screen_task(
         report_type="alphasift_screen",
         message="AlphaSift 选股任务已提交",
         task_id=task_id,
+        trace_id=task_id,
     )
     return AlphaSiftScreenAccepted(
         task_id=task.task_id,
-        trace_id=task.task_id,
+        trace_id=task.trace_id or task.task_id,
         status=task.status.value if isinstance(task.status, QueueTaskStatus) else str(task.status),
         message=task.message or "AlphaSift 选股任务已提交",
         strategy=request.strategy,
@@ -178,7 +179,7 @@ def alphasift_screen_task_status(task_id: str) -> AlphaSiftScreenTaskStatus:
     result = task.result if task.status == QueueTaskStatus.COMPLETED and isinstance(task.result, dict) else None
     return AlphaSiftScreenTaskStatus(
         task_id=task.task_id,
-        trace_id=task.task_id,
+        trace_id=task.trace_id or task.task_id,
         status=task.status.value if isinstance(task.status, QueueTaskStatus) else str(task.status),
         progress=task.progress,
         message=task.message,

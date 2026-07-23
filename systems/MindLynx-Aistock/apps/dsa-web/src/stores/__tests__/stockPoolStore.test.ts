@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analysisApi, DuplicateTaskError } from '../../api/analysis';
 import { historyApi } from '../../api/history';
-import type { TaskInfo, TaskListResponse } from '../../types/analysis';
+import type {
+  AnalysisReport,
+  HistoryListResponse,
+  StockBarResponse,
+  TaskInfo,
+  TaskListResponse,
+} from '../../types/analysis';
+import { getRecentStartDate, getTodayInShanghai } from '../../utils/format';
 import { useStockPoolStore } from '../stockPoolStore';
 
 vi.mock('../../api/history', () => ({
@@ -9,6 +16,7 @@ vi.mock('../../api/history', () => ({
     getList: vi.fn(),
     getDetail: vi.fn(),
     deleteRecords: vi.fn(),
+    getStockBarList: vi.fn(),
   },
 }));
 
@@ -33,6 +41,16 @@ const historyItem = {
   createdAt: '2026-03-18T08:00:00Z',
 };
 
+const stockBarItem = {
+  id: 1,
+  stockCode: '600519',
+  stockName: '贵州茅台',
+  sentimentScore: 82,
+  operationAdvice: '买入',
+  analysisCount: 1,
+  lastAnalysisTime: '2026-03-18T08:00:00Z',
+};
+
 const historyReport = {
   meta: {
     id: 1,
@@ -47,6 +65,18 @@ const historyReport = {
     operationAdvice: '继续观察买点',
     trendPrediction: '短线震荡偏强',
     sentimentScore: 78,
+  },
+};
+
+const marketReviewHistoryReport = {
+  ...historyReport,
+  meta: {
+    ...historyReport.meta,
+    id: 10,
+    queryId: 'q-10',
+    stockCode: '',
+    stockName: '大盘复盘',
+    reportType: 'market_review' as const,
   },
 };
 
@@ -110,6 +140,298 @@ describe('stockPoolStore', () => {
     expect(state.selectedReport?.meta.stockCode).toBe('600519');
     expect(state.isLoadingHistory).toBe(false);
     expect(state.isLoadingReport).toBe(false);
+  });
+
+  it('opens same-stock history trend and loads more records', async () => {
+    const olderItem = {
+      ...historyItem,
+      id: 2,
+      queryId: 'q-2',
+      modelUsed: 'gemini/gemini-2.5-pro',
+    };
+
+    useStockPoolStore.setState({ selectedReport: historyReport });
+    vi.mocked(historyApi.getList)
+      .mockResolvedValueOnce({
+        total: 2,
+        page: 1,
+        limit: 20,
+        items: [historyItem],
+      })
+      .mockResolvedValueOnce({
+        total: 2,
+        page: 2,
+        limit: 20,
+        items: [olderItem],
+      });
+
+    await useStockPoolStore.getState().openHistoryTrend();
+
+    let state = useStockPoolStore.getState();
+    expect(state.isHistoryTrendOpen).toBe(true);
+    expect(state.stockHistoryItems).toEqual([historyItem]);
+    expect(state.stockHistoryHasMore).toBe(true);
+    expect(historyApi.getList).toHaveBeenLastCalledWith({
+      stockCode: '600519',
+      page: 1,
+      limit: 20,
+    });
+
+    await useStockPoolStore.getState().loadMoreStockHistory();
+
+    state = useStockPoolStore.getState();
+    expect(state.stockHistoryItems.map((item) => item.id)).toEqual([1, 2]);
+    expect(state.stockHistoryHasMore).toBe(false);
+    expect(historyApi.getList).toHaveBeenLastCalledWith({
+      stockCode: '600519',
+      page: 2,
+      limit: 20,
+    });
+  });
+
+  it('deduplicates same-stock trend records when loading more pages', async () => {
+    const duplicateCurrentItem = {
+      ...historyItem,
+      id: 1,
+      queryId: 'q-1',
+    };
+    const olderPageItem = {
+      ...historyItem,
+      id: 2,
+      queryId: 'q-2',
+      modelUsed: 'gemini/gemini-2.5-pro',
+    };
+    const thirdItem = {
+      ...historyItem,
+      id: 3,
+      queryId: 'q-3',
+      modelUsed: 'gemini/gemini-2.5-flash',
+    };
+
+    useStockPoolStore.setState({ selectedReport: historyReport });
+    vi.mocked(historyApi.getList)
+      .mockResolvedValueOnce({
+        total: 3,
+        page: 1,
+        limit: 20,
+        items: [olderPageItem],
+      })
+      .mockResolvedValueOnce({
+        total: 3,
+        page: 2,
+        limit: 20,
+        items: [duplicateCurrentItem, thirdItem],
+      });
+
+    await useStockPoolStore.getState().openHistoryTrend();
+    await useStockPoolStore.getState().loadMoreStockHistory();
+
+    const state = useStockPoolStore.getState();
+    expect(state.stockHistoryItems.map((item) => item.id)).toEqual([1, 2, 3]);
+  });
+
+  it('does not inject the current report when it is outside the selected history time range', async () => {
+    const oldSelectedReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 5,
+        queryId: 'q-old',
+        createdAt: '2020-01-01T08:00:00Z',
+      },
+    };
+
+    useStockPoolStore.setState({
+      selectedReport: oldSelectedReport,
+      stockHistoryFilters: {
+        range: '30d',
+        model: 'all',
+        sort: 'desc',
+      },
+    });
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 1,
+      page: 1,
+      limit: 20,
+      items: [
+        {
+          ...historyItem,
+          id: 6,
+          queryId: 'q-in-range',
+          createdAt: '2026-03-18T08:00:00Z',
+        },
+      ],
+    });
+
+    await useStockPoolStore.getState().openHistoryTrend();
+
+    const state = useStockPoolStore.getState();
+    expect(state.stockHistoryItems).toHaveLength(1);
+    expect(state.stockHistoryItems[0].id).toBe(6);
+    expect(state.stockHistoryItems[0].id).not.toBe(5);
+    expect(historyApi.getList).toHaveBeenCalledWith({
+      stockCode: '600519',
+      startDate: getRecentStartDate(30),
+      endDate: getTodayInShanghai(),
+      page: 1,
+      limit: 20,
+    });
+  });
+
+  it('loads market-review trend history when selecting a market-review report', async () => {
+    const marketItem = {
+      ...historyItem,
+      id: 10,
+      queryId: 'market-review-q-10',
+      stockCode: 'MARKET',
+      stockName: '大盘复盘',
+      reportType: 'market_review' as const,
+    };
+    useStockPoolStore.setState({
+      selectedReport: historyReport,
+      isHistoryTrendOpen: true,
+      stockHistoryItems: [{ ...historyItem, modelUsed: 'gemini/gemini-2.5-pro' }],
+      stockHistoryTotal: 12,
+      stockHistoryPage: 3,
+      stockHistoryHasMore: true,
+    });
+
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 1,
+      page: 1,
+      limit: 20,
+      items: [marketItem],
+    });
+    vi.mocked(historyApi.getDetail).mockResolvedValue(marketReviewHistoryReport);
+
+    await useStockPoolStore.getState().selectHistoryItem(1);
+
+    const state = useStockPoolStore.getState();
+    expect(state.selectedReport?.meta.reportType).toBe('market_review');
+    expect(state.isHistoryTrendOpen).toBe(true);
+    expect(state.stockHistoryItems).toEqual([marketItem]);
+    expect(state.stockHistoryTotal).toBe(1);
+    expect(state.stockHistoryPage).toBe(1);
+    expect(state.stockHistoryHasMore).toBe(false);
+    expect(state.isLoadingStockHistory).toBe(false);
+    expect(state.isLoadingMoreStockHistory).toBe(false);
+    expect(historyApi.getList).toHaveBeenCalledWith({
+      stockCode: 'MARKET',
+      reportType: 'market_review',
+      page: 1,
+      limit: 20,
+    });
+  });
+
+  it('loads market review history through the dedicated MARKET filter', async () => {
+    const marketItem = {
+      ...historyItem,
+      id: 10,
+      queryId: 'market-review-q-10',
+      stockCode: 'MARKET',
+      stockName: '大盘复盘',
+      reportType: 'market_review' as const,
+      operationAdvice: '查看复盘',
+      sentimentScore: 50,
+    };
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 1,
+      page: 1,
+      limit: 10,
+      items: [marketItem],
+    });
+
+    await useStockPoolStore.getState().loadMarketReviewHistory();
+
+    const state = useStockPoolStore.getState();
+    expect(state.marketReviewHistoryItems).toEqual([marketItem]);
+    expect(state.marketReviewHistoryHasMore).toBe(false);
+    expect(historyApi.getList).toHaveBeenCalledWith({
+      stockCode: 'MARKET',
+      reportType: 'market_review',
+      page: 1,
+      limit: 10,
+    });
+  });
+
+  it('deduplicates market review history after silent refresh shifts pagination', async () => {
+    const createMarketReviewItem = (id: number) => ({
+      ...historyItem,
+      id,
+      queryId: `market-review-q-${id}`,
+      stockCode: 'MARKET',
+      stockName: '大盘复盘',
+      reportType: 'market_review' as const,
+    });
+    const loadedItems = Array.from({ length: 20 }, (_, index) => createMarketReviewItem(index + 1));
+    const newlyCompletedItem = createMarketReviewItem(21);
+
+    useStockPoolStore.setState({
+      marketReviewHistoryItems: loadedItems,
+      marketReviewHistoryPage: 2,
+      marketReviewHistoryHasMore: true,
+    });
+    vi.mocked(historyApi.getList)
+      .mockResolvedValueOnce({
+        total: 21,
+        page: 1,
+        limit: 10,
+        items: [newlyCompletedItem, ...loadedItems.slice(0, 9)],
+      })
+      .mockResolvedValueOnce({
+        total: 21,
+        page: 3,
+        limit: 10,
+        items: [loadedItems[19]],
+      });
+
+    await useStockPoolStore.getState().refreshMarketReviewHistory(true);
+    await useStockPoolStore.getState().loadMoreMarketReviewHistory();
+
+    const state = useStockPoolStore.getState();
+    expect(state.marketReviewHistoryItems.map((item) => item.id)).toEqual([
+      21,
+      ...Array.from({ length: 20 }, (_, index) => index + 1),
+    ]);
+    expect(state.marketReviewHistoryHasMore).toBe(false);
+    expect(historyApi.getList).toHaveBeenLastCalledWith({
+      stockCode: 'MARKET',
+      reportType: 'market_review',
+      page: 3,
+      limit: 10,
+    });
+  });
+
+  it('deletes the selected market review history record and clears the open market report', async () => {
+    const marketItem = {
+      ...historyItem,
+      id: 10,
+      queryId: 'market-review-q-10',
+      stockCode: 'MARKET',
+      stockName: '大盘复盘',
+      reportType: 'market_review' as const,
+    };
+    useStockPoolStore.setState({
+      marketReviewHistoryItems: [marketItem],
+      selectedMarketReviewHistoryIds: [10],
+      selectedReport: marketReviewHistoryReport,
+    });
+
+    vi.mocked(historyApi.deleteRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 0,
+      page: 1,
+      limit: 10,
+      items: [],
+    });
+
+    await useStockPoolStore.getState().deleteSelectedMarketReviewHistory();
+
+    const state = useStockPoolStore.getState();
+    expect(historyApi.deleteRecords).toHaveBeenCalledWith([10]);
+    expect(state.marketReviewHistoryItems).toEqual([]);
+    expect(state.selectedMarketReviewHistoryIds).toEqual([]);
+    expect(state.selectedReport).toBeNull();
   });
 
   it('deletes selected history and clears the selected report when nothing remains', async () => {
@@ -254,6 +576,339 @@ describe('stockPoolStore', () => {
     const state = useStockPoolStore.getState();
     expect(state.historyItems.map((item) => item.id)).toEqual([2, 1]);
     expect(state.currentPage).toBe(1);
+  });
+
+  it('selects the newest report for the completed task stock during silent refresh', async () => {
+    const latestItem = {
+      ...historyItem,
+      id: 2,
+      queryId: 'q-2',
+      createdAt: '2026-03-18T09:00:00Z',
+    };
+    const latestReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 2,
+        queryId: 'q-2',
+        createdAt: '2026-03-18T09:00:00Z',
+      },
+    };
+
+    useStockPoolStore.setState({
+      historyItems: [historyItem],
+      selectedReport: historyReport,
+    });
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 2,
+      page: 1,
+      limit: 20,
+      items: [latestItem, historyItem],
+    });
+    vi.mocked(historyApi.getDetail).mockResolvedValue(latestReport);
+
+    await useStockPoolStore.getState().refreshHistoryForCompletedTask(createTask({
+      status: 'completed',
+      progress: 100,
+    }));
+
+    const state = useStockPoolStore.getState();
+    expect(historyApi.getDetail).toHaveBeenCalledWith(2);
+    expect(state.historyItems.map((item) => item.id)).toEqual([2, 1]);
+    expect(state.selectedReport?.meta.id).toBe(2);
+  });
+
+  it('selects the completed-task report after an overlapping refresh supersedes the original request', async () => {
+    const latestItem = {
+      ...historyItem,
+      id: 2,
+      queryId: 'q-2',
+      createdAt: '2026-03-18T09:00:00Z',
+    };
+    const latestReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 2,
+        queryId: 'q-2',
+        createdAt: '2026-03-18T09:00:00Z',
+      },
+    };
+    const completedRefresh = createDeferred<HistoryListResponse>();
+    const overlappingRefresh = createDeferred<HistoryListResponse>();
+
+    useStockPoolStore.setState({
+      historyItems: [historyItem],
+      selectedReport: historyReport,
+    });
+    vi.mocked(historyApi.getList)
+      .mockReturnValueOnce(completedRefresh.promise)
+      .mockReturnValueOnce(overlappingRefresh.promise);
+    vi.mocked(historyApi.getDetail).mockResolvedValue(latestReport);
+
+    const completedRefreshPromise = useStockPoolStore.getState().refreshHistoryForCompletedTask(createTask({
+      status: 'completed',
+      progress: 100,
+    }));
+    const overlappingRefreshPromise = useStockPoolStore.getState().refreshHistory(true);
+
+    overlappingRefresh.resolve({
+      total: 2,
+      page: 1,
+      limit: 20,
+      items: [latestItem, historyItem],
+    });
+    await overlappingRefreshPromise;
+
+    completedRefresh.resolve({
+      total: 2,
+      page: 1,
+      limit: 20,
+      items: [latestItem, historyItem],
+    });
+    await completedRefreshPromise;
+
+    const state = useStockPoolStore.getState();
+    expect(historyApi.getDetail).toHaveBeenCalledTimes(1);
+    expect(historyApi.getDetail).toHaveBeenCalledWith(2);
+    expect(state.historyItems.map((item) => item.id)).toEqual([2, 1]);
+    expect(state.selectedReport?.meta.id).toBe(2);
+  });
+
+  it('selects the newest completed-task report when stock codes use equivalent aliases', async () => {
+    const olderTencentItem = {
+      ...historyItem,
+      id: 10,
+      queryId: 'q-10',
+      stockCode: 'HK00700',
+      stockName: '腾讯控股',
+    };
+    const olderTencentReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 10,
+        queryId: 'q-10',
+        stockCode: 'HK00700',
+        stockName: '腾讯控股',
+      },
+    };
+    const latestTencentItem = {
+      ...olderTencentItem,
+      id: 11,
+      queryId: 'q-11',
+      stockCode: '00700.HK',
+      createdAt: '2026-03-18T09:00:00Z',
+    };
+    const latestTencentReport = {
+      ...olderTencentReport,
+      meta: {
+        ...olderTencentReport.meta,
+        id: 11,
+        queryId: 'q-11',
+        stockCode: '00700.HK',
+        createdAt: '2026-03-18T09:00:00Z',
+      },
+    };
+
+    useStockPoolStore.setState({
+      historyItems: [olderTencentItem],
+      selectedReport: olderTencentReport,
+    });
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 2,
+      page: 1,
+      limit: 20,
+      items: [latestTencentItem, olderTencentItem],
+    });
+    vi.mocked(historyApi.getDetail).mockResolvedValue(latestTencentReport);
+
+    await useStockPoolStore.getState().refreshHistoryForCompletedTask(createTask({
+      stockCode: '00700.HK',
+      stockName: '腾讯控股',
+      status: 'completed',
+      progress: 100,
+    }));
+
+    const state = useStockPoolStore.getState();
+    expect(historyApi.getDetail).toHaveBeenCalledWith(11);
+    expect(state.historyItems.map((item) => item.id)).toEqual([11, 10]);
+    expect(state.selectedReport?.meta.id).toBe(11);
+  });
+
+  it('does not replace the selected report when another stock task completes', async () => {
+    const otherReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 3,
+        queryId: 'q-3',
+        stockCode: 'AAPL',
+        stockName: 'Apple',
+      },
+    };
+    const latestItem = {
+      ...historyItem,
+      id: 2,
+      queryId: 'q-2',
+      createdAt: '2026-03-18T09:00:00Z',
+    };
+
+    useStockPoolStore.setState({
+      historyItems: [historyItem],
+      selectedReport: otherReport,
+    });
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 2,
+      page: 1,
+      limit: 20,
+      items: [latestItem, historyItem],
+    });
+
+    await useStockPoolStore.getState().refreshHistoryForCompletedTask(createTask({
+      status: 'completed',
+      progress: 100,
+    }));
+
+    const state = useStockPoolStore.getState();
+    expect(historyApi.getDetail).not.toHaveBeenCalled();
+    expect(state.historyItems.map((item) => item.id)).toEqual([2, 1]);
+    expect(state.selectedReport?.meta.stockCode).toBe('AAPL');
+  });
+
+  it('does not auto-switch to completed-task latest when the selected report changed before the refresh response returns', async () => {
+    const latestItem = {
+      ...historyItem,
+      id: 2,
+      queryId: 'q-2',
+      createdAt: '2026-03-18T09:00:00Z',
+    };
+    const latestCompletedReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 2,
+        queryId: 'q-2',
+        createdAt: '2026-03-18T09:00:00Z',
+      },
+    };
+    const switchedReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 3,
+        queryId: 'q-3',
+      },
+    };
+    const completedRefreshResponse = createDeferred<HistoryListResponse>();
+
+    useStockPoolStore.setState({
+      historyItems: [historyItem],
+      selectedReport: historyReport,
+    });
+    vi.mocked(historyApi.getList).mockReturnValue(completedRefreshResponse.promise);
+    vi.mocked(historyApi.getDetail).mockResolvedValue(latestCompletedReport);
+
+    const completedRefreshPromise = useStockPoolStore.getState().refreshHistoryForCompletedTask(createTask({
+      status: 'completed',
+      progress: 100,
+    }));
+
+    useStockPoolStore.setState({
+      selectedReport: switchedReport,
+    });
+
+    completedRefreshResponse.resolve({
+      total: 2,
+      page: 1,
+      limit: 20,
+      items: [latestItem, historyItem],
+    });
+    await completedRefreshPromise;
+
+    const state = useStockPoolStore.getState();
+    expect(state.historyItems.map((item) => item.id)).toEqual([2, 1]);
+    expect(state.selectedReport?.meta.id).toBe(3);
+    expect(historyApi.getDetail).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-switch report when user selection is pending during completed-task refresh', async () => {
+    const latestItem = {
+      ...historyItem,
+      id: 2,
+      queryId: 'q-2',
+      createdAt: '2026-03-18T09:00:00Z',
+    };
+    const completedRefreshResponse = createDeferred<HistoryListResponse>();
+    const userSelectionDetail = createDeferred<AnalysisReport>();
+    const userSelectionReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 3,
+        queryId: 'q-3',
+        stockCode: 'AAPL',
+        stockName: 'Apple',
+        createdAt: '2026-03-18T07:00:00Z',
+      },
+    };
+    const latestCompletedReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 2,
+        queryId: 'q-2',
+        createdAt: '2026-03-18T09:00:00Z',
+      },
+    };
+
+    useStockPoolStore.setState({
+      historyItems: [
+        historyItem,
+        {
+          ...historyItem,
+          id: 3,
+          queryId: 'q-3',
+          stockCode: 'AAPL',
+          stockName: 'Apple',
+          createdAt: '2026-03-18T07:00:00Z',
+        },
+      ],
+      selectedReport: historyReport,
+    });
+    vi.mocked(historyApi.getList).mockReturnValueOnce(completedRefreshResponse.promise);
+    vi.mocked(historyApi.getDetail)
+      .mockReturnValueOnce(userSelectionDetail.promise)
+      .mockResolvedValue(latestCompletedReport);
+
+    const completedRefreshPromise = useStockPoolStore.getState().refreshHistoryForCompletedTask(
+      createTask({
+        status: 'completed',
+        progress: 100,
+      }),
+    );
+    const manualSelectionPromise = useStockPoolStore.getState().selectHistoryItem(3);
+
+    completedRefreshResponse.resolve({
+      total: 2,
+      page: 1,
+      limit: 20,
+      items: [latestItem, historyItem],
+    });
+    await completedRefreshPromise;
+
+    const midState = useStockPoolStore.getState();
+    expect(midState.selectedReport?.meta.id).toBe(historyReport.meta.id);
+    expect(historyApi.getDetail).toHaveBeenCalledWith(3);
+    expect(historyApi.getDetail).toHaveBeenCalledTimes(1);
+
+    userSelectionDetail.resolve(userSelectionReport);
+    await manualSelectionPromise;
+
+    const state = useStockPoolStore.getState();
+    expect(state.selectedReport?.meta.id).toBe(3);
+    expect(state.selectedReport?.meta.stockCode).toBe('AAPL');
+    expect(state.historyItems.map((item) => item.id)).toEqual([2, 1, 3]);
   });
 
   it('ignores late history responses after dashboard reset', async () => {
@@ -405,7 +1060,7 @@ describe('stockPoolStore', () => {
     await useStockPoolStore.getState().refreshActiveTasks();
 
     expect(analysisApi.getTasks).toHaveBeenCalledWith({
-      status: 'pending,processing',
+      status: 'pending,processing,cancel_requested',
       limit: 100,
     });
     expect(useStockPoolStore.getState().activeTasks).toHaveLength(0);
@@ -507,6 +1162,24 @@ describe('stockPoolStore', () => {
     expect(useStockPoolStore.getState().activeTasks).toEqual([localTask, remoteTask]);
   });
 
+  it('prunes stale local tasks when a complete backend snapshot contains cancel-requested tasks', async () => {
+    const staleTask = createTask({ taskId: 'task-stale', status: 'processing' });
+    const cancelRequestedTask = createTask({
+      taskId: 'task-cancel-requested',
+      status: 'cancel_requested',
+      progress: 60,
+      message: '正在取消任务',
+    });
+    useStockPoolStore.getState().syncTaskCreated(staleTask);
+    vi.mocked(analysisApi.getTasks).mockResolvedValue(
+      createTaskListResponse([cancelRequestedTask]),
+    );
+
+    await useStockPoolStore.getState().refreshActiveTasks();
+
+    expect(useStockPoolStore.getState().activeTasks).toEqual([cancelRequestedTask]);
+  });
+
   it('keeps active tasks unchanged when backend reconciliation fails', async () => {
     const activeTask = createTask();
     useStockPoolStore.getState().syncTaskCreated(activeTask);
@@ -532,5 +1205,101 @@ describe('stockPoolStore', () => {
       stockCode: '600519',
       forceRefresh: true,
     }));
+  });
+
+  it('clears stock-bar loading when a refresh supersedes the initial load', async () => {
+    const initialStockBarRequest = createDeferred<StockBarResponse>();
+    const refreshStockBarRequest = createDeferred<StockBarResponse>();
+
+    vi.mocked(historyApi.getStockBarList)
+      .mockReturnValueOnce(initialStockBarRequest.promise)
+      .mockReturnValueOnce(refreshStockBarRequest.promise);
+
+    const initialPromise = useStockPoolStore.getState().loadStockBar();
+    expect(useStockPoolStore.getState().isLoadingStockBar).toBe(true);
+
+    const refreshPromise = useStockPoolStore.getState().refreshStockBar();
+    refreshStockBarRequest.resolve({
+      total: 1,
+      items: [stockBarItem],
+    });
+    await refreshPromise;
+
+    expect(useStockPoolStore.getState().isLoadingStockBar).toBe(false);
+
+    initialStockBarRequest.resolve({
+      total: 0,
+      items: [],
+    });
+    await initialPromise;
+
+    expect(useStockPoolStore.getState().stockBarItems).toEqual([stockBarItem]);
+    expect(useStockPoolStore.getState().isLoadingStockBar).toBe(false);
+  });
+
+  it('keeps stock-bar failure state when a stale older request succeeds after a newer failure', async () => {
+    const staleStockBarRequest = createDeferred<StockBarResponse>();
+    const latestStockBarRequest = createDeferred<StockBarResponse>();
+
+    vi.mocked(historyApi.getStockBarList)
+      .mockReturnValueOnce(staleStockBarRequest.promise)
+      .mockReturnValueOnce(latestStockBarRequest.promise);
+
+    const stalePromise = useStockPoolStore.getState().refreshStockBar();
+    const latestPromise = useStockPoolStore.getState().refreshStockBar();
+
+    latestStockBarRequest.reject(new Error('latest failed'));
+    staleStockBarRequest.resolve({
+      total: 1,
+      items: [stockBarItem],
+    });
+
+    await Promise.all([stalePromise, latestPromise]);
+
+    const stateAfterLatest = useStockPoolStore.getState();
+    expect(stateAfterLatest.stockBarRefreshFailed).toBe(true);
+
+    expect(stateAfterLatest.stockBarItems).toEqual([]);
+  });
+
+  it('keeps newer stock-bar results when a stale earlier request fails after newer success', async () => {
+    const staleStockBarRequest = createDeferred<StockBarResponse>();
+    const latestStockBarRequest = createDeferred<StockBarResponse>();
+
+    const latestItems = [
+      {
+        ...stockBarItem,
+        id: 8,
+      },
+    ];
+    const staleItems = [
+      {
+        ...stockBarItem,
+        id: 9,
+      },
+    ];
+
+    vi.mocked(historyApi.getStockBarList)
+      .mockReturnValueOnce(staleStockBarRequest.promise)
+      .mockReturnValueOnce(latestStockBarRequest.promise);
+
+    const stalePromise = useStockPoolStore.getState().refreshStockBar();
+    const latestPromise = useStockPoolStore.getState().refreshStockBar();
+
+    latestStockBarRequest.resolve({
+      total: latestItems.length,
+      items: latestItems,
+    });
+    await latestPromise;
+
+    staleStockBarRequest.resolve({
+      total: staleItems.length,
+      items: staleItems,
+    });
+    await stalePromise;
+
+    const finalState = useStockPoolStore.getState();
+    expect(finalState.stockBarItems).toEqual(latestItems);
+    expect(finalState.stockBarRefreshFailed).toBe(false);
   });
 });

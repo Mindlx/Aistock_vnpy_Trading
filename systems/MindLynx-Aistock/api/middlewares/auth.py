@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Auth middleware: protect /api/v1/* when admin auth is enabled.
 """
@@ -5,7 +6,7 @@ Auth middleware: protect /api/v1/* when admin auth is enabled.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from typing import Callable
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -15,17 +16,6 @@ from src.auth import COOKIE_NAME, is_auth_enabled, verify_session
 
 logger = logging.getLogger(__name__)
 
-EXEMPT_PATHS = frozenset(
-    {
-        "/api/v1/auth/login",
-        "/api/v1/auth/status",
-        "/api/health",
-        "/health",
-        "/docs",
-        "/redoc",
-        "/openapi.json",
-    }
-)
 EXEMPT_PATHS = frozenset({
     "/api/v1/auth/login",
     "/api/v1/auth/status",

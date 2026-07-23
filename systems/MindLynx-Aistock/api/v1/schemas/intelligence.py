@@ -1,152 +1,138 @@
-"""Intelligence API schemas.
-
-Pydantic models for RSS/Atom intelligence source CRUD and item listing.
-"""
+# -*- coding: utf-8 -*-
+"""Intelligence source API schemas."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+SourceTypeValue = Literal["rss", "atom", "newsnow"]
+ScopeTypeValue = Literal["symbol", "market", "sector"]
+MarketValue = Literal["cn", "hk", "us", "jp", "kr", "tw", "global"]
+
 
 class IntelligenceSourceCreateRequest(BaseModel):
-    """Request body for creating a new intelligence source."""
-
-    name: str = Field(..., min_length=1, max_length=100, description="Display name of the source")
-    source_type: str = Field("rss", max_length=32, description="Source type: rss / atom / newsnow")
-    url: str = Field(..., min_length=1, max_length=1000, description="Feed URL")
+    name: str = Field(..., min_length=1, max_length=100)
+    url: str = Field(..., min_length=1, max_length=1000)
+    source_type: SourceTypeValue = "rss"
     enabled: bool = True
-    scope_type: str = Field("market", max_length=32, description="Scope category: market / sector / stock")
-    scope_value: str | None = Field(None, max_length=64, description="Scope value, e.g. market name or stock code")
-    market: str = Field("cn", max_length=32, description="Market: cn / hk / us")
-    description: str | None = Field(None, description="Optional description")
+    scope_type: ScopeTypeValue = "market"
+    scope_value: Optional[str] = Field(None, max_length=64)
+    market: MarketValue = "cn"
+    description: Optional[str] = None
 
 
-class IntelligenceSourceUpdateRequest(BaseModel):
-    """Request body for updating an existing intelligence source."""
+class IntelligenceSourceTemplateCreateRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    enabled: Optional[bool] = None
+    scope_type: Optional[ScopeTypeValue] = None
+    scope_value: Optional[str] = Field(None, max_length=64)
+    market: Optional[MarketValue] = None
+    description: Optional[str] = None
 
-    name: str | None = Field(None, min_length=1, max_length=100)
-    source_type: str | None = Field(None, max_length=32)
-    url: str | None = Field(None, min_length=1, max_length=1000)
-    enabled: bool | None = None
-    scope_type: str | None = Field(None, max_length=32)
-    scope_value: str | None = Field(None, max_length=64)
-    market: str | None = Field(None, max_length=32)
-    description: str | None = None
+
+class IntelligenceDefaultSourcesCreateRequest(BaseModel):
+    enabled: Optional[bool] = None
 
 
 class IntelligenceSourceItem(BaseModel):
-    """Response model for a single intelligence source."""
-
     id: int
     name: str
     source_type: str
     url: str
     enabled: bool
     scope_type: str
-    scope_value: str | None = None
+    scope_value: Optional[str] = None
     market: str
-    description: str | None = None
-    last_status: str | None = None
-    last_error: str | None = None
-    last_fetched_at: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
-    item_count: int = 0
+    description: Optional[str] = None
+    last_status: Optional[str] = None
+    last_error: Optional[str] = None
+    last_fetched_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class IntelligenceSourceTemplateItem(BaseModel):
+    template_id: str
+    name: str
+    source_type: str
+    url: str
+    scope_type: str
+    scope_value: Optional[str] = None
+    market: str
+    description: Optional[str] = None
 
 
 class IntelligenceSourceListResponse(BaseModel):
-    """Response model for listing intelligence sources."""
-
-    items: list[IntelligenceSourceItem] = Field(default_factory=list)
-    total: int
-
-
-class IntelligenceItemResponse(BaseModel):
-    """Response model for a single fetched intelligence item."""
-
-    id: int
-    source_id: int | None = None
-    source_name: str | None = None
-    source_type: str
-    title: str
-    summary: str | None = None
-    url: str
-    source: str | None = None
-    published_at: str | None = None
-    fetched_at: str | None = None
-    scope_type: str
-    scope_value: str
-    market: str
-
-
-class IntelligenceItemListResponse(BaseModel):
-    """Response model for listing intelligence items."""
-
-    items: list[IntelligenceItemResponse] = Field(default_factory=list)
+    items: List[IntelligenceSourceItem] = Field(default_factory=list)
     total: int
     page: int
     page_size: int
 
 
-class IntelligenceFetchRequest(BaseModel):
-    """Request body for triggering a fetch. If source_id is omitted, fetch all enabled sources."""
+class IntelligenceSourceTemplateListResponse(BaseModel):
+    items: List[IntelligenceSourceTemplateItem] = Field(default_factory=list)
+    total: int
 
-    source_id: int | None = Field(None, description="Specific source ID to fetch, or None for all enabled")
+
+class IntelligenceDefaultSourceResult(BaseModel):
+    created: bool
+    source: IntelligenceSourceItem
 
 
-class IntelligenceFetchStatus(BaseModel):
-    """Status of a single source fetch operation."""
+class IntelligenceDefaultSourceCreateResponse(BaseModel):
+    items: List[IntelligenceDefaultSourceResult] = Field(default_factory=list)
+    created_count: int
+    total: int
 
-    source_id: int
-    source_name: str
-    status: str
-    items_fetched: int
-    error: str | None = None
+
+class IntelligenceItem(BaseModel):
+    id: int
+    source_id: Optional[int] = None
+    source_name: Optional[str] = None
+    source_type: str
+    title: str
+    summary: Optional[str] = None
+    url: str
+    source: Optional[str] = None
+    published_at: Optional[str] = None
+    fetched_at: Optional[str] = None
+    scope_type: str
+    scope_value: Optional[str] = None
+    market: str
+
+
+class IntelligenceSampleItem(BaseModel):
+    title: str
+    summary: Optional[str] = None
+    url: str
+    source: Optional[str] = None
+    published_at: Optional[str] = None
+
+
+class IntelligenceItemListResponse(BaseModel):
+    items: List[IntelligenceItem] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
 
 
 class IntelligenceFetchResponse(BaseModel):
-    """Response model for a fetch operation."""
-
-    results: list[IntelligenceFetchStatus] = Field(default_factory=list)
-
-
-class IntelligenceSourceTestRequest(BaseModel):
-    """Request body for testing a source URL without saving."""
-
-    url: str = Field(..., min_length=1, max_length=1000, description="Feed URL to test")
+    ok: bool
+    source_id: Optional[int] = None
+    source_count: Optional[int] = None
+    fetched_count: Optional[int] = None
+    saved_count: Optional[int] = None
+    retention_deleted: Optional[int] = None
+    dry_run: Optional[bool] = None
+    sample_items: List[IntelligenceSampleItem] = Field(default_factory=list)
+    results: Optional[List[dict]] = None
+    error: Optional[str] = None
 
 
 class IntelligenceSourceTestResponse(BaseModel):
-    """Response model for a source URL test."""
-
-    success: bool
-    title: str | None = None
-    description: str | None = None
-    entries_count: int = 0
-    sample_entries: list[dict[str, Any]] = Field(default_factory=list)
-    error: str | None = None
-
-
-class IntelligenceCreateDefaultsResponse(BaseModel):
-    """Response model for creating default built-in sources."""
-
-    created: int = 0
-    sources: list[IntelligenceSourceItem] = Field(default_factory=list)
-
-
-__all__ = [
-    "IntelligenceSourceCreateRequest",
-    "IntelligenceSourceUpdateRequest",
-    "IntelligenceSourceItem",
-    "IntelligenceSourceListResponse",
-    "IntelligenceItemResponse",
-    "IntelligenceItemListResponse",
-    "IntelligenceFetchRequest",
-    "IntelligenceFetchResponse",
-    "IntelligenceFetchStatus",
-    "IntelligenceSourceTestRequest",
-    "IntelligenceSourceTestResponse",
-    "IntelligenceCreateDefaultsResponse",
-]
+    ok: bool
+    source: dict
+    fetched_count: int
+    sample_items: List[IntelligenceSampleItem] = Field(default_factory=list)

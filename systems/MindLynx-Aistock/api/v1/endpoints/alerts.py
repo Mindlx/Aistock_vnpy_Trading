@@ -1,8 +1,10 @@
+# -*- coding: utf-8 -*-
 """Alert API endpoints (Issue #1202 P1 MVP)."""
 
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -76,11 +78,11 @@ def create_rule(request: AlertRuleCreateRequest) -> AlertRuleItem:
     summary="List alert rules",
 )
 def list_rules(
-    enabled: bool | None = Query(None, description="Optional enabled filter"),
-    alert_type: str | None = Query(None, description="Optional alert type filter"),
-    target_scope: str | None = Query(None, description="Optional target scope filter"),
-    target: str | None = Query(None, description="Optional target filter"),
-    source: str | None = Query(None, description="Optional source filter"),
+    enabled: Optional[bool] = Query(None, description="Optional enabled filter"),
+    alert_type: Optional[str] = Query(None, description="Optional alert type filter"),
+    target_scope: Optional[str] = Query(None, description="Optional target scope filter"),
+    target: Optional[str] = Query(None, description="Optional target filter"),
+    source: Optional[str] = Query(None, description="Optional source filter"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> AlertRuleListResponse:
@@ -211,9 +213,9 @@ def test_rule(rule_id: int) -> AlertRuleTestResponse:
     summary="List alert trigger history",
 )
 def list_triggers(
-    rule_id: int | None = Query(None, description="Optional rule id filter"),
-    target: str | None = Query(None, description="Optional target filter"),
-    status: str | None = Query(None, description="Optional status filter"),
+    rule_id: Optional[int] = Query(None, description="Optional rule id filter"),
+    target: Optional[str] = Query(None, description="Optional target filter"),
+    status: Optional[str] = Query(None, description="Optional status filter"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> AlertTriggerListResponse:
@@ -239,9 +241,9 @@ def list_triggers(
     summary="List alert notification attempts",
 )
 def list_notifications(
-    trigger_id: int | None = Query(None, description="Optional trigger id filter"),
-    channel: str | None = Query(None, description="Optional channel filter"),
-    success: bool | None = Query(None, description="Optional success filter"),
+    trigger_id: Optional[int] = Query(None, description="Optional trigger id filter"),
+    channel: Optional[str] = Query(None, description="Optional channel filter"),
+    success: Optional[bool] = Query(None, description="Optional success filter"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> AlertNotificationListResponse:
