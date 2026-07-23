@@ -81,27 +81,26 @@ class DataWarehouseConfig:
     def get_instance(cls) -> DataWarehouseConfig:
         if cls._instance is None:
             stock_list: list[str] = []
+            # 单源配置：优先从 config/stock_pool.csv 加载
+            csv_path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "stock_pool.csv")
+            if os.path.exists(csv_path):
+                with open(csv_path) as f:
+                    next(f, None)
+                    for line in f:
+                        parts = line.strip().split(",")
+                        if parts:
+                            stock_list.append(parts[0])
+            # env STOCK_LIST 可作覆盖（用于临时增减，不修改 CSV）
             try:
                 from src.config import get_config
                 cfg = get_config()
-                stock_list = getattr(cfg, "stock_list", [])
+                env_list = getattr(cfg, "stock_list", [])
+                if env_list:
+                    stock_list = env_list
             except (ImportError, Exception):
-                pass
-            if not stock_list:
                 env_val = os.environ.get("STOCK_LIST", "")
-                stock_list = [s.strip() for s in env_val.split(",") if s.strip()]
-            if not stock_list:
-                stock_list = os.environ.get("WATCHLIST", "").split(",") if os.environ.get("WATCHLIST") else []
-            # 从 stock_pool.csv 补充
-            if not stock_list:
-                csv_path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "stock_pool.csv")
-                if os.path.exists(csv_path):
-                    with open(csv_path) as f:
-                        next(f, None)  # skip header
-                        for line in f:
-                            parts = line.strip().split(",")
-                            if parts:
-                                stock_list.append(parts[0])
+                if env_val:
+                    stock_list = [s.strip() for s in env_val.split(",") if s.strip()]
             cls._instance = cls(stock_pool=stock_list)
         return cls._instance
 

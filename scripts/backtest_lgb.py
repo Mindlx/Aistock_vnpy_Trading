@@ -9,6 +9,7 @@ LGB walk-forward 回测 — 评估 alpha158 LGB 模型的样本外准确率。
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
@@ -23,9 +24,13 @@ from vnpy_bridge.alpha_predictor import _compute_alpha_factors, _normalize
 # 使用 unified_cache 获取行情数据（避免 EastMoney API 不稳定）
 from services.data_warehouse.warehouse import WarehouseReader
 
-STOCK_CODES = ['001390', '300652', '600372', '605368', '000592',
-               '603189', '603557', '688202', '601801', '300676',
-               '603127', '000999']
+# 从 config/stock_pool.csv 自动加载（单源配置）
+_STOCK_POOL_PATH = _PROJ / "config" / "stock_pool.csv"
+STOCK_CODES: list[str] = []
+if _STOCK_POOL_PATH.exists():
+    with open(_STOCK_POOL_PATH) as _f:
+        for _row in csv.DictReader(_f):
+            STOCK_CODES.append(_row["code"])
 
 MIN_TRAIN = 60  # 最少训练天数
 WINDOW = 120    # 滚动窗口

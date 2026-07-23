@@ -6,6 +6,7 @@
     python lynx_signal.py --schedule --time 15:30
 """
 import argparse
+import csv
 import json
 import os
 import sys
@@ -29,17 +30,16 @@ if _PROJECT_ROOT not in sys.path:
 warnings.filterwarnings("ignore")
 
 # ===== 配置 =====
-STOCK_CODES = ['001390', '300652', '600372', '605368', '000592',
-               '603189', '603557', '688202', '601801', '300676',
-               '603127', '000999']
-
-# 股票名称映射
-STOCK_NAMES = {
-    '001390': '古麒绒材', '300652': '雷迪克', '600372': '中航机载',
-    '605368': '蓝天燃气', '000592': '平潭发展', '603189': '*ST网达',
-    '603557': '*ST起步', '688202': '美迪西', '601801': '皖新传媒',
-    '300676': '华大基因', '603127': '昭衍新药', '000999': '华润三九',
-}
+# 从 config/stock_pool.csv 自动加载（单源配置）
+_STOCK_POOL_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "stock_pool.csv"
+STOCK_CODES: list[str] = []
+STOCK_NAMES: dict[str, str] = {}
+if _STOCK_POOL_PATH.exists():
+    with open(_STOCK_POOL_PATH) as _f:
+        for _row in csv.DictReader(_f):
+            _code = _row["code"]
+            STOCK_CODES.append(_code)
+            STOCK_NAMES[_code] = _row["name"]
 WECOM_WEBHOOK = os.getenv("WECOM_WEBHOOK_URL", "")
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
