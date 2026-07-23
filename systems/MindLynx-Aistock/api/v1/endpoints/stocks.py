@@ -8,11 +8,17 @@
 2. POST /api/v1/stocks/parse-import 解析 CSV/Excel/剪贴板
 3. GET /api/v1/stocks/{code}/quote 实时行情接口
 4. GET /api/v1/stocks/{code}/history 历史行情接口
+5. GET /api/v1/stocks/watchlist 获取自选股列表
+6. POST /api/v1/stocks/watchlist/add 添加自选股
+7. POST /api/v1/stocks/watchlist/remove 移除自选股
 """
 
 import logging
+import os
+from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from dotenv import dotenv_values
+from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
 
 from api.v1.schemas.common import ErrorResponse
 from api.v1.schemas.stocks import (
@@ -22,6 +28,8 @@ from api.v1.schemas.stocks import (
     StockHistoryResponse,
     StockQuote,
 )
+from src.config import Config
+from src.core.config_manager import ConfigLineEntry, ConfigManager
 from src.services.image_stock_extractor import (
     ALLOWED_MIME,
     MAX_SIZE_BYTES,
@@ -355,3 +363,74 @@ def get_stock_history(
         raise HTTPException(
             status_code=500, detail={"error": "internal_error", "message": f"获取历史行情失败: {str(e)}"}
         )
+
+
+def _get_env_path() -> Path:
+    env_file = os.getenv("ENV_FILE")
+    return Path(env_file) if env_file else (Path(__file__).parent.parent.parent.parent / ".env")
+
+
+def _read_stock_list() -> list[str]:
+    env_path = _get_env_path()
+    if env_path.exists():
+        env_values = dotenv_values(env_path)
+        raw = (env_values.get("STOCK_LIST") or "").strip()
+    else:
+        raw = os.getenv("STOCK_LIST", "")
+    return [(c or "").strip().upper() for c in raw.split(",") if (c or "").strip()]
+
+
+def _write_stock_list(codes: list[str]) -> None:
+    env_path = _get_env_path()
+    raw = ",".join(codes)
+    manager = ConfigManager(env_path)
+    lines = manager.read_lines()
+    found = False
+    for entry in lines:
+        if entry.kind == "assignment" and entry.key == "STOCK_LIST":
+            entry.value = raw
+            entry.updated = True
+            found = True
+            break
+    if not found:
+        lines.append(ConfigLineEntry.parse(f"STOCK_LIST={raw}"))
+    manager.write_lines(lines)
+    Config.reset_instance()
+
+
+@router.get(
+    "/watchlist",
+    summary="获取自选股列表",
+    description="返回当前 STOCK_LIST 配置的自选股代码列表",
+)
+def get_watchlist():
+    codes = _read_stock_list()
+    return {"stock_codes": codes}
+
+
+@router.post(
+    "/watchlist/add",
+    summary="添加自选股",
+    description="添加股票代码到自选列表",
+)
+def add_to_watchlist(stock_code: str = Body(..., embed=True)):
+    codes = _read_stock_list()
+    code = stock_code.strip().upper()
+    if code in codes:
+        return {"stock_codes": codes}
+    codes.append(code)
+    _write_stock_list(codes)
+    return {"stock_codes": codes}
+
+
+@router.post(
+    "/watchlist/remove",
+    summary="移除自选股",
+    description="从自选列表中移除股票代码",
+)
+def remove_from_watchlist(stock_code: str = Body(..., embed=True)):
+    codes = _read_stock_list()
+    code = stock_code.strip().upper()
+    codes = [c for c in codes if c != code]
+    _write_stock_list(codes)
+    return {"stock_codes": codes}
