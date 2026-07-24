@@ -51,8 +51,8 @@
 
 | # | Timer/Service | 触发时间 | 功能 | 是否推送 |
 |---|--------------|---------|------|---------|
-| 6 | `Aistock_vnpy_Trading-TA.timer` | Mon-Fri 09:31/13:00 | run_daily.py --run-ta (TA辩论+融合) | 推送 🛟 融合决策（TA结果写入文件，融合通过 WeComNotifier 推送） |
-| 7 | `Aistock_vnpy_Trading-ml-factor.service` | 常驻(5s) | ML 因子实时计算 | 不推送 |
+| 6 | `Aistock_vnpy_Trading-TA.timer` | Mon-Fri 10:10/13:30 | run_daily.py --run-ta (TA辩论+融合) | 推送 🛟 融合决策（TA结果写入文件，融合通过 WeComNotifier 推送） |
+| 7 | `Aistock_vnpy_Trading-ml-factor.service` | 常驻(300s/5min) | ML 因子实时计算 | 不推送 |
 
 ---
 
