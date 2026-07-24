@@ -65,9 +65,9 @@ _TS_FIELD_MAP = {}  # filled by each fetcher
 # ═══════════════════════════════════════════
 
 class DailyFetcher:
-    """日K线获取, 降级链: pytdx(TCP) → Sina → Tushare → akshare(EM) → efinance"""
+    """日K线获取, 降级链: Tushare(付费) → pytdx(TCP) → Sina → akshare(EM) → efinance"""
 
-    FETCHERS = ["pytdx", "akshare_sina", "tushare", "akshare_em", "efinance"]
+    FETCHERS = ["tushare", "pytdx", "akshare_sina", "akshare_em", "efinance"]
 
     def fetch_pytdx(self, code: str, days: int = 365) -> list[dict]:
         """通达信TCP源(永不封IP), 使用pytdx direct"""
