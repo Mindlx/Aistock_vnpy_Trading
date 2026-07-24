@@ -393,8 +393,9 @@ class BaseFetcher(ABC):
             标准化的 DataFrame，包含技术指标
         """
         # 计算日期范围
-        if end_date is None:
-            end_date = datetime.now().strftime("%Y-%m-%d")
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        if end_date is None or end_date > today_str:
+            end_date = today_str
 
         if start_date is None:
             # 默认获取最近 30 个交易日（按日历日估算，多取一些）
