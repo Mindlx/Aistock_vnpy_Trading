@@ -834,6 +834,17 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 news_block,
             )
 
+        # ── 盘面总览：用模板替换 LLM 首段，确保数字 100% 精确 ──
+        if (not self._get_review_language() == "en"
+            and overview.total_amount > 0
+            and overview.up_count > 0
+            and "market_summary" in patterns):
+            summary_para = self._build_summary_paragraph(overview)
+            if summary_para:
+                combined = summary_para + "\n\n" + (stats_block or "")
+                review = self._replace_section_content(review, patterns["market_summary"], combined)
+                stats_block = ""  # 已包含在 combined 中，跳过后续注入
+
         # ── 后处理 ──
         if not self._get_review_language() == "en":
             import re as _re
@@ -853,6 +864,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 "> 以上数据仅供参考，不构成投资建议",
                 review,
             )
+
+
 
         return review
 
@@ -875,6 +888,43 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             insert_pos = len(text)
         # Insert the block before the next heading, with spacing
         return text[:insert_pos].rstrip() + "\n\n" + block + "\n\n" + text[insert_pos:].lstrip("\n")
+
+    @staticmethod
+    def _replace_section_content(text: str, heading_pattern: str, new_content: str) -> str:
+        """Replace everything between a heading and the next ### heading."""
+        import re
+        match = re.search(heading_pattern, text)
+        if not match:
+            return text
+        start = match.end()
+        next_heading = re.search(r"\n###\s", text[start:])
+        end = start + next_heading.start() if next_heading else len(text)
+        return text[:start] + "\n\n" + new_content + "\n\n" + text[end:].lstrip("\n")
+
+    def _build_summary_paragraph(self, overview: MarketOverview) -> str:
+        """Build a pre-built 盘面总览 paragraph with 100% accurate numbers from DB."""
+        total_idx = sum(1 for idx in overview.indices if idx.change_pct < 0) if overview.indices else 0
+        tone = "全面走弱" if total_idx >= 2 else "震荡分化" if total_idx >= 1 else "整体偏强"
+        participation = overview.up_count + overview.down_count
+        up_ratio = overview.up_count / participation if participation else 0
+        prev_amount = self._load_prev_market_turnover(overview.date, "全天") or 0
+        vol_note = ""
+        if prev_amount > 0 and overview.total_amount > 0:
+            ratio = overview.total_amount / prev_amount
+            if ratio < 0.7:
+                vol_note = f"，较昨日{prev_amount:.0f}亿元{'大幅' if ratio < 0.5 else ''}萎缩"
+            elif ratio > 1.3:
+                vol_note = f"，较昨日{prev_amount:.0f}亿元{'大幅' if ratio > 1.5 else ''}放量"
+            else:
+                vol_note = f"，与昨日{prev_amount:.0f}亿元基本持平"
+        return (
+            f"今日A股{tone}，主要指数集体收跌。"
+            f"全天仅{overview.up_count}家个股上涨，{overview.down_count}家下跌"
+            f"（上涨占比{up_ratio:.1%}），"
+            f"涨停{overview.limit_up_count}家、跌停{overview.limit_down_count}家。"
+            f"两市成交额{overview.total_amount:.0f}亿元{vol_note}，"
+            f"市场呈现明确的“{tone}”格局。"
+        )
 
     def _build_stats_block(self, overview: MarketOverview) -> str:
         """Build market statistics block."""
