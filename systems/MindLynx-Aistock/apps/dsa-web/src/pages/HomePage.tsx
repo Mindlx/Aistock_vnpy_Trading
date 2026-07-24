@@ -320,10 +320,10 @@ const HomePage: React.FC = () => {
 
   // 加载历史记录和自选股数据（组件挂载时）
   useEffect(() => {
-    void loadInitialHistory();
-    void loadMarketReviewHistory();
+    void refreshHistory(true);
+    void refreshMarketReviewHistory(true);
     void loadStockBar();
-  }, [loadInitialHistory, loadMarketReviewHistory, loadStockBar]);
+  }, [refreshHistory, refreshMarketReviewHistory, loadStockBar]);
 
   useEffect(() => {
     let active = true;
