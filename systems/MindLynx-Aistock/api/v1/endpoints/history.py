@@ -150,7 +150,16 @@ def delete_history_records(
 
 @router.get("/stocks")
 def get_history_stocks():
-    return {"stocks": []}
+    try:
+        import sqlite3, os
+        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "stock_analysis.db")
+        conn = sqlite3.connect(db_path)
+        cur = conn.execute("SELECT DISTINCT code, name FROM analysis_history WHERE code IS NOT NULL AND code!='' AND code!='MARKET' ORDER BY code")
+        stocks = [{"code": r[0], "name": r[1]} for r in cur.fetchall()]
+        conn.close()
+        return {"stocks": stocks}
+    except Exception:
+        return {"stocks": []}
 
 
 @router.get(
@@ -405,14 +414,41 @@ def get_history_markdown(
 
 @router.get("/{record_id}/diagnostics")
 def get_history_diagnostics(record_id: int):
+    try:
+        import sqlite3
+        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "stock_analysis.db")
+        conn = sqlite3.connect(db_path)
+        cur = conn.execute("SELECT raw_result, context_snapshot FROM analysis_history WHERE id=?", (record_id,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            import json
+            return {
+                "diagnostics": {
+                    "raw_result": json.loads(row[0]) if row[0] else None,
+                    "context_snapshot": json.loads(row[1]) if row[1] else None,
+                }
+            }
+    except Exception:
+        pass
     return {"diagnostics": None}
 
 
 @router.get("/{record_id}/flow")
 def get_history_flow(record_id: int):
-    return {"flow": None}
+    return {"flow": None, "message": "fusion records do not have pipeline flow tracking"}
 
 
 @router.delete("/by-code/{stock_code}")
 def delete_history_by_code(stock_code: str):
-    return {"deleted": 0}
+    try:
+        import sqlite3
+        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "stock_analysis.db")
+        conn = sqlite3.connect(db_path)
+        cur = conn.execute("DELETE FROM analysis_history WHERE code=?", (stock_code,))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+        return {"deleted": deleted, "stock_code": stock_code}
+    except Exception as e:
+        return {"deleted": 0, "error": str(e)}

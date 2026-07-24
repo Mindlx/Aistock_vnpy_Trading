@@ -99,6 +99,26 @@ def get_outcomes_stats():
     return {"total": 0, "hit": 0, "miss": 0, "neutral": 0, "by_stock": []}
 
 
+@router.post("/reassess")
+def reassess_signals():
+    return {"success": True, "reassessed": 0}
+
+
+@router.post("/outcomes/run")
+def run_outcomes():
+    return {"success": True, "processed": 0}
+
+
 @router.get("")
 def list_signals():
     return {"items": [], "total": 0}
+
+
+@router.get("/outcomes")
+def list_outcomes():
+    return {"items": [], "total": 0}
+
+
+@router.get("/{signal_id}/outcomes")
+def get_signal_outcomes(signal_id: int):
+    return {"signal_id": signal_id, "hit": 0, "miss": 0, "neutral": 0}

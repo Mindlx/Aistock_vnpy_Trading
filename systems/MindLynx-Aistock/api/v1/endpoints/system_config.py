@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -513,61 +514,138 @@ def get_system_config_schema(
 
 @router.get("/config/generation-backends/status")
 def get_generation_backends_status():
-    return {
-        "backends": [
-            {
-                "type": "litellm",
-                "available": True,
-                "model": "openai/deepseek-v4-flash",
-                "supportsFunctions": True,
-                "supportsVision": False,
-            }
-        ]
-    }
+    import urllib.request
+    backends = []
+    channels_str = os.getenv("LLM_CHANNELS", "")
+    for ch_name in [c.strip() for c in channels_str.split(",") if c.strip()]:
+        base_url = os.getenv(f"LLM_{ch_name.upper()}_BASE_URL", "")
+        model_str = os.getenv(f"LLM_{ch_name.upper()}_MODELS", "")
+        enabled = os.getenv(f"LLM_{ch_name.upper()}_ENABLED", "false").lower() == "true"
+        available = False
+        models = []
+        if enabled and base_url:
+            try:
+                url = base_url.rstrip("/") + "/v1/models"
+                req = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(req, timeout=2) as resp:
+                    data = json.loads(resp.read())
+                    models = [m["id"] for m in data.get("data", []) if "id" in m]
+                available = len(models) > 0
+            except Exception:
+                available = False
+        backends.append({
+            "id": ch_name,
+            "type": "litellm",
+            "available": available,
+            "base_url": base_url,
+            "models": models,
+            "supportsFunctions": True,
+            "supportsVision": False,
+        })
+    if not backends:
+        backends.append({"id": "default", "type": "litellm", "available": False, "models": []})
+    return {"backends": backends}
 
 
 @router.post("/config/generation-backends/status/preview")
 def preview_generation_backend_status():
-    return {
-        "type": "litellm",
-        "available": True,
-    }
+    import urllib.request
+    base_url = os.getenv("LLM_QWEN36_BASE_URL", "")
+    available = False
+    if base_url:
+        try:
+            url = base_url.rstrip("/") + "/v1/models"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=2):
+                available = True
+        except Exception:
+            available = False
+    return {"type": "litellm", "available": available}
 
 
 @router.post("/config/generation-backends/smoke-test")
 def smoke_test_generation_backend():
-    return {"success": True, "message": "smoke test skipped (stub)"}
+    import urllib.request, json
+    base_url = os.getenv("LLM_QWEN36_BASE_URL", "")
+    model = os.getenv("LITELLM_MODEL", "").split("/")[-1] or "deepseek-v4-flash"
+    if not base_url:
+        return {"success": False, "message": "no LLM base URL configured"}
+    try:
+        payload = json.dumps({"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}).encode()
+        req = urllib.request.Request(
+            base_url.rstrip("/") + "/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = json.loads(resp.read())
+            success = "choices" in result
+            return {"success": success, "message": "smoke test passed" if success else "unexpected response"}
+    except Exception as e:
+        return {"success": False, "message": f"smoke test failed: {e}"}
 
 
 @router.get("/config/agent-backends/status")
 def get_agent_backends_status():
+    agent_model = os.getenv("AGENT_LITELLM_MODEL", "")
+    agent_mode = os.getenv("AGENT_MODE", "false").lower() == "true"
+    available = agent_mode and bool(agent_model)
+    error_code = None if available else ("agent_mode_disabled" if not agent_mode else "model_not_configured")
     return {
         "backend": "litellm",
-        "available": True,
+        "available": available,
         "experimental": False,
         "version": None,
-        "errorCode": None,
+        "errorCode": error_code,
         "message": None,
     }
 
 
 @router.post("/config/agent-backends/status/preview")
 def preview_agent_backend_status():
-    return {
-        "backend": "litellm",
-        "available": True,
-        "experimental": False,
-        "version": None,
-        "errorCode": None,
-        "message": None,
-    }
+    return get_agent_backends_status()
 
 
 @router.get("/scheduler/status")
 def get_scheduler_status():
-    return {"status": "unknown", "enabled": False, "next_run": None}
+    import subprocess, sqlite3
+    # 检查 systemd scheduler 服务状态
+    try:
+        r = subprocess.run(
+            ["systemctl", "--user", "is-active", "Aistock_vnpy_Trading-scheduler.service"],
+            capture_output=True, text=True, timeout=5,
+        )
+        svc_status = r.stdout.strip()
+    except Exception:
+        svc_status = "unknown"
+
+    # 读取最近一次分析时间
+    try:
+        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "stock_analysis.db")
+        conn = sqlite3.connect(db_path)
+        cur = conn.execute("SELECT MAX(created_at) FROM analysis_history")
+        last_run = cur.fetchone()[0]
+        conn.close()
+    except Exception:
+        last_run = None
+
+    return {
+        "status": svc_status,
+        "enabled": svc_status == "active",
+        "last_run": last_run,
+        "next_run": None,
+    }
 
 
 @router.post("/scheduler/run-now")
 def run_scheduler_now():
-    return {"success": True, "message": "scheduler run triggered (stub)"}
+    import subprocess
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "start", "Aistock_vnpy_Trading-scheduler.service"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return {"success": True, "message": "scheduler service triggered"}
+    except Exception as e:
+        return {"success": False, "message": f"trigger failed: {e}"}

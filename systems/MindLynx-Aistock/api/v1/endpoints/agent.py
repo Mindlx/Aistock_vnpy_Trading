@@ -469,15 +469,11 @@ async def agent_chat_stream(request: ChatRequest):
 
 @router.get("/status")
 def agent_status():
-    from src.config import get_config
-    cfg = get_config()
-    agent_mode = getattr(cfg, "agent_mode", False)
-    agent_model = getattr(cfg, "agent_litellm_model", "") or ""
-    available = bool(agent_mode) and bool(agent_model)
     return {
-        "status": "ok",
-        "agent_available": available,
-        "mode": "agent" if available else "unconfigured",
-        "composer_mode": False,
-        "has_orchestrator_key": False,
+        "backend": "litellm",
+        "available": True,
+        "experimental": False,
+        "version": None,
+        "errorCode": None,
+        "message": None,
     }

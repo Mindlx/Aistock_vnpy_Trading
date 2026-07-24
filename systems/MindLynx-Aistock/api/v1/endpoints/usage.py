@@ -61,12 +61,19 @@ def get_usage_summary(
 
 
 @router.get("/dashboard")
-def get_usage_dashboard():
+def get_usage_dashboard(
+    period: str = Query("month", description="'today' | 'month' | 'all'"),
+    db_manager: DatabaseManager = Depends(get_database_manager),
+):
+    if period not in _VALID_PERIODS:
+        period = "month"
+    from_dt, to_dt = _date_range(period)
+    data = db_manager.get_llm_usage_summary(from_dt, to_dt)
     return {
-        "total_calls": 0,
-        "total_tokens": 0,
+        "period": period,
+        "total_calls": data["total_calls"],
+        "total_tokens": data["total_tokens"],
         "total_cost": 0,
         "daily_stats": [],
-        "model_stats": [],
-        "period": "month",
+        "model_stats": data.get("by_model", []),
     }

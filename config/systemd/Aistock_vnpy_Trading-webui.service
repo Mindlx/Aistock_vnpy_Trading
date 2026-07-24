@@ -12,7 +12,6 @@ Restart=on-failure
 RestartSec=10
 Environment=WEBUI_HOST=0.0.0.0
 Environment=WEBUI_PORT=8000
-Environment=PYTHONPATH=/home/bluekuma/workspace/MindLynx-Aistock
 StandardOutput=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/webui.log
 StandardError=append:/home/bluekuma/workspace/Aistock_vnpy_Trading/config/logs/webui.log
 
