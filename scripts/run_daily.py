@@ -421,97 +421,6 @@ def write_at_signal(ta_results: List[Dict[str, Any]], date: str):
     print(f"  📡 at_signal.json 已写入 (准实时文件交换区)")
 
 
-def _save_market_review(results: list[dict], date_str: str):
-    """生成大盘复盘（融合决策报告）写入 stock_analysis.db"""
-    try:
-        import sqlite3
-        from datetime import datetime
-        valid = [r for r in results if r.get("valid", False)]
-
-        lines = [f"# {date_str} 融合决策报告", ""]
-        lines.append(f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-        lines.append("")
-
-        # 信号总览
-        bull = sum(1 for r in valid if r.get("signal") in ("strong_bullish", "bullish", "cautious_bullish"))
-        neut = sum(1 for r in valid if r.get("signal") == "neutral")
-        bear = sum(1 for r in valid if r.get("signal") in ("cautious_bearish", "bearish", "strong_bearish"))
-        lines.append("## 📊 信号总览")
-        overview = []
-        if bull: overview.append(f"看好{bull}")
-        if neut: overview.append(f"中立{neut}")
-        if bear: overview.append(f"看空{bear}")
-        lines.append("｜".join(overview) if overview else "无有效信号")
-        lines.append("")
-
-        # 按信号分组
-        signal_groups = [
-            ("🚀 强烈看多", "strong_bullish"), ("📈 看多", "bullish"),
-            ("📈 谨慎看多", "cautious_bullish"), ("🗂 中性/持有", "neutral"),
-            ("📉 谨慎看空", "cautious_bearish"), ("📉 看空", "bearish"),
-            ("🚨 强烈看空", "strong_bearish"),
-        ]
-        for title, sig_key in signal_groups:
-            stocks = [r for r in valid if r.get("signal") == sig_key]
-            if not stocks:
-                continue
-            disagree = [r for r in stocks if r.get("has_disagreement")]
-            label = f"{title} ({len(stocks)})" + (" ⚡分歧" if disagree else "")
-            lines.append(f"### {label}")
-            for r in stocks:
-                name = r.get("stock_name", r.get("stock_code", ""))
-                price = r.get("price", 0)
-                pct = r.get("pct_chg", 0)
-                pos = r.get("position_advice", "")
-                pa = f" ({pos})" if pos else ""
-                price_str = f"¥{price:.2f}" if price else "-"
-                chg_str = f"{pct:+.2f}%" if pct else "-"
-                lines.append(f"- **{name}** {price_str} {chg_str}{pa}")
-            lines.append("")
-
-        # 子系统健康
-        ly_ok = sum(1 for r in valid if r.get("lynx_valid"))
-        ml_ok = sum(1 for r in valid if r.get("mindlynx_valid"))
-        at_ok = sum(1 for r in valid if r.get("tradingagent_valid"))
-        disagree_count = sum(1 for r in valid if r.get("has_disagreement"))
-        lines.append("## 📡 系统状态")
-        lines.append(f"| 子系统 | 可用 |")
-        lines.append(f"|--------|:---:|")
-        lines.append(f"| LY | {ly_ok}/{len(valid)} |")
-        lines.append(f"| ML | {ml_ok}/{len(valid)} |")
-        lines.append(f"| AT | {at_ok}/{len(valid)} |")
-        if disagree_count:
-            lines.append(f"\n⚠️ 存在分歧股票: {disagree_count} 只")
-        lines.append("")
-        lines.append("---")
-        lines.append("*以上数据仅供参考，不构成投资建议*")
-
-        content = "\n".join(lines)
-        db_path = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.db"
-        conn = sqlite3.connect(str(db_path))
-        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
-        query_id = f"fusion_market_{date_str}"
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id FROM analysis_history WHERE code='MARKET' AND DATE(created_at)=?",
-            (date_str,),
-        )
-        if not cursor.fetchone():
-            cursor.execute(
-                """INSERT INTO analysis_history
-                   (query_id, code, name, report_type, sentiment_score,
-                    operation_advice, analysis_summary, raw_result, created_at)
-                   VALUES (?, 'MARKET', '大盘复盘', 'market_review',
-                    50, '观望', ?, ?, ?)""",
-                (query_id, content, "{}", now),
-            )
-            conn.commit()
-            print(f"  📊 大盘复盘已写入 ({len(valid)} 只股票)")
-        conn.close()
-    except Exception as e:
-        print(f"  ⚠️ 大盘复盘写入失败: {e}")
-
-
 def main():
     args = parse_args()
 
@@ -637,7 +546,6 @@ def main():
     save_fusion_output(results, today, output_dir, config)
 
     # ── 桥接：大盘复盘写入 stock_analysis.db ──
-    _save_market_review(results, today)
 
     # ── 审核模式：保存到staging + 等待确认 ──
     if args.review_mode:
