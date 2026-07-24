@@ -45,6 +45,7 @@ class ChatRequest(BaseModel):
 
     message: str
     session_id: str | None = None
+    request_id: str | None = None
     skills: list[str] | None = Field(
         default=None,
         validation_alias=AliasChoices("skills", "strategies"),
@@ -433,6 +434,13 @@ async def agent_chat_stream(request: ChatRequest):
             )
 
     async def event_generator():
+        # Send accepted event first (frontend expects this before any thinking event)
+        yield "data: " + json.dumps({
+            "type": "accepted",
+            "backend": "litellm",
+            "request_id": request.request_id or "",
+            "session_id": session_id,
+        }, ensure_ascii=False) + "\n\n"
         # Start executor in a thread so we don't block the event loop
         fut = loop.run_in_executor(None, run_sync)
         try:
