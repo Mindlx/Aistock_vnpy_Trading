@@ -440,7 +440,7 @@ const ChatPage: React.FC = () => {
           res.default_skill_id ||
           res.skills[0]?.id ||
           '';
-        setSelectedSkillIds(defaultId ? [defaultId] : []);
+        setSelectedSkillIds(res.skills.map((s: { id: string }) => s.id));
       })
       .catch((error) => {
         console.error('Failed to load chat skills:', error);
