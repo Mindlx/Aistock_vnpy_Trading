@@ -675,6 +675,13 @@ const HomePage: React.FC = () => {
     setSidebarOpen(false);
   }, [clearMarketReviewState, selectHistoryItem]);
 
+  const handleWatchlistItemClick = useCallback((recordId: number) => {
+    clearMarketReviewState();
+    selectHistoryItem(recordId).then(() => {
+      openHistoryTrend();
+    }).catch(() => {});
+  }, [clearMarketReviewState, selectHistoryItem, openHistoryTrend]);
+
   const [isDeletingStock, setIsDeletingStock] = useState(false);
   const handleDeleteStock = useCallback(async (stockCode: string) => {
     if (isDeletingStock) return;
@@ -1232,7 +1239,7 @@ const HomePage: React.FC = () => {
           selectedStockCode={selectedReport?.meta.stockCode}
           selectedRecordId={selectedReport?.meta.id}
           onHistoryItemClick={handleHistoryItemClick}
-          onWatchlistItemClick={handleHistoryItemClick}
+          onWatchlistItemClick={handleWatchlistItemClick}
           onDeleteStock={handleDeleteStock}
           isDeleting={isDeletingStock}
           className="flex-1 overflow-hidden"

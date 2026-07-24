@@ -154,18 +154,26 @@ def get_history_stocks():
         import sqlite3, os
         db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "stock_analysis.db")
         conn = sqlite3.connect(db_path)
-        # 取每只股票的最新一条记录，按 created_at 倒序
+        # 取每只股票的最新一条记录，优先 full > fusion > 其他
         cur = conn.execute("""
-            SELECT a.id, a.code, a.name, a.report_type, a.sentiment_score,
-                   a.operation_advice, a.created_at, a.analysis_summary
-            FROM analysis_history a
-            INNER JOIN (
-                SELECT code, MAX(created_at) AS max_created
-                FROM analysis_history
-                WHERE code IS NOT NULL AND code!='' AND code!='MARKET'
-                GROUP BY code
-            ) b ON a.code = b.code AND a.created_at = b.max_created
-            ORDER BY a.created_at DESC
+            SELECT id, code, name, report_type, sentiment_score,
+                   operation_advice, created_at
+            FROM (
+                SELECT a.id, a.code, a.name, a.report_type,
+                       a.sentiment_score, a.operation_advice, a.created_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY a.code
+                           ORDER BY CASE a.report_type
+                                        WHEN 'full' THEN 0
+                                        WHEN 'fusion' THEN 1
+                                        ELSE 2
+                                    END, a.created_at DESC
+                       ) as rn
+                FROM analysis_history a
+                WHERE a.code IS NOT NULL AND a.code != '' AND a.code != 'MARKET'
+            )
+            WHERE rn = 1
+            ORDER BY created_at DESC
         """)
         items = []
         for r in cur.fetchall():
@@ -177,6 +185,7 @@ def get_history_stocks():
                 "sentiment_score": r[4],
                 "operation_advice": r[5],
                 "created_at": r[6],
+                "last_analysis_time": r[6],
             })
         conn.close()
         return {"total": len(items), "items": items}
