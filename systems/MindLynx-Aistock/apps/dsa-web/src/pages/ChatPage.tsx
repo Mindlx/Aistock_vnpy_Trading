@@ -436,10 +436,6 @@ const ChatPage: React.FC = () => {
     agentApi.getSkills()
       .then((res) => {
         setSkills(res.skills);
-        const defaultId =
-          res.default_skill_id ||
-          res.skills[0]?.id ||
-          '';
         setSelectedSkillIds(res.skills.map((s: { id: string }) => s.id));
       })
       .catch((error) => {
