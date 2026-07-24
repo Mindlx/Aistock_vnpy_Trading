@@ -278,6 +278,32 @@ class AgentExecutor:
         self.max_steps = max_steps
         self.timeout_seconds = timeout_seconds
 
+    @staticmethod
+    def _load_factor_profile(stock_code: str, context: dict[str, Any] | None = None) -> str:
+        if not stock_code or not (context or {}).get("enable_factors", True):
+            return ""
+        try:
+            from src.core.factor_engine import FactorEngine
+            from src.services.history_loader import load_history_df
+            df, _ = load_history_df(stock_code, days=120)
+            if df is None or df.empty or len(df) < 20:
+                return ""
+            bars = []
+            for _, r in df.sort_index().iterrows():
+                bars.append({
+                    "close": float(r.get("close", r.get("收盘", 0))),
+                    "volume": float(r.get("volume", r.get("成交量", 0))),
+                    "high": float(r.get("high", r.get("最高", 0))),
+                    "low": float(r.get("low", r.get("最低", 0))),
+                    "pct_chg": float(r.get("pct_chg", r.get("涨跌幅", 0))),
+                })
+            engine = FactorEngine()
+            result = engine.compute_for_stock(stock_code, bars)
+            return engine.build_factor_profile(result)
+        except Exception as exc:
+            logger.debug("[Executor] 因子计算跳过: %s", exc)
+            return ""
+
     def run(self, task: str, context: dict[str, Any] | None = None) -> AgentResult:
         """Execute the agent loop for a given task.
 
@@ -351,6 +377,7 @@ class AgentExecutor:
             default_skill_policy_section = f"\n{self.default_skill_policy}\n"
         report_language = normalize_report_language((context or {}).get("report_language", "zh"))
         stock_code = (context or {}).get("stock_code", "")
+        factor_profile = self._load_factor_profile(stock_code, context)
         market_role = get_market_role(stock_code, report_language)
         market_guidelines = get_market_guidelines(stock_code, report_language)
         from src.core.prompt_shared import SCORING_CRITERIA, ACTION_GUARDRAILS
@@ -385,6 +412,8 @@ class AgentExecutor:
                 context_parts.append(f"股票代码: {context['stock_code']}")
             if context.get("stock_name"):
                 context_parts.append(f"股票名称: {context['stock_name']}")
+            if factor_profile:
+                context_parts.append(f"\n{factor_profile}")
             if context.get("previous_price"):
                 context_parts.append(f"上次分析价格: {context['previous_price']}")
             if context.get("previous_change_pct"):
@@ -495,6 +524,8 @@ class AgentExecutor:
                 )
             if context.get("news_context"):
                 parts.append(f"\n[系统已获取的新闻与舆情情报]\n{context['news_context']}")
+            if context.get("factor_profile"):
+                parts.append(f"\n[系统量化因子评分]\n{context['factor_profile']}")
             # if context.get("ly_signal"):  # @calibration LY量化信号注入 (2026-07-03 暂注释)
             #     parts.append(f"\n[系统已获取的量化预判信号（LY双模型）]\n{context['ly_signal']}")
 
