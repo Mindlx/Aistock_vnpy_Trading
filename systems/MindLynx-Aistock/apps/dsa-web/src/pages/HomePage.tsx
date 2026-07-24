@@ -318,6 +318,13 @@ const HomePage: React.FC = () => {
     document.title = t('home.pageTitle');
   }, [t]);
 
+  // 加载历史记录和自选股数据（组件挂载时）
+  useEffect(() => {
+    void loadInitialHistory();
+    void loadMarketReviewHistory();
+    void loadStockBar();
+  }, [loadInitialHistory, loadMarketReviewHistory, loadStockBar]);
+
   useEffect(() => {
     let active = true;
     systemConfigApi.getSetupStatus()
