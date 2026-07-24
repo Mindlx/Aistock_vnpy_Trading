@@ -116,6 +116,8 @@ EXCLUDES=(
     --exclude='.gitignore'
     --exclude='README.md'
     --exclude='LICENSE'
+    --exclude='.venv/'
+    --exclude='reports/'
 )
 
 # lynx_vnpy
