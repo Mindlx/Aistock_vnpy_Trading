@@ -40,10 +40,23 @@ def main():
     parser.add_argument("--type", choices=list(DATA_TYPE_GROUPS.keys()), default="all")
     parser.add_argument("--codes", type=str, default=None, help="股票代码,逗号分隔")
     parser.add_argument("--force", action="store_true", help="强制刷新(跳过缓存检查)")
+    parser.add_argument("--full-market", action="store_true", help="全A股历史数据回填(首次/断点续传)")
+    parser.add_argument("--days", type=int, default=365, help="回填天数(默认365)")
+    parser.add_argument("--workers", type=int, default=8, help="并发线程数(默认8)")
     args = parser.parse_args()
 
     from services.data_warehouse.warehouse import WarehouseReader
     wr = WarehouseReader()
+
+    if args.full_market:
+        logger.info("全市场回填开始 — %d 天, %d 线程", args.days, args.workers)
+        t0 = datetime.now()
+        result = wr.prefetch_full_market(days=args.days, max_workers=args.workers)
+        elapsed = (datetime.now() - t0).total_seconds()
+        logger.info("全市场回填完成 — 成功 %d / 失败 %d / 跳过 %d / 耗时 %.0fs",
+                     result.get("success", 0), result.get("failed", 0),
+                     result.get("skipped", 0), elapsed)
+        return
 
     dtypes = DATA_TYPE_GROUPS[args.type]
     codes = args.codes.split(",") if args.codes else None

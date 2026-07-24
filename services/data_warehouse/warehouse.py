@@ -421,6 +421,138 @@ class WarehouseReader:
 
         return result
 
+    @staticmethod
+    def get_full_market_stock_list() -> list[dict]:
+        """加载全A股股票列表（本地缓存优先, Tushare 备用）"""
+        import json, os
+        from pathlib import Path
+        cache_path = Path(__file__).resolve().parent.parent.parent / "data" / "stock_list.json"
+        if cache_path.exists():
+            with open(cache_path) as f:
+                return json.load(f)
+        try:
+            import tushare as ts
+            token = os.popen('grep TUSHARE_TOKEN ~/.secrets 2>/dev/null').read().strip().split('=')[-1].strip()
+            if token:
+                ts.set_token(token)
+                pro = ts.pro_api()
+                df = pro.stock_basic(exchange='', list_status='L', fields='symbol,name')
+                stocks = [{"code": r["symbol"], "name": r["name"]} for _, r in df.iterrows()]
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache_path, "w") as f:
+                    json.dump(stocks, f, ensure_ascii=False)
+                logger.info("stock_list.json 已生成 (%d 只)", len(stocks))
+                return stocks
+        except Exception as exc:
+            logger.warning("获取全市场股票列表失败: %s", exc)
+        return []
+
+    def prefetch_full_market(self, days: int = 365, max_workers: int = 8,
+                              batch_size: int = 100, max_calls_per_min: int = 60) -> dict:
+        """全A股历史数据回填（首次执行/断点续传）
+
+        流程:
+          1. 加载 stock_list.json
+          2. 跳过已有缓存且未过期的股票
+          3. 并发获取, 限速保护
+          4. 每 batch_size 只保存进度
+        """
+        import json, os, time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from pathlib import Path
+        from services.data_warehouse.fetchers import DailyFetcher
+
+        all_stocks = self.get_full_market_stock_list()
+        if not all_stocks:
+            logger.error("股票列表为空, 无法执行全市场回填")
+            return {}
+        logger.info("全市场回填: %d 只股票, 每只 %d 天, %d 线程", len(all_stocks), days, max_workers)
+        t_start = time.time()
+
+        # 断点续传: 跳过已有缓存
+        pending = []
+        for s in all_stocks:
+            code = s["code"]
+            if code.startswith(("8", "4", "2")):
+                continue
+            meta = self._lake.get_cache_meta(code, "daily_ohlcv")
+            if meta and self.is_fresh(code, "daily_ohlcv"):
+                continue
+            pending.append(code)
+        logger.info("需更新: %d / %d 只", len(pending), len(all_stocks))
+
+        fetcher = DailyFetcher()
+        progress_path = Path(__file__).resolve().parent.parent.parent / "data" / "full_market_progress.json"
+        done = set()
+        if progress_path.exists():
+            try:
+                done = set(json.load(open(progress_path)))
+                logger.info("断点续传: 已有 %d 只完成", len(done))
+            except Exception:
+                pass
+
+        res = {"total": len(all_stocks), "success": len(done), "failed": 0, "skipped": (len(all_stocks) - len(pending))}
+        rlimiter = _RateLimiter(max_calls_per_min, 60)
+        lock = threading.Lock()
+        batch_count = 0
+
+        def _fetch_one(code: str) -> bool:
+            if code in done:
+                return True
+            rlimiter.wait()
+            try:
+                rows = fetcher.fetch(code, days=days)
+                if rows:
+                    self._lake.upsert_daily_ohlcv(code, rows)
+                with lock:
+                    done.add(code)
+                return True
+            except Exception as exc:
+                logger.debug("[全市场回填] %s 失败: %s", code, exc)
+                return False
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_fetch_one, code): code for code in pending if code not in done}
+            for fut in as_completed(futures):
+                code = futures[fut]
+                ok = fut.result()
+                batch_count += 1
+                if ok:
+                    res["success"] += 1
+                else:
+                    res["failed"] += 1
+                if batch_count % batch_size == 0:
+                    with open(progress_path, "w") as f:
+                        json.dump(sorted(done)[-5000:], f)
+                    elapsed = time.time() - t_start
+                    rate = batch_count / elapsed * 60 if elapsed > 0 else 0
+                    logger.info("进度: %d/%d | 成功 %d 失败 %d | %.1f 只/分",
+                                batch_count, len(pending), res["success"],
+                                res["failed"], rate)
+
+        with open(progress_path, "w") as f:
+            json.dump(sorted(list(done))[-5000:], f)
+        elapsed = time.time() - t_start
+        logger.info("全市场回填完成: 成功 %d 失败 %d 跳过 %d 耗时 %.0fs",
+                     res["success"], res["failed"], res["skipped"], elapsed)
+        return res
+
     def stats(self) -> dict:
         """数据湖统计"""
         return self._lake.stats()
+    """简易令牌桶限速器（内部使用）"""
+
+    def __init__(self, max_calls: int, period: float):
+        self.max_calls = max_calls
+        self.period = period
+        self.timestamps: list[float] = []
+
+    def wait(self):
+        import time
+        now = time.time()
+        self.timestamps = [t for t in self.timestamps if now - t < self.period]
+        if len(self.timestamps) >= self.max_calls:
+            sleep = self.timestamps[0] + self.period - now
+            if sleep > 0:
+                time.sleep(sleep)
+        self.timestamps.append(time.time())
