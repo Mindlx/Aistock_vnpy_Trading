@@ -540,6 +540,9 @@ class WarehouseReader:
     def stats(self) -> dict:
         """数据湖统计"""
         return self._lake.stats()
+
+
+class _RateLimiter:
     """简易令牌桶限速器（内部使用）"""
 
     def __init__(self, max_calls: int, period: float):
