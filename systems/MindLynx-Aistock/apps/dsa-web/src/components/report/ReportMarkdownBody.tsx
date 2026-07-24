@@ -1,6 +1,7 @@
 import type React from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 
 interface ReportMarkdownBodyProps {
   content: string;
@@ -33,7 +34,7 @@ export const ReportMarkdownBody: React.FC<ReportMarkdownBodyProps> = ({
       ${className}
     `}
   >
-    <Markdown remarkPlugins={[remarkGfm]}>
+    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
       {content}
     </Markdown>
   </div>
