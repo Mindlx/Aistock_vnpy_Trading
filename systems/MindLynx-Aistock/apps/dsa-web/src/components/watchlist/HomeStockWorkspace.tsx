@@ -62,6 +62,7 @@ interface HomeStockWorkspaceProps {
   selectedStockCode?: string;
   selectedRecordId?: number;
   onHistoryItemClick: (recordId: number) => void;
+  onWatchlistItemClick?: (recordId: number) => void;
   onDeleteStock?: (stockCode: string) => Promise<void> | void;
   isDeleting?: boolean;
   className?: string;
@@ -111,15 +112,26 @@ const ScoreBadge: React.FC<{ item?: StockBarItem }> = ({ item }) => {
 const WatchlistRowItem: React.FC<{
   row: HomeWatchlistRow;
   onRemove: (code: string) => Promise<void>;
+  onSelect?: (recordId: number) => void;
   disabled: boolean;
-}> = ({ row, onRemove, disabled }) => {
+}> = ({ row, onRemove, onSelect, disabled }) => {
   const { t } = useUiLanguage();
   const taskLabel = getTaskStatusLabel(row.activeTask, t);
   const item = row.latestItem;
   const stockName = item?.stockName || row.code;
 
+  const handleClick = () => {
+    if (onSelect && item?.id) {
+      onSelect(item.id);
+    }
+  };
+
   return (
-    <div className="home-subpanel grid min-w-0 gap-2 px-3 py-2.5">
+    <button
+      type="button"
+      className="home-subpanel grid min-w-0 gap-2 px-3 py-2.5 w-full text-left"
+      onClick={handleClick}
+    >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
@@ -171,7 +183,7 @@ const WatchlistRowItem: React.FC<{
           <span className="truncate">{t('watchlist.taskRunning', { status: taskLabel })}</span>
         </div>
       ) : null}
-    </div>
+    </button>
   );
 };
 
@@ -219,6 +231,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
   selectedStockCode,
   selectedRecordId,
   onHistoryItemClick,
+  onWatchlistItemClick,
   onDeleteStock,
   isDeleting = false,
   className = '',
@@ -417,6 +430,7 @@ export const HomeStockWorkspace: React.FC<HomeStockWorkspaceProps> = ({
                   key={row.code}
                   row={row}
                   onRemove={onRemoveFromWatchlist}
+                  onSelect={onWatchlistItemClick}
                   disabled={watchlistActioning}
                 />
               ))}

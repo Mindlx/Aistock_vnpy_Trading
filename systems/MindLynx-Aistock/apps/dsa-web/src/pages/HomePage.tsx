@@ -190,7 +190,7 @@ const HomePage: React.FC = () => {
   const [strategyMenuOpen, setStrategyMenuOpen] = useState(false);
   const [runFlowDrawer, setRunFlowDrawer] = useState<RunFlowDrawerState>({ open: false });
   const [duplicateBannerVisible, setDuplicateBannerVisible] = useState(false);
-  const [sidebarWorkspaceTab, setSidebarWorkspaceTab] = useState<HomeWorkspaceTab>('history');
+  const [sidebarWorkspaceTab, setSidebarWorkspaceTab] = useState<HomeWorkspaceTab>('today');
   const [isBatchAnalyzingWatchlist, setIsBatchAnalyzingWatchlist] = useState(false);
   const [batchAnalyzeStatus, setBatchAnalyzeStatus] = useState<BatchAnalyzeStatus>(null);
   const [watchlistHistoryItemsByCode, setWatchlistHistoryItemsByCode] = useState<Map<string, StockBarItem>>(new Map());
@@ -1232,6 +1232,7 @@ const HomePage: React.FC = () => {
           selectedStockCode={selectedReport?.meta.stockCode}
           selectedRecordId={selectedReport?.meta.id}
           onHistoryItemClick={handleHistoryItemClick}
+          onWatchlistItemClick={handleHistoryItemClick}
           onDeleteStock={handleDeleteStock}
           isDeleting={isDeletingStock}
           className="flex-1 overflow-hidden"
