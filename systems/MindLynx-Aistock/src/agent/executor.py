@@ -52,7 +52,6 @@ class AgentResult:
 # System prompt builder
 # ============================================================
 
-LEGACY_DEFAULT_AGENT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT
 AGENT_SYSTEM_PROMPT = """你是一位{market_role}投资分析 Agent，拥有数据工具和可切换交易技能，负责生成专业的【决策仪表盘】分析报告。
 
 {market_guidelines}
@@ -166,7 +165,8 @@ AGENT_SYSTEM_PROMPT = """你是一位{market_role}投资分析 Agent，拥有数
 {language_section}
 """
 
-LEGACY_DEFAULT_CHAT_SYSTEM_PROMPT = CHAT_SYSTEM_PROMPT
+LEGACY_DEFAULT_AGENT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT
+
 CHAT_SYSTEM_PROMPT = """你是一位{market_role}投资分析 Agent，拥有数据工具和可切换交易技能，负责解答用户的股票投资问题。
 
 {market_guidelines}
@@ -203,6 +203,10 @@ CHAT_SYSTEM_PROMPT = """你是一位{market_role}投资分析 Agent，拥有数�
 {skills_section}
 {language_section}
 """
+
+LEGACY_DEFAULT_CHAT_SYSTEM_PROMPT = CHAT_SYSTEM_PROMPT
+
+LEGACY_DEFAULT_AGENT_SYSTEM_PROMPT = AGENT_SYSTEM_PROMPT
 
 
 def _build_language_section(report_language: str, *, chat_mode: bool = False) -> str:
