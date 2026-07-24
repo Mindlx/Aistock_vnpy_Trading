@@ -154,12 +154,34 @@ def get_history_stocks():
         import sqlite3, os
         db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "stock_analysis.db")
         conn = sqlite3.connect(db_path)
-        cur = conn.execute("SELECT DISTINCT code, name FROM analysis_history WHERE code IS NOT NULL AND code!='' AND code!='MARKET' ORDER BY code")
-        stocks = [{"code": r[0], "name": r[1]} for r in cur.fetchall()]
+        # 取每只股票的最新一条记录，按 created_at 倒序
+        cur = conn.execute("""
+            SELECT a.id, a.code, a.name, a.report_type, a.sentiment_score,
+                   a.operation_advice, a.created_at, a.analysis_summary
+            FROM analysis_history a
+            INNER JOIN (
+                SELECT code, MAX(created_at) AS max_created
+                FROM analysis_history
+                WHERE code IS NOT NULL AND code!='' AND code!='MARKET'
+                GROUP BY code
+            ) b ON a.code = b.code AND a.created_at = b.max_created
+            ORDER BY a.created_at DESC
+        """)
+        items = []
+        for r in cur.fetchall():
+            items.append({
+                "id": r[0],
+                "stock_code": r[1],
+                "stock_name": r[2],
+                "report_type": r[3],
+                "sentiment_score": r[4],
+                "operation_advice": r[5],
+                "created_at": r[6],
+            })
         conn.close()
-        return {"stocks": stocks}
-    except Exception:
-        return {"stocks": []}
+        return {"total": len(items), "items": items}
+    except Exception as e:
+        return {"total": 0, "items": [], "error": str(e)}
 
 
 @router.get(

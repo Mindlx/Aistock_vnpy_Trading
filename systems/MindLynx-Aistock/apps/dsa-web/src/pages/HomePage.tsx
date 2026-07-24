@@ -318,12 +318,7 @@ const HomePage: React.FC = () => {
     document.title = t('home.pageTitle');
   }, [t]);
 
-  // 加载历史记录和自选股数据（组件挂载时）
-  useEffect(() => {
-    void refreshHistory(true);
-    void refreshMarketReviewHistory(true);
-    void loadStockBar();
-  }, [refreshHistory, refreshMarketReviewHistory, loadStockBar]);
+  // 数据加载由 useDashboardLifecycle 处理（初始化/30s轮询/可见性切换）
 
   useEffect(() => {
     let active = true;
