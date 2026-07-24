@@ -21,7 +21,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 import re
 import sqlite3
 import sys
@@ -58,42 +61,13 @@ DIRECTION_THRESHOLD = 0.05
 # ── 数据库 ────────────────────────────────────────────────
 
 def _migrate_schema():
-    """迁移: 添加 eval_batch 字段 + 重建 UNIQUE(date,stock_code,eval_batch)"""
+    """迁移: 添加 eval_batch 字段（如不存在）"""
     conn = _get_db()
     cols = [r[1] for r in conn.execute("PRAGMA table_info(bt_predictions)").fetchall()]
     if "eval_batch" not in cols:
-        logger.info("[Schema] 迁移: 添加 eval_batch + 重建UNIQUE约束")
-        conn.executescript("""
-            PRAGMA foreign_keys=OFF;
-            BEGIN TRANSACTION;
-            CREATE TABLE bt_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT NOT NULL, stock_code TEXT NOT NULL,
-                stock_name TEXT NOT NULL DEFAULT '',
-                eval_batch TEXT NOT NULL DEFAULT '18:00',
-                fusion_score REAL, ly_score REAL, ml_score REAL, at_score REAL,
-                ly_valid INTEGER DEFAULT 1, ml_valid INTEGER DEFAULT 1,
-                at_valid INTEGER DEFAULT 1, ta_is_stale INTEGER DEFAULT 0,
-                ml_sentiment INTEGER, ml_trend TEXT, ml_operation TEXT,
-                ml_trend_score INTEGER, ml_risk_alert_count INTEGER DEFAULT 0,
-                signal TEXT, has_disagreement INTEGER DEFAULT 0,
-                is_degraded INTEGER DEFAULT 0,
-                next_date TEXT, next_pct_chg REAL, next_close REAL,
-                days_offset INTEGER,
-                fusion_dir INTEGER, ly_dir INTEGER, ml_dir INTEGER, at_dir INTEGER,
-                fusion_correct INTEGER, ly_correct INTEGER,
-                ml_correct INTEGER, at_correct INTEGER,
-                created_at TEXT DEFAULT (datetime('now','localtime')),
-                updated_at TEXT DEFAULT (datetime('now','localtime')),
-                UNIQUE(date, stock_code, eval_batch)
-            );
-            INSERT INTO bt_new SELECT *, '18:00' FROM bt_predictions;
-            DROP TABLE bt_predictions;
-            ALTER TABLE bt_new RENAME TO bt_predictions;
-            CREATE INDEX IF NOT EXISTS idx_bt_date ON bt_predictions(date);
-            CREATE INDEX IF NOT EXISTS idx_bt_code ON bt_predictions(stock_code);
-            COMMIT;
-        """)
+        logger.info("[Schema] 添加 eval_batch 列")
+        conn.execute("ALTER TABLE bt_predictions ADD COLUMN eval_batch TEXT NOT NULL DEFAULT '18:00'")
+        conn.commit()
         logger.info("[Schema] 迁移完成")
     conn.close()
 
