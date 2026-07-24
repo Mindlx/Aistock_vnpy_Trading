@@ -17,6 +17,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from src.agent.llm_adapter import LLMToolAdapter
@@ -279,30 +280,47 @@ class AgentExecutor:
         self.timeout_seconds = timeout_seconds
 
     @staticmethod
-    def _load_factor_profile(stock_code: str, context: dict[str, Any] | None = None) -> str:
+    def _load_stock_context(stock_code: str, context: dict[str, Any] | None = None) -> str:
         if not stock_code or not (context or {}).get("enable_factors", True):
             return ""
+        parts = []
         try:
             from src.core.factor_engine import FactorEngine
             from src.services.history_loader import load_history_df
             df, _ = load_history_df(stock_code, days=120)
-            if df is None or df.empty or len(df) < 20:
-                return ""
-            bars = []
-            for _, r in df.sort_index().iterrows():
-                bars.append({
-                    "close": float(r.get("close", r.get("收盘", 0))),
-                    "volume": float(r.get("volume", r.get("成交量", 0))),
-                    "high": float(r.get("high", r.get("最高", 0))),
-                    "low": float(r.get("low", r.get("最低", 0))),
-                    "pct_chg": float(r.get("pct_chg", r.get("涨跌幅", 0))),
-                })
-            engine = FactorEngine()
-            result = engine.compute_for_stock(stock_code, bars)
-            return engine.build_factor_profile(result)
+            if df is not None and not df.empty and len(df) >= 20:
+                bars = [{"close": float(r.get("close", r.get("收盘", 0))), "volume": float(r.get("volume", r.get("成交量", 0))), "high": float(r.get("high", r.get("最高", 0))), "low": float(r.get("low", r.get("最低", 0))), "pct_chg": float(r.get("pct_chg", r.get("涨跌幅", 0)))} for _, r in df.sort_index().iterrows()]
+                engine = FactorEngine()
+                result = engine.compute_for_stock(stock_code, bars)
+                parts.append(engine.build_factor_profile(result))
         except Exception as exc:
             logger.debug("[Executor] 因子计算跳过: %s", exc)
-            return ""
+        try:
+            from data_provider.base import create_fetcher_manager
+            dm = create_fetcher_manager()
+            fund = dm.get_fundamental_context(stock_code)
+            if fund:
+                items = []
+                for k in ("pe_ttm", "pb_mrq", "market_capital", "dividend_yield"):
+                    v = fund.get(k, fund.get(f"fundamental_{k}", None))
+                    if v is not None:
+                        items.append(f"{k}={v}")
+                if items:
+                    parts.append("### 基本面\n" + " | ".join(items))
+        except Exception as exc:
+            logger.debug("[Executor] 基本面跳过: %s", exc)
+        try:
+            import sqlite3
+            db = sqlite3.connect(str(Path(__file__).resolve().parent.parent.parent / "data" / "stock_analysis.db"))
+            db.row_factory = sqlite3.Row
+            rows = db.execute("SELECT analysis_date, trend_prediction, operation_advice, strategy_advice FROM analysis_history WHERE code=? ORDER BY analysis_date DESC LIMIT 3", (stock_code,)).fetchall()
+            if rows:
+                hist = "\n".join(f"  [{r['analysis_date']}] 趋势:{r['trend_prediction']} 操作:{r['operation_advice']} 策略:{r['strategy_advice']}" for r in rows)
+                parts.append(f"### 历史分析记录\n{hist}")
+            db.close()
+        except Exception as exc:
+            logger.debug("[Executor] 历史分析跳过: %s", exc)
+        return "\n\n".join(parts)
 
     def run(self, task: str, context: dict[str, Any] | None = None) -> AgentResult:
         """Execute the agent loop for a given task.
@@ -377,7 +395,7 @@ class AgentExecutor:
             default_skill_policy_section = f"\n{self.default_skill_policy}\n"
         report_language = normalize_report_language((context or {}).get("report_language", "zh"))
         stock_code = (context or {}).get("stock_code", "")
-        factor_profile = self._load_factor_profile(stock_code, context)
+        factor_profile = self._load_stock_context(stock_code, context)
         market_role = get_market_role(stock_code, report_language)
         market_guidelines = get_market_guidelines(stock_code, report_language)
         from src.core.prompt_shared import SCORING_CRITERIA, ACTION_GUARDRAILS

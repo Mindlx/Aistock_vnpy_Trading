@@ -70,7 +70,27 @@ def _persist_news_response(
 
 
 def _handle_search_stock_news(stock_code: str, stock_name: str) -> dict:
-    """Search latest news for a stock."""
+    """Search latest news for a stock (cache-first: check news_intel, then API)."""
+    code = _canonical_search_code(stock_code)
+    try:
+        cached = _get_db().search_news_intel(code, limit=5)
+        if cached:
+            logger.info("[Agent] news_intel 命中 %s (%d 条)", code, len(cached))
+            return {
+                "query": f"{stock_code} {stock_name}",
+                "provider": "cache",
+                "success": True,
+                "results_count": len(cached),
+                "results": [
+                    {"title": r.get("title", ""), "snippet": r.get("snippet", ""),
+                     "url": r.get("url", ""), "source": r.get("source", ""),
+                     "published_date": r.get("fetched_at", "")}
+                    for r in cached
+                ],
+            }
+    except Exception:
+        pass
+
     service = _get_search_service()
 
     if not service.is_available:
