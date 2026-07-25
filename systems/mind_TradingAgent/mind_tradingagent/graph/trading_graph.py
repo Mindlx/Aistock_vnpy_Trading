@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import yfinance as yf
+from services.data_warehouse.warehouse import WarehouseReader
 from langgraph.prebuilt import ToolNode
 
 from mind_tradingagent.llm_clients import create_llm_client
@@ -266,30 +266,35 @@ class TradingAgentsGraph:
         actual_holding_days)`` or ``(None, None, None)`` if price data is
         unavailable (too recent, delisted, or network error).
         """
-        from mind_tradingagent.dataflows.symbol_utils import normalize_symbol
-
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
             end_str = end.strftime("%Y-%m-%d")
 
-            # Normalize so the realized-return lookup hits the same instrument
-            # the analysis priced (e.g. XAUUSD -> GC=F) (#984). The benchmark is
-            # already a canonical Yahoo symbol from ``_resolve_benchmark``.
-            stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
-            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
+            wr = WarehouseReader()
 
-            if len(stock) < 2 or len(bench) < 2:
+            # Fetch price data via the data warehouse (akshare/Tushare for A-shares).
+            stock = wr.get_daily_df(ticker, start=trade_date, end=end_str)
+            bench_df = wr.get_daily_df(benchmark, start=trade_date, end=end_str)
+
+            if stock.empty or bench_df.empty:
                 return None, None, None
 
-            actual_days = min(holding_days, len(stock) - 1, len(bench) - 1)
+            # Warehouse returns lowercase column names; the arithmetic below
+            # uses the original "Close" convention.
+            if "close" in stock.columns and "Close" not in stock.columns:
+                stock = stock.rename(columns={"close": "Close"})
+            if "close" in bench_df.columns and "Close" not in bench_df.columns:
+                bench_df = bench_df.rename(columns={"close": "Close"})
+
+            actual_days = min(holding_days, len(stock) - 1, len(bench_df) - 1)
             raw = float(
                 (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0])
                 / stock["Close"].iloc[0]
             )
             bench_ret = float(
-                (bench["Close"].iloc[actual_days] - bench["Close"].iloc[0])
-                / bench["Close"].iloc[0]
+                (bench_df["Close"].iloc[actual_days] - bench_df["Close"].iloc[0])
+                / bench_df["Close"].iloc[0]
             )
             alpha = raw - bench_ret
             return raw, alpha, actual_days
