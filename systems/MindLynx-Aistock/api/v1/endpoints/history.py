@@ -60,6 +60,7 @@ router = APIRouter()
 )
 def get_history_list(
     stock_code: str | None = Query(None, description="股票代码筛选"),
+    report_type: str | None = Query(None, description="报表类型筛选"),
     start_date: str | None = Query(None, description="开始日期 (YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="结束日期 (YYYY-MM-DD)"),
     page: int = Query(1, ge=1, description="页码（从 1 开始）"),
@@ -73,6 +74,7 @@ def get_history_list(
 
     Args:
         stock_code: 股票代码筛选
+        report_type: 报表类型筛选
         start_date: 开始日期
         end_date: 结束日期
         page: 页码
@@ -87,7 +89,7 @@ def get_history_list(
 
         # 使用 def 而非 async def，FastAPI 自动在线程池中执行
         result = service.get_history_list(
-            stock_code=stock_code, start_date=start_date, end_date=end_date, page=page, limit=limit
+            stock_code=stock_code, report_type=report_type, start_date=start_date, end_date=end_date, page=page, limit=limit
         )
 
         # 转换为响应模型

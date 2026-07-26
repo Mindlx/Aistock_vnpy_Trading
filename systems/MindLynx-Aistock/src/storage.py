@@ -1468,6 +1468,7 @@ class DatabaseManager:
     def get_analysis_history_paginated(
         self,
         code: str | None = None,
+        report_type: str | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
         offset: int = 0,
@@ -1478,6 +1479,7 @@ class DatabaseManager:
 
         Args:
             code: 股票代码筛选
+            report_type: 报表类型筛选
             start_date: 开始日期（含）
             end_date: 结束日期（含）
             offset: 偏移量（跳过前 N 条）
@@ -1493,6 +1495,8 @@ class DatabaseManager:
 
             if code:
                 conditions.append(AnalysisHistory.code == code)
+            if report_type:
+                conditions.append(AnalysisHistory.report_type == report_type)
             if start_date:
                 # created_at >= start_date 00:00:00
                 conditions.append(AnalysisHistory.created_at >= datetime.combine(start_date, datetime.min.time()))
