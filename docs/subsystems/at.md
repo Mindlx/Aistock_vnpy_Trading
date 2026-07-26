@@ -217,5 +217,5 @@ LLM 多智能体辩论
 | `data/realtime/at_signal.json` | AT 准实时信号文件 |
 | `data/tradingagent/ta_logs/` | AT 全量日志 (每股票 per date) |
 | `config/systems.yaml` | 三系统权重配置 |
-| `docs/subsystems/at-debate-example-2026-06-23.md` | 601801 皖新传媒辩论完整记录（4角色全文） |
 | `docs/subsystems/at-evolution-analysis.md` | 基线 vs 当前演化分析：bug溯源/功能增益/质量评估 |
+| `~~docs/subsystems/at-debate-example-2026-06-23.md~~` | ~~601801 皖新传媒辩论完整记录（4角色全文） — 已归档清理~~ |
