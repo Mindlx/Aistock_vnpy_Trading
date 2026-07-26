@@ -20,6 +20,23 @@ def get_news(
     """
     return route_to_vendor("get_news", ticker, start_date, end_date)
 
+def get_capital_flows(
+    ticker: Annotated[str, "Ticker symbol of the company"],
+    days: Annotated[int, "Number of trading days to look back (default 30)"] = 30,
+) -> str:
+    """
+    Retrieve capital flow data for a given ticker symbol (A-share only).
+    Returns daily main-force net inflows/outflows, super-large/large/medium/small
+    order net flows, and a multi-day trend summary.
+    Uses the configured news_data vendor.
+    Args:
+        ticker (str): Ticker symbol
+        days (int): Number of days to look back (default 30)
+    Returns:
+        str: A formatted string containing capital flow data
+    """
+    return route_to_vendor("get_capital_flows", ticker, days)
+
 @tool
 def get_global_news(
     curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],

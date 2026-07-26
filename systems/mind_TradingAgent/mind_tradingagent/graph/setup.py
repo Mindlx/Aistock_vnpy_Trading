@@ -9,12 +9,14 @@ from mind_tradingagent.agents import (
     create_aggressive_debator,
     create_bear_researcher,
     create_bull_researcher,
+    create_capital_flow_tracker,
     create_conservative_debator,
     create_fundamentals_analyst,
     create_market_analyst,
     create_msg_delete,
     create_neutral_debator,
     create_news_analyst,
+    create_policy_analyst,
     create_portfolio_manager,
     create_research_manager,
     create_sentiment_analyst,
@@ -59,7 +61,7 @@ class GraphSetup:
         self.conditional_logic = conditional_logic
 
     def setup_graph(
-        self, selected_analysts=("market", "social", "news", "fundamentals")
+        self, selected_analysts=("market", "social", "news", "fundamentals", "policy", "capital_flow")
     ):
         """Set up and compile the agent workflow graph.
 
@@ -69,6 +71,8 @@ class GraphSetup:
                 - "social": Social media analyst
                 - "news": News analyst
                 - "fundamentals": Fundamentals analyst
+                - "policy": Policy analyst
+                - "capital_flow": Capital flow tracker
         """
         plan = build_analyst_execution_plan(selected_analysts)
 
@@ -77,6 +81,8 @@ class GraphSetup:
             "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
             "news": lambda: create_news_analyst(self.quick_thinking_llm),
             "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
+            "policy": lambda: create_policy_analyst(self.quick_thinking_llm),
+            "capital_flow": lambda: create_capital_flow_tracker(self.quick_thinking_llm),
         }
 
         # Create researcher and manager nodes

@@ -89,6 +89,14 @@ _DEFAULT = ModelCapabilities(
     preferred_structured_method="function_calling",
 )
 
+# SGLang / 本地模型: 支持 json_mode 但不支持 function_calling 的 tool_choice
+_SGLANG_LOCAL = ModelCapabilities(
+    supports_tool_choice=False,
+    supports_json_mode=True,
+    supports_json_schema=False,
+    preferred_structured_method="json_mode",
+)
+
 
 # Exact-ID matches take precedence over pattern matches.
 _BY_ID: dict[str, ModelCapabilities] = {
@@ -105,6 +113,9 @@ _BY_ID: dict[str, ModelCapabilities] = {
     "MiniMax-M2.1": _MINIMAX_THINKING,
     "MiniMax-M2.1-highspeed": _MINIMAX_THINKING,
     "MiniMax-M2": _MINIMAX_THINKING,
+    # 本地 SGLang / Qwen 模型
+    "selode-35b": _SGLANG_LOCAL,
+    "Qwen-3.6-35B": _SGLANG_LOCAL,
 }
 
 # Forward-compat patterns. New ``deepseek-v5-*`` / ``deepseek-reasoner-*``
@@ -113,6 +124,9 @@ _BY_PATTERN: list[tuple[re.Pattern[str], ModelCapabilities]] = [
     (re.compile(r"^deepseek-v\d"), _DEEPSEEK_THINKING),
     (re.compile(r"^deepseek-reasoner"), _DEEPSEEK_THINKING),
     (re.compile(r"^MiniMax-M\d"), _MINIMAX_THINKING),
+    # 本地 SGLang / Qwen 模型 (路径格式: /models/.../Qwen-3.6-35B-...)
+    (re.compile(r"Qwen-3\.6-35B", re.IGNORECASE), _SGLANG_LOCAL),
+    (re.compile(r"Qwen-3\.6-27B", re.IGNORECASE), _SGLANG_LOCAL),
 ]
 
 

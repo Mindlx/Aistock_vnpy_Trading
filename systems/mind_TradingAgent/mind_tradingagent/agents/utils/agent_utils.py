@@ -26,6 +26,7 @@ from mind_tradingagent.agents.utils.market_data_validation_tools import (
     get_verified_market_snapshot,
 )
 from mind_tradingagent.agents.utils.news_data_tools import (
+    get_capital_flows,
     get_global_news,
     get_insider_transactions,
     get_news,
@@ -46,6 +47,7 @@ __all__ = [
     "get_news",
     "get_global_news",
     "get_insider_transactions",
+    "get_capital_flows",
     "get_macro_indicators",
     "get_prediction_markets",
     "get_verified_market_snapshot",
