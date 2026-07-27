@@ -290,6 +290,35 @@ def save_fusion_output(
     _save_fusion_to_analysis_db(results, date)
 
 
+def _get_stock_accuracy_discount(code: str) -> float:
+    """根据历史回测准确率对 fusion_score 做折扣。
+
+    准确率 < 50% 的股票, fusion_score 按比例打折。
+    折扣公式: discount = 0.5 + accuracy (40%→0.9x, 30%→0.8x, 20%→0.7x)
+    """
+    try:
+        import sqlite3
+        from pathlib import Path
+        db_path = Path(__file__).resolve().parent.parent / "data" / "backtest" / "bt_results.db"
+        if not db_path.exists():
+            return 1.0
+        conn = sqlite3.connect(str(db_path))
+        c = conn.execute(
+            "SELECT CAST(SUM(fusion_correct) AS REAL) / COUNT(*) FROM bt_predictions WHERE stock_code=?",
+            (code,),
+        )
+        row = c.fetchone()
+        conn.close()
+        if row and row[0] is not None and row[0] < 0.5:
+            discount = 0.5 + row[0]  # 40% → 0.9, 30% → 0.8
+            logger.info("[评分校准] %s 准确率 %.0f%% < 50%%, fusion_score 折扣 %.2f×", code, row[0] * 100, discount)
+            return discount
+        return 1.0
+    except Exception as exc:
+        logger.debug("[评分校准] %s 跳过: %s", code, exc)
+        return 1.0
+
+
 def _save_fusion_to_analysis_db(results: list[dict], date_str: str):
     """将融合结果写入 stock_analysis.db，供前端 /api/v1/history 读取"""
     try:
@@ -313,7 +342,10 @@ def _save_fusion_to_analysis_db(results: list[dict], date_str: str):
             has_disagreement = r.get("has_disagreement", False)
 
             # fusion_score [-3, +3] → sentiment_score [0, 100]
-            sentiment_score = int(50 + fusion_score * 16.67)
+            # 按历史准确率校准（低准确率股票降权）
+            discount = _get_stock_accuracy_discount(code)
+            calibrated = fusion_score * discount
+            sentiment_score = int(50 + calibrated * 16.67)
             sentiment_score = max(0, min(100, sentiment_score))
 
             summary_parts = [f"融合信号: {signal_name}"]
