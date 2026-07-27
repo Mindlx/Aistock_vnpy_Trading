@@ -938,13 +938,52 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if prev_plan_hint:
             prev_plan_suffix = f"\n\n{prev_plan_hint}"
 
+        # 数据驱动的市场信号评分（替换 LLM 自行发挥）
+        limit_diff = (overview.limit_up_count or 0) - (overview.limit_down_count or 0)
+        signal_score = int(round(up_ratio * 100))  # 基础: 上涨占比 0~100
+        signal_score += min(15, max(-15, limit_diff // 10))  # 涨跌停差: 每差10家 ±5, 上限±15
+        # 缩量下跌/放量上涨强化信号，放量下跌/缩量上涨弱化
+        if prev_amount > 0 and overview.total_amount > 0:
+            vol_ratio = overview.total_amount / prev_amount
+            if vol_ratio > 1.3 and up_ratio >= 0.65:
+                signal_score += 5  # 放量上涨 → 强化看多
+            elif vol_ratio > 1.3 and up_ratio < 0.35:
+                signal_score -= 5  # 放量下跌 → 强化看空
+            elif vol_ratio < 0.7 and up_ratio >= 0.65:
+                signal_score -= 3  # 缩量上涨 → 弱化
+            elif vol_ratio < 0.7 and up_ratio < 0.35:
+                signal_score += 3  # 缩量下跌 → 抛压释放, 弱化看空
+        signal_score = max(0, min(100, signal_score))
+
+        # 信号标签
+        if signal_score >= 70:
+            signal_label = "强势，可进攻"
+            signal_action = "关注主线延续与仓位纪律"
+        elif signal_score >= 55:
+            signal_label = "偏强，偏进攻"
+            signal_action = "控制仓位，适度参与"
+        elif signal_score >= 40:
+            signal_label = "中性，偏防守"
+            signal_action = "控制仓位，等待方向明确"
+        else:
+            signal_label = "偏弱，偏防守"
+            signal_action = "风险偏高，优先控制回撤"
+
+        signal_block = (
+            f"\n\n- **盘面信号**：{signal_score}/100（{signal_label}）\n"
+            f"- **信号依据**：上涨家数占比 {up_ratio:.0%}，涨跌停差 {limit_diff:+d}\n"
+            f"- **操作建议**：{signal_action}"
+        )
+
         return (
             f"今日A股{tone}，{idx_note}。"
             f"全天{up_word}{overview.up_count}家个股上涨，{overview.down_count}家下跌"
             f"（上涨占比{up_ratio:.1%}），"
             f"涨停{overview.limit_up_count}家、跌停{overview.limit_down_count}家。"
             f"两市成交额{overview.total_amount:.0f}亿元{vol_note}，"
-            f"市场呈现明确的“{tone}”格局。{prev_plan_suffix}"
+            f"市场呈现明确的“{tone}”格局。"
+            f"{signal_block}"
+            f"{prev_plan_suffix}"
         )
 
     def _build_stats_block(self, overview: MarketOverview) -> str:
