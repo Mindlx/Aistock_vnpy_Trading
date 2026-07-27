@@ -1,228 +1,54 @@
 {
-  "run_id": "c1test-2026-07-26-103029",
-  "timestamp": "2026-07-26 10:30:29",
-  "mode": "full",
+  "run_id": "c1test-2026-07-27-163005",
+  "timestamp": "2026-07-27 16:30:05",
+  "mode": "quick",
   "fusion": {
-    "accuracy_pct": 52.7,
-    "total_matched": 461,
-    "backtest_days": 47,
+    "accuracy_pct": 52.6,
+    "total_matched": 477,
+    "backtest_days": 48,
     "disagreement_pct": 60.2,
     "no_disagreement_pct": 50.7
   },
   "subsystems": {
     "ly": {
       "accuracy_pct": 41.1,
-      "correct": 152,
-      "total": 370
+      "correct": 159,
+      "total": 387
     },
     "ml": {
-      "accuracy_pct": 61.9,
-      "correct": 313,
-      "total": 506
+      "accuracy_pct": 56.9,
+      "correct": 242,
+      "total": 425
     },
     "at": {
-      "accuracy_pct": 51.8,
-      "correct": 58,
-      "total": 112
+      "accuracy_pct": 51.6,
+      "correct": 66,
+      "total": 128
     }
   },
   "subsystem_coverage": {
     "ly": {
-      "valid": 409,
-      "total": 461,
-      "pct": 88.7
+      "valid": 425,
+      "total": 477,
+      "pct": 89.1
     },
     "ml": {
-      "valid": 382,
-      "total": 461,
-      "pct": 82.9
+      "valid": 398,
+      "total": 477,
+      "pct": 83.4
     },
     "at": {
-      "valid": 238,
-      "total": 461,
-      "pct": 51.6
+      "valid": 254,
+      "total": 477,
+      "pct": 53.2
     }
   },
-  "ly_flat_zone_neutral": 88,
-  "ly_independent": {
-    "accuracy": 52.6,
-    "raw": "准确率 52.6% (30/57) | 训练窗口 3 次 | 高置信 1/3 (33.3% )"
-  },
-  "ml": {
-    "operation_advice": {
-      "direction_accuracy": 74.8,
-      "correct": 80,
-      "total": 107,
-      "neutral": 16,
-      "no_direction": 415,
-      "source": "analysis_history T+1 (与 sentiment 完全一致口径)"
-    },
-    "sentiment_score": {
-      "correct": 329,
-      "total": 522,
-      "accuracy": 63.0,
-      "source": "analysis_history + stock_daily T+1"
-    },
-    "fusion_equivalent": {
-      "correct": 313,
-      "total": 506,
-      "neutral": 16,
-      "accuracy": 61.9,
-      "source": "analysis_history → v4.0 L7 ×0.8 → _sign(0.1) → T+1"
-    },
-    "strategy_breakdown": [
-      {
-        "skill_id": "consensus",
-        "correct": 130,
-        "total": 488,
-        "accuracy": 26.6
-      }
-    ],
-    "internal_divergence": {
-      "agree_accuracy": 71.6,
-      "agree_total": 116,
-      "diverge_rate": 0.0,
-      "diverge_total": 0,
-      "diverge_sentiment_accuracy": 0,
-      "diverge_op_accuracy": 0,
-      "sent_diverge_op_neutral": 390
-    }
-  },
-  "at_fusion_level": {
-    "status": "ok",
-    "timestamp": "2026-07-26 10:30:29",
-    "fusion_level_note": "融合层面 AT 数据见 fusion.subsystems.at",
-    "correct": 53,
-    "total": 101,
-    "accuracy": 52.5,
-    "records_scanned": 530,
-    "per_stock": [
-      {
-        "code": "000060",
-        "correct": 0,
-        "total": 1,
-        "accuracy": 0.0
-      },
-      {
-        "code": "000592",
-        "correct": 5,
-        "total": 8,
-        "accuracy": 62.5
-      },
-      {
-        "code": "000988",
-        "correct": 1,
-        "total": 1,
-        "accuracy": 100.0
-      },
-      {
-        "code": "000999",
-        "correct": 1,
-        "total": 3,
-        "accuracy": 33.3
-      },
-      {
-        "code": "001390",
-        "correct": 4,
-        "total": 7,
-        "accuracy": 57.1
-      },
-      {
-        "code": "002230",
-        "correct": 1,
-        "total": 1,
-        "accuracy": 100.0
-      },
-      {
-        "code": "300652",
-        "correct": 3,
-        "total": 10,
-        "accuracy": 30.0
-      },
-      {
-        "code": "300676",
-        "correct": 5,
-        "total": 11,
-        "accuracy": 45.5
-      },
-      {
-        "code": "301106",
-        "correct": 1,
-        "total": 2,
-        "accuracy": 50.0
-      },
-      {
-        "code": "301293",
-        "correct": 1,
-        "total": 2,
-        "accuracy": 50.0
-      },
-      {
-        "code": "600372",
-        "correct": 8,
-        "total": 11,
-        "accuracy": 72.7
-      },
-      {
-        "code": "601801",
-        "correct": 2,
-        "total": 7,
-        "accuracy": 28.6
-      },
-      {
-        "code": "603127",
-        "correct": 2,
-        "total": 2,
-        "accuracy": 100.0
-      },
-      {
-        "code": "603189",
-        "correct": 5,
-        "total": 10,
-        "accuracy": 50.0
-      },
-      {
-        "code": "603557",
-        "correct": 6,
-        "total": 11,
-        "accuracy": 54.5
-      },
-      {
-        "code": "605117",
-        "correct": 0,
-        "total": 2,
-        "accuracy": 0.0
-      },
-      {
-        "code": "605368",
-        "correct": 3,
-        "total": 6,
-        "accuracy": 50.0
-      },
-      {
-        "code": "688202",
-        "correct": 5,
-        "total": 6,
-        "accuracy": 83.3
-      }
-    ]
-  },
-  "factor": {
-    "status": "ok",
-    "timestamp": "2026-07-26 10:30:28",
-    "accuracy": 0.0,
-    "total_evaluations": 2,
-    "stocks_evaluated": 2,
-    "conclusion": "❌ 因子信号无预测能力 (≤50%)",
-    "returncode": 0,
-    "stdout_preview": "============================================================\n  因子-only 回测基准 (Factor Backtest Baseline)\n  评估窗口: 20 交易日  步长: 5 天\n  归一化: time_series (每只股票自身上百天历史分布)\n============================================================\n\n代码             评估次数     正确      准确率\n-----------------------------------\n300058            1      0     0.0%\n301293            1      0     0.0%\n\n整体准确率: 0.0%\n总评估次数: 2\n评估股票数: 2\n结论: ❌ 因子信号无预测能力 (≤50%)\n\n> 对比 LLM：若 LLM 综合评分准确率 > 0.0%, 则 AI 增值。\n> 反之则说明 LLM 在添加噪音，应降低 LLM 权重或切换到因子-on",
-    "stderr_preview": "[FactorEngine] 2 factor-stock pairs filled with 0.0 (insufficient data — check stock_daily completeness)\n[FactorEngine] 2 factor-stock pairs filled with 0.0 (insufficient data — check stock_daily completeness)\n"
-  },
+  "ly_flat_zone_neutral": 89,
   "walkforward": {
     "status": "ok",
-    "timestamp": "2026-07-26 10:30:13",
-    "date_range": "2026-05-30 ~ 2026-07-24",
-    "trading_days": 39,
+    "timestamp": "2026-07-27 16:30:04",
+    "date_range": "2026-05-30 ~ 2026-07-27",
+    "trading_days": 40,
     "train_window": 20,
     "test_window": 10,
     "step": 5,
@@ -230,7 +56,7 @@
   },
   "weight_sweep": {
     "status": "ok",
-    "timestamp": "2026-07-26 10:30:13",
+    "timestamp": "2026-07-27 16:30:04",
     "ly_range": [
       0.2,
       0.3,
@@ -248,112 +74,114 @@
     ],
     "combo_count": 16,
     "returncode": 0,
-    "stdout_preview": "\n============================================================\n  权重网格扫描 — 461 条历史记录\n============================================================\n  ly: [0.2, 0.3, 0.37, 0.4]\n  ml: [0.3, 0.4, 0.5, 0.55]\n  at: [0.3]\n  共 16 种组合\n\n  权重(l,m,a)                 准确率        正确/总数          \n  ------------------------- ---------- ---------------\n  (0.20,0.55,0.30)             56.3%      246/437\n  (0.20,0.50,0.30)             56.0%      243/434\n  (0.30,0.55,0.30)             54.7%      238/435\n  (0.30,0.50,0.30)             54.6%      237/434\n  (0.20,0.40,0.30)             54.5%      231/424\n  (0.37,0.55,0.30)             54.4%      239/439\n  (0.40,0.55,0.30)             53.5%      232/434\n  (0.37,0.50,0.30)             52.9%      226/427\n  (0.30,0.40,0.30)             52.6%      221/420 ★ 当前\n  (0.40,0.5"
+    "stdout_preview": "\n============================================================\n  权重网格扫描 — 477 条历史记录\n============================================================\n  ly: [0.2, 0.3, 0.37, 0.4]\n  ml: [0.3, 0.4, 0.5, 0.55]\n  at: [0.3]\n  共 16 种组合\n\n  权重(l,m,a)                 准确率        正确/总数          \n  ------------------------- ---------- ---------------\n  (0.20,0.55,0.30)             56.3%      255/453\n  (0.20,0.50,0.30)             56.0%      252/450\n  (0.30,0.55,0.30)             54.8%      247/451\n  (0.30,0.50,0.30)             54.7%      246/450\n  (0.20,0.40,0.30)             54.5%      240/440\n  (0.37,0.55,0.30)             54.5%      248/455\n  (0.40,0.55,0.30)             53.6%      241/450\n  (0.37,0.50,0.30)             53.0%      235/443\n  (0.30,0.40,0.30)             52.8%      230/436 ★ 当前\n  (0.40,0.5"
   },
   "simulate": {
     "status": "ok",
-    "timestamp": "2026-07-26 10:30:13",
-    "total_return": 99.63,
+    "timestamp": "2026-07-27 16:30:04",
+    "total_return": 110.82,
     "max_drawdown": 10.28,
-    "win_rate": 79.6,
-    "trade_count": 167.0,
-    "sharpe": 9.19,
+    "win_rate": 80.5,
+    "trade_count": 174.0,
+    "sharpe": 9.57,
     "returncode": 0
   },
   "changes": {
     "regressions": [
-      "ML 准确率下降 -5.5%"
+      "LY 准确率下降 -8.7%",
+      "ML 准确率下降 -6.8%"
     ],
     "improvements": [],
     "alerts": [
+      "🔴 LY 准确率下降 ≥5%",
       "🔴 ML 准确率下降 ≥5%"
     ],
     "vs_previous": {
       "fusion_accuracy": "+0.0%",
-      "ly_accuracy": "+0.0%",
-      "ml_accuracy": "-5.5%",
+      "ly_accuracy": "-8.7%",
+      "ml_accuracy": "-6.8%",
       "at_accuracy": "+0.0%"
     },
-    "alert_count": 1,
+    "alert_count": 2,
     "warning_count": 0,
     "pass_count": 0
   },
   "fusion_raw": {
     "status": "ok",
-    "timestamp": "2026-07-26 10:30:13",
-    "total_predictions": 561,
-    "total_matched": 461,
-    "total_unmatched": 100,
-    "backtest_days": 47,
+    "timestamp": "2026-07-27 16:30:04",
+    "total_predictions": 579,
+    "total_matched": 477,
+    "total_unmatched": 102,
+    "backtest_days": 48,
     "subsystem_accuracy": {
       "fusion": {
-        "correct": 243,
-        "total": 461,
-        "accuracy": 52.7
+        "correct": 251,
+        "total": 477,
+        "accuracy": 52.6
       },
       "ly": {
-        "correct": 152,
-        "total": 370,
+        "correct": 159,
+        "total": 387,
         "accuracy": 41.1
       },
       "ml": {
-        "correct": 234,
-        "total": 415,
-        "accuracy": 56.4
+        "correct": 242,
+        "total": 425,
+        "accuracy": 56.9
       },
       "at": {
-        "correct": 58,
-        "total": 112,
-        "accuracy": 51.8
+        "correct": 66,
+        "total": 128,
+        "accuracy": 51.6
       }
     },
     "subsystem_coverage": {
       "ly": {
-        "valid": 409,
-        "total": 461,
-        "pct": 88.7
+        "valid": 425,
+        "total": 477,
+        "pct": 89.1
       },
       "ml": {
-        "valid": 382,
-        "total": 461,
-        "pct": 82.9
+        "valid": 398,
+        "total": 477,
+        "pct": 83.4
       },
       "at": {
-        "valid": 238,
-        "total": 461,
-        "pct": 51.6
+        "valid": 254,
+        "total": 477,
+        "pct": 53.2
       }
     },
-    "ly_flat_zone_neutral": 88,
+    "ly_flat_zone_neutral": 89,
     "disagreement": {
       "matched": 98,
       "correct": 59,
       "accuracy": 60.2,
-      "no_disagreement_matched": 363,
-      "no_disagreement_correct": 184,
+      "no_disagreement_matched": 379,
+      "no_disagreement_correct": 192,
       "no_disagreement_accuracy": 50.7
     },
     "signal_breakdown": [
       {
         "signal": "bearish",
-        "count": 47,
-        "correct": 24,
-        "evaluated": 47,
-        "accuracy": 51.1
+        "count": 50,
+        "correct": 25,
+        "evaluated": 50,
+        "accuracy": 50.0
       },
       {
         "signal": "bullish",
-        "count": 8,
-        "correct": 7,
-        "evaluated": 8,
-        "accuracy": 87.5
+        "count": 15,
+        "correct": 14,
+        "evaluated": 15,
+        "accuracy": 93.3
       },
       {
         "signal": "cautious_bearish",
-        "count": 183,
+        "count": 189,
         "correct": 58,
-        "evaluated": 183,
-        "accuracy": 31.7
+        "evaluated": 189,
+        "accuracy": 30.7
       },
       {
         "signal": "cautious_bullish",
@@ -364,7 +192,7 @@
       },
       {
         "signal": "neutral",
-        "count": 240,
+        "count": 242,
         "correct": 146,
         "evaluated": 207,
         "accuracy": 70.5
@@ -382,148 +210,155 @@
         "code": "000060",
         "name": "中金岭南",
         "correct": 3,
-        "evaluated": 10,
-        "total_predictions": 10,
-        "accuracy": 30.0
+        "evaluated": 11,
+        "total_predictions": 11,
+        "accuracy": 27.3
       },
       {
         "code": "000592",
         "name": "平潭发展",
-        "correct": 26,
-        "evaluated": 38,
-        "total_predictions": 47,
-        "accuracy": 68.4
+        "correct": 27,
+        "evaluated": 39,
+        "total_predictions": 48,
+        "accuracy": 69.2
       },
       {
         "code": "000988",
         "name": "华工科技",
         "correct": 2,
-        "evaluated": 10,
-        "total_predictions": 10,
-        "accuracy": 20.0
+        "evaluated": 11,
+        "total_predictions": 11,
+        "accuracy": 18.2
       },
       {
         "code": "000999",
         "name": "华润三九",
-        "correct": 14,
-        "evaluated": 22,
-        "total_predictions": 22,
-        "accuracy": 63.6
+        "correct": 15,
+        "evaluated": 23,
+        "total_predictions": 23,
+        "accuracy": 65.2
       },
       {
         "code": "001390",
         "name": "古麒绒材",
         "correct": 17,
-        "evaluated": 36,
-        "total_predictions": 47,
-        "accuracy": 47.2
+        "evaluated": 37,
+        "total_predictions": 48,
+        "accuracy": 45.9
       },
       {
         "code": "002230",
         "name": "科大讯飞",
         "correct": 6,
         "evaluated": 8,
-        "total_predictions": 10,
+        "total_predictions": 11,
         "accuracy": 75.0
       },
       {
         "code": "300652",
         "name": "雷迪克",
         "correct": 13,
-        "evaluated": 35,
-        "total_predictions": 47,
-        "accuracy": 37.1
+        "evaluated": 36,
+        "total_predictions": 48,
+        "accuracy": 36.1
       },
       {
         "code": "300676",
         "name": "华大基因",
-        "correct": 22,
-        "evaluated": 38,
-        "total_predictions": 43,
-        "accuracy": 57.9
+        "correct": 23,
+        "evaluated": 39,
+        "total_predictions": 44,
+        "accuracy": 59.0
       },
       {
         "code": "301106",
         "name": "骏成科技",
         "correct": 1,
-        "evaluated": 10,
-        "total_predictions": 10,
-        "accuracy": 10.0
+        "evaluated": 11,
+        "total_predictions": 11,
+        "accuracy": 9.1
       },
       {
         "code": "301293",
         "name": "三博脑科",
-        "correct": 4,
-        "evaluated": 9,
-        "total_predictions": 10,
-        "accuracy": 44.4
+        "correct": 5,
+        "evaluated": 10,
+        "total_predictions": 11,
+        "accuracy": 50.0
       },
       {
         "code": "600372",
         "name": "中航机载",
-        "correct": 25,
-        "evaluated": 34,
-        "total_predictions": 47,
-        "accuracy": 73.5
+        "correct": 26,
+        "evaluated": 35,
+        "total_predictions": 48,
+        "accuracy": 74.3
       },
       {
         "code": "601801",
         "name": "皖新传媒",
-        "correct": 24,
-        "evaluated": 37,
-        "total_predictions": 43,
-        "accuracy": 64.9
+        "correct": 25,
+        "evaluated": 38,
+        "total_predictions": 44,
+        "accuracy": 65.8
       },
       {
         "code": "603127",
         "name": "昭衍新药",
-        "correct": 17,
-        "evaluated": 21,
-        "total_predictions": 22,
-        "accuracy": 81.0
+        "correct": 18,
+        "evaluated": 22,
+        "total_predictions": 23,
+        "accuracy": 81.8
       },
       {
         "code": "603189",
         "name": "*ST网达",
         "correct": 11,
-        "evaluated": 35,
-        "total_predictions": 47,
-        "accuracy": 31.4
+        "evaluated": 36,
+        "total_predictions": 48,
+        "accuracy": 30.6
       },
       {
         "code": "603557",
         "name": "*ST起步",
         "correct": 13,
-        "evaluated": 38,
-        "total_predictions": 45,
-        "accuracy": 34.2
+        "evaluated": 39,
+        "total_predictions": 46,
+        "accuracy": 33.3
       },
       {
         "code": "605117",
         "name": "德业股份",
         "correct": 1,
-        "evaluated": 9,
-        "total_predictions": 10,
-        "accuracy": 11.1
+        "evaluated": 10,
+        "total_predictions": 11,
+        "accuracy": 10.0
       },
       {
         "code": "605368",
         "name": "蓝天燃气",
-        "correct": 18,
-        "evaluated": 35,
-        "total_predictions": 47,
-        "accuracy": 51.4
+        "correct": 19,
+        "evaluated": 36,
+        "total_predictions": 48,
+        "accuracy": 52.8
       },
       {
         "code": "688202",
         "name": "美迪西",
         "correct": 26,
         "evaluated": 36,
-        "total_predictions": 44,
+        "total_predictions": 45,
         "accuracy": 72.2
       }
     ],
     "daily_trend": [
+      {
+        "date": "2026-07-27",
+        "correct": 8,
+        "evaluated": 16,
+        "total": 18,
+        "accuracy": 50.0
+      },
       {
         "date": "2026-07-24",
         "correct": 8,
@@ -614,13 +449,6 @@
         "evaluated": 12,
         "total": 12,
         "accuracy": 75.0
-      },
-      {
-        "date": "2026-07-02",
-        "correct": 5,
-        "evaluated": 10,
-        "total": 12,
-        "accuracy": 50.0
       }
     ]
   }

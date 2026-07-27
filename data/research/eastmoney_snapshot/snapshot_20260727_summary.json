@@ -1,0 +1,27 @@
+{
+  "date": "20260727",
+  "total_stocks": 5187,
+  "our_stocks": 18,
+  "fields": [
+    "序号",
+    "代码",
+    "名称",
+    "最新价",
+    "涨跌幅",
+    "换手率",
+    "市盈率",
+    "主力成本",
+    "机构参与度",
+    "综合得分",
+    "上升",
+    "目前排名",
+    "关注指数",
+    "交易日",
+    "cost_deviation_pct",
+    "score_x_focus",
+    "is_our_stock"
+  ],
+  "focus_avg": 72.7,
+  "score_avg": 59.8,
+  "cost_deviation_avg": 0.92
+}

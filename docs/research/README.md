@@ -10,7 +10,7 @@
 | `prompt-optimization.md` | LLM Prompt 注入优化（工具描述精简/去重/合并策略/清理死代码） | 2026-07-23 |
 | `skill-accuracy-tracking.md` | 策略级准确率追踪（`research_skill_accuracy.py`） | 2026-07-23 |
 | `chip-concentration-factor.md` | 筹码集中度横截面因子（IC=-0.111, 已因子化 #14） | 2026-07-23 |
-| `double-bottom-variant-analysis.md` | W 双底中间峰高度变异分析（c1skill 论证，已因子化） | 2026-07-23 |
+| `ml-scoring-asymmetry.md` | ML评分方向不对称 — 14因子看多85% vs LLM看空69% | 2026-07-27 |
 
 ---
 
