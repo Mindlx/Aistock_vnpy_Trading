@@ -784,7 +784,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if review:
             logger.info("[大盘] 复盘报告生成成功，长度: %d 字符", len(review))
             # Inject structured data tables into LLM prose sections
-            return self._inject_data_into_review(review, overview, news)
+            return self._inject_data_into_review(review, overview, news, previous_plan=previous_plan)
         else:
             logger.warning("[大盘] 大模型返回为空，使用模板报告")
             return self._generate_template_review(overview, news)
@@ -794,6 +794,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         review: str,
         overview: MarketOverview,
         news: list | None = None,
+        previous_plan: str | None = None,
     ) -> str:
         """Inject structured data tables into the corresponding LLM prose sections."""
         # Build data blocks
@@ -840,7 +841,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             and overview.total_amount > 0
             and overview.up_count > 0
             and "market_summary" in patterns):
-            summary_para = self._build_summary_paragraph(overview)
+            summary_para = self._build_summary_paragraph(overview, prev_plan_hint=previous_plan or "")
             if summary_para:
                 combined = summary_para + "\n\n" + (stats_block or "")
                 review = self._replace_section_content(review, patterns["market_summary"], combined)
@@ -902,12 +903,25 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         end = start + next_heading.start() if next_heading else len(text)
         return text[:start] + "\n\n" + new_content + "\n\n" + text[end:].lstrip("\n")
 
-    def _build_summary_paragraph(self, overview: MarketOverview) -> str:
+    def _build_summary_paragraph(self, overview: MarketOverview, prev_plan_hint: str = "") -> str:
         """Build a pre-built 盘面总览 paragraph with 100% accurate numbers from DB."""
-        total_idx = sum(1 for idx in overview.indices if idx.change_pct < 0) if overview.indices else 0
-        tone = "全面走弱" if total_idx >= 2 else "震荡分化" if total_idx >= 1 else "整体偏强"
+        # 涨跌家数决定基调（优于指数涨跌数，因个股覆盖面更广）
         participation = overview.up_count + overview.down_count
-        up_ratio = overview.up_count / participation if participation else 0
+        up_ratio = overview.up_count / participation if participation else 0.5
+
+        if up_ratio >= 0.65:
+            tone = "整体偏强"
+            idx_note = "主要指数多数收涨"  # relaxed from "集体收跌"
+            up_word = "高达"
+        elif up_ratio >= 0.35:
+            tone = "震荡分化"
+            idx_note = "主要指数涨跌互现"
+            up_word = "共"
+        else:
+            tone = "全面走弱"
+            idx_note = "主要指数集体收跌"
+            up_word = "仅"
+
         prev_amount = self._load_prev_market_turnover(overview.date, "全天") or 0
         vol_note = ""
         if prev_amount > 0 and overview.total_amount > 0:
@@ -918,13 +932,19 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 vol_note = f"，较昨日{prev_amount:.0f}亿元{'大幅' if ratio > 1.5 else ''}放量"
             else:
                 vol_note = f"，与昨日{prev_amount:.0f}亿元基本持平"
+
+        # 上期策略回顾（如果存在）
+        prev_plan_suffix = ""
+        if prev_plan_hint:
+            prev_plan_suffix = f"\n\n{prev_plan_hint}"
+
         return (
-            f"今日A股{tone}，主要指数集体收跌。"
-            f"全天仅{overview.up_count}家个股上涨，{overview.down_count}家下跌"
+            f"今日A股{tone}，{idx_note}。"
+            f"全天{up_word}{overview.up_count}家个股上涨，{overview.down_count}家下跌"
             f"（上涨占比{up_ratio:.1%}），"
             f"涨停{overview.limit_up_count}家、跌停{overview.limit_down_count}家。"
             f"两市成交额{overview.total_amount:.0f}亿元{vol_note}，"
-            f"市场呈现明确的“{tone}”格局。"
+            f"市场呈现明确的“{tone}”格局。{prev_plan_suffix}"
         )
 
     def _build_stats_block(self, overview: MarketOverview) -> str:
@@ -1488,7 +1508,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
         # 上期交易计划回顾（让LLM自行分析上期建议的准确性）
         _prev_plan_hint = ""
         if previous_plan:
-            _prev_plan_hint = f"\n## 上期交易计划回顾\n{previous_plan}\n"
+            _prev_plan_hint = f"\\n## 上期交易计划回顾\\n{previous_plan}\\n"
 
         if review_language == "en":
             report_title = self._get_review_title(overview.date).removeprefix("## ").strip()
