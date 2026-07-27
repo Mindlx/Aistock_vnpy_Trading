@@ -1508,7 +1508,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
         # 上期交易计划回顾（让LLM自行分析上期建议的准确性）
         _prev_plan_hint = ""
         if previous_plan:
-            _prev_plan_hint = f"\\n## 上期交易计划回顾\\n{previous_plan}\\n"
+            _prev_plan_hint = f"\n## 上期交易计划回顾\n{previous_plan}\n"
 
         if review_language == "en":
             report_title = self._get_review_title(overview.date).removeprefix("## ").strip()
