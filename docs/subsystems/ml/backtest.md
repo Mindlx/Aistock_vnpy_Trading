@@ -11,13 +11,13 @@
 
 ```
 ┌─────────────────────────────────────────────┐
-│  层1: 13 因子引擎 (FactorEngine)            │
+│  层1: 14 因子引擎 (FactorEngine)            │
 │  纯数学公式，100% 客观，无随机性            │
 │  声明 IC ~0.035，实测 |IC| ~0.02~0.05      │
 ├─────────────────────────────────────────────┤
-│  层2: 17 策略 (YAML Skill 定义)             │
-│  ❗ 不是公式计算，是 LLM 驱动的自然语言 YAML  │
-│  16 个策略全由 LLM 判断"是否满足条件"        │
+│  层2: 18 策略 (YAML Skill 定义)             │
+不是公式计算，是 LLM 驱动的自然语言 YAML  
+│  18 个策略全由 LLM 判断"是否满足条件"
 │  无法离开 LLM 独立运行                       │
 ├─────────────────────────────────────────────┤
 │  层3: LLM 推理                              │
@@ -68,7 +68,7 @@ ML 子系统有完整的回测子体系，共 8 个模块：
 
 ---
 
-## 三、13 因子独立回测 (`factor_backtest.py`)
+## 三、14 因子独立回测 (`factor_backtest.py`)
 
 ### 3.1 入口
 
@@ -80,7 +80,7 @@ ML 子系统有完整的回测子体系，共 8 个模块：
 
 1. 从 SQLite 表加载所有股票的 OHLCV 数据（`stock_analysis.db` 或 `data_warehouse.db`）
 2. 对每只股票，每隔 5 天（step_days=5）：
-   - 用过去 60 天数据计算 13 因子 z-score
+   - 用过去 60 天数据计算 14 因子 z-score
    - 对全市场股票做截面归一化（N=11，<30 有统计不可靠警告）
    - 如果 `composite_score > 0` 预测看涨
    - 对比未来 20 个交易日的实际涨跌方向
@@ -108,7 +108,7 @@ LLM 方向准确率:    76.5% (融合回测中 ML 表现)
 结论: LLM 在因子之上显著增值 (+26.4%)
 ```
 
-### 3.4 13 因子定义
+### 3.4 14 因子定义
 
 | 因子 | 类别 | 权重 | IC | 说明 |
 |------|------|------|----|------|
@@ -134,7 +134,7 @@ LLM 方向准确率:    76.5% (融合回测中 ML 表现)
 | 层 | 可独立回测？ | 回测方式 | 结果 |
 |----|------------|---------|------|
 | **层1: 12 因子** | ✅ **可独立** | `factor_backtest.py` | 50.1%（随机） |
-| **层2: 17 策略** | ❌ **不可独立** | 策略是 LLM 驱动的 YAML 文本，不是代码 | N/A |
+| **层2: 18 策略** | ❌ **不可独立** | 策略是 LLM 驱动的 YAML 文本，不是代码 | N/A |
 | **层3: LLM 推理** | ✅ **有独立回测** | `main.py --backtest` + 融合回测 | 操作建议 26.6% / 方向 76.5% |
 
 ### 4.2 回测盲区
@@ -415,9 +415,9 @@ ML 在融合系统中的当前权重为 `alpha=0.55`（`reliability.py:31`），
 | `scripts/research_ml12_factor_ic.py` | 12 因子 IC 分析（动态加载 `factor_engine.py`） |
 | `scripts/research_alpha158_cross_section.py` | LY Alpha158 横截面 vs 时序 IC 对比 |
 
-## 九、17 策略清单
+## 九、18 策略清单
 
-17 个 YAML 策略文件定义在 `systems/MindLynx-Aistock/strategies/` 下，
+18 个 YAML 策略文件定义在 `systems/MindLynx-Aistock/strategies/` 下，
 作为 LLM Agent 的"技能"加载，在不同市场状态下被选择激活。
 
 | # | 名称 | 显示名 | 类别 | 理论基础 | 触发条件 |
@@ -439,15 +439,16 @@ ML 在融合系统中的当前权重为 `alpha=0.55`（`reliability.py:31`），
 | 15 | `one_yang_three_yin` | 一阳夹三阴 | pattern | 史蒂夫·尼森蜡烛图 | K线整理形态→趋势延续 |
 | **16** | **`valuation_safety`** | **估值安全边际** | **risk_control** | **格雷厄姆安全边际** | **PB历史分位极端检测→评分下调** |
 | **17** | **`elevated_double_bottom`** | **高中间峰双底** 🆕 | **reversal** | **Bulkowski统计分类+A股回测** | **84.4%胜率, 20d avg+14.32%, 因子独立R²=0.0006** |
+| **18** | **`chip_concentration`** | **筹码集中度** 🆕 | **alpha** | **量价分布理论** | **IC=-0.111, 横截面因子, 见 `docs/research/chip-concentration-factor.md`** |
 
-**按类别分布**：trend 5个 / reversal **2个** / framework 8个 / pattern 1个 / **risk_control 1个**
+**按类别分布**：trend 5个 / reversal **3个** / framework 8个 / pattern 1个 / risk_control 1个 / **alpha 1个**
 **理论来源**：道氏、威科夫、葛兰碧、欧奈尔、勒庞、索罗斯、马克斯、林奇、达瓦斯、缠中说禅、艾略特、尼森、**格雷厄姆、Bulkowski** — 14个理论。
 
 ### 9.1 策略层定位
 
-**层2: 17 策略 (YAML Skill 定义)**
-- ❗ 不是公式计算，是 LLM 驱动的自然语言 YAML
-- 17 个策略全由 LLM 判断"是否满足条件"
+**层2: 18 策略 (YAML Skill 定义)**
+不是公式计算，是 LLM 驱动的自然语言 YAML  
+│  18 个策略全由 LLM 判断"是否满足条件"
 - 无法离开 LLM 独立运行
 - 每个策略触发时记录 `skill_id` 到 `analysis_history`
 - 策略级准确率依托 `backtest_service.py:457-475` 的 skill-level 回测摘要
