@@ -43,6 +43,7 @@ SCORING_CRITERIA_A = """
 若 tool 返回的 MAX 值为 100，评分不应超过 100（v3.1 @calibration 2026-06-23）。
 """
 
+# DEPRECATED — 从未启用，保留仅为兼容 USE_COMPACT_PROMPT
 SCORING_CRITERIA_B = """
 ## 评分标准
 

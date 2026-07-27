@@ -31,6 +31,8 @@ CANONICAL_DECISION_SCALE: tuple[DecisionScaleBand, ...] = (
 )
 
 
+# 注意：LLM 评分标准定义在 prompt_config.py 的 SCORING_CRITERIA_A 中
+# 此处的区间用来将评分映射到操作建议，不是 LLM 评分依据
 CANONICAL_DECISION_SCALE_PROMPT_ZH = """## Canonical 评分与动作口径
 
 - `sentiment_score`、`operation_advice`、三态 `decision_type` 与八态 `action` 必须按同一口径表达。
