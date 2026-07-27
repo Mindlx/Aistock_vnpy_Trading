@@ -238,29 +238,22 @@ class SignalNormalizer:
     @classmethod
     def normalize_mindlynx_score(cls, sentiment_score: int, threshold_bull: int = 52, threshold_bear: int = 49) -> float:
         """
-        Accuracy-calibrated sentiment_score → L7 mapping (v4.0).
+        Accuracy-calibrated sentiment_score → L7 mapping (v5.0).
 
-        Based on 598-sample backtest & c1skill cross-disciplinary analysis
-        (2026-06-29, docs/decisions/accuracy-calibrated-mapping.md):
+        Based on 1048-sample backtest (2026-07-27, c1test T+1 口径):
 
-        ≤19:  100.0% acc → -3.0 (S7 strong_bearish)
-        20-30: 89.0% acc → -2.5 (S6/S7 boundary)
-        31-40: 92.8% acc → -2.0 (S6 bearish)
-        41-48: 92.8% acc → -1.5 (S5 cautious_bearish, preserved)
-        50-51:  0.0% acc →  0.0 (S4 neutral)
-        52-59: 56.2% acc → +0.8 (S4+, barely bullish, conservative)
-        60-79: 38.2% acc → +1.0 (S3 cautious_bullish, dampened)
-        ≥80:   (extrap)   → +1.5 (S2-, extrapolated)
+        ≤19:  80.0% acc → -2.5 (S6/S7 boundary, 20 samples, slightly lower)
+        20-39: 65.4% acc → -1.5 (S5 cautious_bearish, convergence, 491+20 samples)
+        40-49: 75.4% acc → -2.0 (S6 bearish, 281 samples, raised from -1.5)
+        50-51:  0.0% acc →  0.0 (S4 neutral, 16 samples)
+        52-59: 34.8% acc → +0.5 (S4+, barely bullish, lowered from +0.8, 141 samples)
+        60-79: 54.5% acc → +1.0 (S3 cautious_bullish, stable, 99 samples)
+        ≥80:   (extrap)   → +1.5 (S2-, extrapolated, no data)
 
-        Design principles (L1 book sources):
-        - Grinold & Kahn *APM* IR=IC×√BR: precision(IC) > granularity(BR)
-        - López de Prado *AFML* meta-labeling: asymmetric accuracy→asymmetric mapping
-        - Carver *Systematic Trading*: continuous signals beat discrete bins
-        - Kahneman *TFS* WYSIATI: classification jumps lose gradient info
-        - Taleb *Black Swan*: each discretization boundary creates a Platonic fold
+        看多整体准确率 42.9% (240条), 看空 69.3% (792条)
+        对称性: 看多保守映射(上限+1.5), 看空中等映射(上限-2.5)
 
-        52-59 / 60-79 tiers use conservative parameters due to limited
-        samples (76 / 59). Re-evaluate via Phase 2 monitor when N≥300/tier.
+        Threshold: bull=52, bear=49 (最优平衡, 覆盖90%, 准确率81.1%)
 
         Args:
             sentiment_score: LLM score 0-100
@@ -275,23 +268,21 @@ class SignalNormalizer:
         if threshold_bear < s < threshold_bull:
             return 0.0
 
-        # ── Bearish regime (high accuracy 89-100%, sufficient samples) ──
+        # ── Bearish regime ──
         if s <= threshold_bear:
             if s <= 19:
-                return -3.0    # 100.0% acc, 9 samples → S7
-            if s <= 30:
-                return -2.5    #  89.0% acc, 93 samples → S6/S7 boundary
-            if s <= 40:
-                return -2.0    #  92.8% acc, bulk → S6
-            return -1.5        #  92.8% acc, 41-48, 351 samples → S5 (kept)
+                return -2.5    #  80.0% acc, 20 samples → S6/S7 (was -3.0)
+            if s <= 39:
+                return -1.5    #  65.4% acc, 491+20 samples → S5 (merged 20-39 tier, was -2.5)
+            return -2.0        #  75.4% acc, 281 samples → S6 (raised from -1.5)
 
-        # ── Bullish regime (low accuracy 38-56%, ⚠️ limited samples 59-76) ──
+        # ── Bullish regime ──
         if s >= threshold_bull:
             if s >= 80:
-                return +1.5    # extrapolated → S2 boundary
+                return +1.5    # extrapolated → S2 (unchanged)
             if s >= 60:
-                return +1.0    # 38.2% acc, 59 samples → S3 (dampened)
-            return +0.8        # 56.2% acc, 76 samples → S4+ (conservative, not +1.0)
+                return +1.0    # 54.5% acc, 99 samples → S3 (stable)
+            return +0.5        # 34.8% acc, 141 samples → S4+ (lowered from +0.8)
 
         return 0.0
 
