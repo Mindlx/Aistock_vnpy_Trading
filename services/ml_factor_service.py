@@ -143,16 +143,24 @@ class MLFactorService:
                     if row and row[0]:
                         ss = int(row[0])
                         # 使用 normalizer 的 v4.0 映射
-                        from src.normalizer import SignalNormalizer
-                        llm_l7 = SignalNormalizer.normalize_mindlynx_score(ss)
+                        # 直接从文件路径加载(避免 sys.path 与 ML 子系统的 src 包冲突)
+                        import importlib.util
+                        _npath = str(PROJECT_ROOT / "src" / "normalizer.py")
+                        _spec = importlib.util.spec_from_file_location("_ml_bridge_normalizer", _npath)
+                        if _spec and _spec.loader:
+                            _norm = importlib.util.module_from_spec(_spec)
+                            _spec.loader.exec_module(_norm)
+                            llm_l7 = _norm.SignalNormalizer.normalize_mindlynx_score(ss)
+                        else:
+                            llm_l7 = 0.0
                         results[code]["llm_sentiment"] = ss
                         results[code]["llm_l7_score"] = llm_l7
                     else:
                         results[code]["llm_sentiment"] = None
                         results[code]["llm_l7_score"] = None
                 _ml_conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[ml-factor] LLM bridge error: {exc}")
 
         return {
             "stocks": results,

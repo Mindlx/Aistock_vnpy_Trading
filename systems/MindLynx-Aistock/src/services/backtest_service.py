@@ -165,7 +165,7 @@ class BacktestService:
                         sentiment_score=evaluation.get("sentiment_score"),  # @calibration 校准参数传递
                         sentiment_direction_correct=evaluation.get("sentiment_direction_correct"),  # @calibration 校准参数传递
                         position_recommendation=evaluation.get("position_recommendation"),
-                        skill_id=None,
+                        skill_id=evaluation.get("skill_id") or None,
                         start_price=evaluation.get("start_price"),
                         end_close=evaluation.get("end_close"),
                         max_high=evaluation.get("max_high"),
