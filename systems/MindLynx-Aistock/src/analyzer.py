@@ -1465,6 +1465,7 @@ class GeminiAnalyzer:
     # 核心模块：核心结论 + 数据透视 + 舆情情报 + 作战计划
     # ========================================
 
+    # @deprecated — 2026-07-27: 已退回到 SYSTEM_PROMPT 统一路径
     LEGACY_DEFAULT_SYSTEM_PROMPT = (
         """你是一位专注于趋势交易的{market_placeholder}投资分析师，负责生成专业的【决策仪表盘】分析报告。
 
@@ -1816,17 +1817,16 @@ class GeminiAnalyzer:
         market_guidelines = get_market_guidelines(stock_code, lang)
         skill_instructions, default_skill_policy, use_legacy_default_prompt = self._get_skill_prompt_sections()
         if use_legacy_default_prompt:
-            base_prompt = self.LEGACY_DEFAULT_SYSTEM_PROMPT.replace("{market_placeholder}", market_role).replace(
-                "{guidelines_placeholder}", market_guidelines
-            )
-        else:
-            skills_section = ""
-            if skill_instructions:
-                skills_section = f"## 激活的交易技能\n\n{skill_instructions}\n"
-            default_skill_policy_section = ""
-            if default_skill_policy:
-                default_skill_policy_section = f"{default_skill_policy}\n"
-            base_prompt = (
+            logger.warning("[DEPRECATED] LEGACY_DEFAULT_SYSTEM_PROMPT (P5) — 退回到 SYSTEM_PROMPT (P4)")
+            use_legacy_default_prompt = False
+        # 以下为 P4 (SYSTEM_PROMPT) 统一路径
+        skills_section = ""
+        if skill_instructions:
+            skills_section = f"## 激活的交易技能\n\n{skill_instructions}\n"
+        default_skill_policy_section = ""
+        if default_skill_policy:
+            default_skill_policy_section = f"{default_skill_policy}\n"
+        base_prompt = (
                 self.SYSTEM_PROMPT.replace("{market_placeholder}", market_role)
                 .replace("{guidelines_placeholder}", market_guidelines)
                 .replace("{default_skill_policy_section}", default_skill_policy_section)

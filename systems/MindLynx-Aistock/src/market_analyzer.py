@@ -24,6 +24,7 @@ from src.core.market_profile import MarketProfile, get_profile
 from src.core.market_strategy import get_market_strategy_blueprint
 from src.report_language import normalize_report_language
 from src.search_service import SearchService
+from src.core.prompt_shared import SCORING_CRITERIA, ACTION_GUARDRAILS
 
 logger = logging.getLogger(__name__)
 
@@ -1627,6 +1628,14 @@ Output the report content directly, no extra commentary.
 {stock_data or ""}
 
 {hourly_analysis_text or ""}
+
+---
+
+## 系统评分标准参考
+{SCORING_CRITERIA}
+
+## 操作约束  
+{ACTION_GUARDRAILS}
 
 ---
 
