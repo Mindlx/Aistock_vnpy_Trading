@@ -291,10 +291,18 @@ def save_fusion_output(
 
 
 def _get_stock_accuracy_discount(code: str) -> float:
-    """根据历史回测准确率对 fusion_score 做折扣。
+    """EWMA 加权准确率 + 贝叶斯收缩 → fusion_score 折扣。
 
-    准确率 < 50% 的股票, fusion_score 按比例打折。
-    折扣公式: discount = 0.5 + accuracy (40%→0.9x, 30%→0.8x, 20%→0.7x)
+    三步:
+      1. EWMA: 按预测日期指数衰减权重, half_life=60 交易日
+      2. 贝叶斯收缩: 个股加权准确率向全局均值收缩 (prior_weight=30)
+      3. 折扣: 0.5 + 校准后准确率
+
+    Args:
+        code: 股票代码
+
+    Returns:
+        折扣系数 (1.0 = 不折扣, < 1.0 = 降权)
     """
     try:
         import sqlite3
@@ -303,20 +311,66 @@ def _get_stock_accuracy_discount(code: str) -> float:
         if not db_path.exists():
             return 1.0
         conn = sqlite3.connect(str(db_path))
-        c = conn.execute(
-            "SELECT CAST(SUM(fusion_correct) AS REAL) / COUNT(*) FROM bt_predictions WHERE stock_code=?",
+
+        # 全局均值 (贝叶斯先验)
+        global_row = conn.execute(
+            "SELECT CAST(SUM(fusion_correct) AS REAL) / NULLIF(COUNT(*), 0), COUNT(*) "
+            "FROM bt_predictions WHERE fusion_correct IS NOT NULL"
+        ).fetchone()
+        global_acc = global_row[0] or 0.5
+        global_n = global_row[1] or 1
+
+        # 个股所有预测记录 (含日期, 用于 EWMA 权重)
+        rows = conn.execute(
+            "SELECT fusion_correct, date FROM bt_predictions "
+            "WHERE stock_code=? AND fusion_correct IS NOT NULL ORDER BY date",
             (code,),
-        )
-        row = c.fetchone()
+        ).fetchall()
         conn.close()
-        if row and row[0] is not None and row[0] < 0.5:
-            discount = 0.5 + row[0]  # 40% → 0.9, 30% → 0.8
-            logger.info("[评分校准] %s 准确率 %.0f%% < 50%%, fusion_score 折扣 %.2f×", code, row[0] * 100, discount)
-            return discount
-        return 1.0
+
+        if not rows:
+            return 1.0
+
+        n = len(rows)
+        last_date = rows[-1][1]
+
+        # EWMA 权重: 半衰期 60 个交易日
+        half_life = 60.0
+        total_weight = 0.0
+        weighted_correct = 0.0
+
+        for correct, date_str in rows:
+            days_ago = _trading_days_between(date_str, last_date)
+            w = 0.5 ** (days_ago / half_life)
+            total_weight += w
+            if correct == 1:
+                weighted_correct += w
+
+        ewma_acc = weighted_correct / total_weight if total_weight > 0 else 0.5
+
+        # 贝叶斯收缩: 小样本向全局均值回归
+        prior_weight = 30.0
+        n_effective = min(n, 60)  # 有效样本上限 60
+        calibrated = (global_acc * prior_weight + ewma_acc * n_effective) / (prior_weight + n_effective)
+
+        discount = 0.5 + calibrated  # 40%→0.9, 30%→0.8, 20%→0.7
+        if discount < 1.0:
+            logger.info(
+                "[评分校准] %s EWMA=%.1f%% 校准=%.1f%% (N=%d) → 折扣 %.2f×",
+                code, ewma_acc * 100, calibrated * 100, n, discount,
+            )
+        return min(1.0, max(0.5, discount))
     except Exception as exc:
         logger.debug("[评分校准] %s 跳过: %s", code, exc)
         return 1.0
+
+
+def _trading_days_between(d1: str, d2: str) -> float:
+    """估算两个交易日之间的交易日数（近似: 日历日 × 5/7）"""
+    from datetime import datetime
+    a = datetime.strptime(d1, "%Y-%m-%d")
+    b = datetime.strptime(d2, "%Y-%m-%d")
+    return abs((b - a).days) * 5.0 / 7.0
 
 
 def _save_fusion_to_analysis_db(results: list[dict], date_str: str):
