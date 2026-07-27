@@ -185,11 +185,84 @@ def print_report(results: list[dict], markdown: bool = False):
     return "\n".join(lines)
 
 
+def cmd_window_analysis():
+    """分析不同窗口大小下每只股票的准确率变化，检测非平稳性。"""
+    print("读取 bt_results.db ...")
+    conn = sqlite3.connect(str(BACKTEST_DB))
+    rows = conn.execute(
+        "SELECT stock_code, date, fusion_correct FROM bt_predictions "
+        "WHERE fusion_correct IS NOT NULL ORDER BY stock_code, date"
+    ).fetchall()
+    conn.close()
+
+    stock_data: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        stock_data[r[0]].append({"date": r[1], "correct": r[2]})
+
+    pool_names = load_stock_names()
+    print(f"\n{'='*75}")
+    print(f"  窗口敏感性分析 — 不同窗口下每只股票的准确率")
+    print(f"{'='*75}")
+    print(f"\n{'代码':>8} {'名称':8s} {'全量':>6s} {'N=30':>6s} {'N=20':>6s} {'N=10':>6s} {'极差':>5s} {'稳定性':8s}")
+    print("-" * 65)
+
+    unstable_stocks = []
+    for code in sorted(stock_data.keys()):
+        data = stock_data[code]
+        hits = [d for d in data if d["correct"] == 1]
+        total = len(data)
+
+        full_acc = len(hits) / total * 100 if total > 0 else 0
+        wins = [30, 20, 10]
+        win_accs = {}
+        for w in wins:
+            if total >= w:
+                recent = data[-w:]
+                win_accs[w] = sum(1 for d in recent if d["correct"] == 1) / w * 100
+            else:
+                win_accs[w] = None
+
+        # 极差 = 全量与最近窗口的最大差异
+        valid_accs = [full_acc] + [v for v in win_accs.values() if v is not None]
+        spread = max(valid_accs) - min(valid_accs)
+        unstable = spread > 15
+
+        name = pool_names.get(code, "")
+        flag = "⚠️ 非平稳" if unstable else "✅ 平稳"
+        if unstable:
+            unstable_stocks.append((code, name, full_acc, win_accs, spread))
+
+        w30 = f"{win_accs[30]:>5.1f}%" if win_accs[30] is not None else "   N/A"
+        w20 = f"{win_accs[20]:>5.1f}%" if win_accs[20] is not None else "   N/A"
+        w10 = f"{win_accs[10]:>5.1f}%" if win_accs[10] is not None else "   N/A"
+        print(f"{code:>8} {name:8s} {full_acc:>5.1f}% {w30} {w20} {w10} {spread:>4.1f}% {flag}")
+
+    if unstable_stocks:
+        print(f"\n{'='*75}")
+        print(f"  ⚠️  非平稳股票（极差 > 15%） — 需要近期加权估计准确率")
+        print(f"{'='*75}\n")
+        for code, name, full, win_accs, spread in unstable_stocks:
+            details = " | ".join(f"N={w}={win_accs[w]:.1f}%" for w in [30, 20, 10] if win_accs[w] is not None)
+            print(f"  {code} {name}: 全量={full:.1f}% 极差={spread:.1f}% ({details})")
+        print()
+        print("  建议: 这些股票的校准折扣应使用 EWMA 加权准确率，")
+        print("  而非全量历史平均。半衰期建议 30-60 个交易日。")
+    else:
+        print("\n  所有股票的准确率在不同窗口下保持稳定。全量历史平均即可。")
+
+    print(f"\n  数据范围: {rows[0][1]} ~ {rows[-1][1]}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="评分校准诊断")
     parser.add_argument("--stock", type=str, default=None, help="指定股票代码")
     parser.add_argument("--output", type=str, default=None, help="输出 Markdown 文件")
+    parser.add_argument("--window-analysis", action="store_true", help="窗口敏感性分析")
     args = parser.parse_args()
+
+    if args.window_analysis:
+        cmd_window_analysis()
+        return
 
     print(f"读取 analysis_history ...")
     scores = load_analysis_scores()
