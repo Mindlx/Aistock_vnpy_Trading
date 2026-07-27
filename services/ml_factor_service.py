@@ -1,7 +1,9 @@
 """
 ml 因子层实时服务 — 从 data_warehouse.db 读取日K线数据，
-调用 FactorEngine 计算 13 因子 composite_score。
-完全绕过 LLM 层，纯数学计算。
+调用 FactorEngine 计算 14 因子 composite_score + l7_score。
+同时读取最新的 LLM sentiment_score，以 L7 映射并入输出。
+
+完全绕过 LLM 层，纯数学计算 + 独立 LLM 信号桥接。
 
 用法:
     python services/ml_factor_service.py                     # 执行一次
@@ -125,6 +127,32 @@ class MLFactorService:
                 "composite_label": result.composite_label,
                 "factors": {k: float(v) for k, v in result.raw_factors.items()},
             }
+
+        # 第四步：数值级融合 — 读取最新 LLM sentiment_score，以 L7 映射并入
+        try:
+            import sqlite3
+            ML_DB = PROJECT_ROOT / "systems" / "MindLynx-Aistock" / "data" / "stock_analysis.db"
+            if ML_DB.exists():
+                _ml_conn = sqlite3.connect(str(ML_DB))
+                for code in list(results.keys()):
+                    row = _ml_conn.execute(
+                        "SELECT sentiment_score FROM analysis_history "
+                        "WHERE code=? AND sentiment_score>0 "
+                        "ORDER BY created_at DESC LIMIT 1", (code,)
+                    ).fetchone()
+                    if row and row[0]:
+                        ss = int(row[0])
+                        # 使用 normalizer 的 v4.0 映射
+                        from src.normalizer import SignalNormalizer
+                        llm_l7 = SignalNormalizer.normalize_mindlynx_score(ss)
+                        results[code]["llm_sentiment"] = ss
+                        results[code]["llm_l7_score"] = llm_l7
+                    else:
+                        results[code]["llm_sentiment"] = None
+                        results[code]["llm_l7_score"] = None
+                _ml_conn.close()
+        except Exception:
+            pass
 
         return {
             "stocks": results,

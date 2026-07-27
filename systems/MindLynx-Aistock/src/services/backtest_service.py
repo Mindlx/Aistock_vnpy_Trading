@@ -135,6 +135,7 @@ class BacktestService:
                 evaluation = BacktestEngine.evaluate_single(
                     operation_advice=analysis.operation_advice,
                     sentiment_score=getattr(analysis, "sentiment_score", None),
+                    skill_id=getattr(analysis, "skill_id", None),
                     analysis_date=start_daily.date,
                     start_price=float(start_daily.close),
                     forward_bars=forward_bars,
