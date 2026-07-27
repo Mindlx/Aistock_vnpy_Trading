@@ -648,7 +648,7 @@ def get_signal_level(advice: Any, score: Any, language: str | None) -> tuple[str
     except (TypeError, ValueError):
         numeric_score = 50
 
-    if numeric_score >= 80:
+    if numeric_score >= 75:
         return (_OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language], "💚", "strong_buy")
     if numeric_score >= 65:
         return (_OPERATION_ADVICE_TRANSLATIONS["buy"][normalized_language], "🟢", "buy")
