@@ -73,7 +73,7 @@ _SIGNAL_RANK = {
 
 def _signal_sort_key(r):
     """按信号好→差排序，同级内按 sentiment_score 降序。"""
-    _, _, tag = get_signal_level(r.operation_advice, r.sentiment_score, None)
+    _, _, tag = get_signal_level(r.operation_advice, SignalNormalizer.calibrate_score(r.sentiment_score) if r.sentiment_score else None, None)
     return _SIGNAL_RANK.get(tag, 99), -r.sentiment_score
 from src.utils.data_processing import normalize_model_used
 from src.utils.sanitize import sanitize_diagnostic_text
@@ -1002,7 +1002,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         """Get localized signal level and color based on operation advice."""
         return get_signal_level(
             result.operation_advice,
-            result.sentiment_score,
+            SignalNormalizer.calibrate_score(result.sentiment_score) if result.sentiment_score else None,
             self._get_report_language(result),
         )
 
@@ -2328,7 +2328,7 @@ class NotificationManager:
         lines = [f"📊 **{labels['summary_heading']}**", ""]
 
         for r in sorted(results, key=_signal_sort_key):
-            _, emoji, _ = get_signal_level(r.operation_advice, r.sentiment_score, report_language)
+            _, emoji, _ = get_signal_level(r.operation_advice, SignalNormalizer.calibrate_score(r.sentiment_score) if r.sentiment_score else None, report_language)
             name = get_localized_stock_name(r.name, r.code, report_language)
             lines.append(
                 f"{emoji} **{name}**: {localize_operation_advice(r.operation_advice, report_language)} ｜ "
