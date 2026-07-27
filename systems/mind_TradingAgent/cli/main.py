@@ -1,13 +1,5 @@
 from typing import Optional
 import datetime
-import datetime
-import os
-import sys
-import time
-from collections import deque
-from functools import wraps
-from pathlib import Path
-
 import typer
 import questionary
 from pathlib import Path
@@ -42,18 +34,6 @@ from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
 
 console = Console()
-
-# prompt_toolkit's win32 output module is importable only on Windows (it asserts
-# the platform at import time), so gate on the platform rather than catching the
-# failure — that way a genuinely broken prompt_toolkit on Windows still surfaces
-# instead of silently disabling the handler below. Off Windows this stays an
-# empty tuple, which `except` accepts and never matches (#1138).
-if sys.platform == "win32":  # pragma: no cover - platform dependent
-    from prompt_toolkit.output.win32 import NoConsoleScreenBufferError
-
-    _NO_CONSOLE_ERRORS: tuple[type[BaseException], ...] = (NoConsoleScreenBufferError,)
-else:
-    _NO_CONSOLE_ERRORS = ()
 
 app = typer.Typer(
     name="mind-tradingagent",
@@ -1300,19 +1280,7 @@ def analyze(
         from mind_tradingagent.graph.checkpointer import clear_all_checkpoints
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
-    try:
-        run_analysis(checkpoint=checkpoint)
-    except _NO_CONSOLE_ERRORS:
-        # A terminal with no console buffer cannot host the interactive prompts.
-        # Emit one actionable line on stderr instead of a prompt_toolkit
-        # traceback; plain text, since rich may not render here either (#1138).
-        typer.echo(
-            "Error: no Windows console available. The interactive CLI needs a real "
-            "console buffer — run it from Windows Terminal, PowerShell, or cmd.exe "
-            "rather than a piped or embedded terminal.",
-            err=True,
-        )
-        raise typer.Exit(code=1) from None
+    run_analysis(checkpoint=checkpoint)
 
 
 if __name__ == "__main__":

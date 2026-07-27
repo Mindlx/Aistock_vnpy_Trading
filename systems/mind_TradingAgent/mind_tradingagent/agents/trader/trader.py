@@ -12,7 +12,6 @@ from mind_tradingagent.agents.utils.agent_utils import (
     get_language_instruction,
 )
 from mind_tradingagent.agents.utils.structured import (
-    NO_EXTERNAL_TOOLS,
     bind_structured,
     invoke_structured_or_freetext,
 )
@@ -36,8 +35,8 @@ def create_trader(llm):
                     "(3) A股交易时间 — 9:15-9:25 集合竞价 (call auction, orders cancellable 9:15-9:20), 9:30-11:30 and 13:00-15:00 连续竞价 (continuous auction); "
                     "(4) Minimum order size: 1手 = 100 shares — all buy/sell quantities must be multiples of 100; "
                     "(5) ST (Special Treatment) stocks — elevated delisting risk, additional trading restrictions, limit portfolio exposure. "
-                    "Anchor your reasoning in the analysts' reports and the research plan. "
-                    + NO_EXTERNAL_TOOLS
+                    "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
+                    "Anchor your reasoning in the analysts' reports and the research plan."
                     + get_language_instruction()
                 ),
             },

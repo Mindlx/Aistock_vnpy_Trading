@@ -43,13 +43,15 @@ class Reflector:
         for US tickers, ``"^N225"`` for ``.T`` listings); defaults to SPY for
         callers that haven't been updated to thread the benchmark through.
         """
+        raw_str = f"{raw_return:+.1%}" if raw_return is not None else "N/A"
+        alpha_str = f"{alpha_return:+.1%}" if alpha_return is not None else "N/A"
         messages = [
             ("system", self.log_reflection_prompt),
             (
                 "human",
                 (
-                    f"Raw return: {raw_return:+.1%}\n"
-                    f"Alpha vs {benchmark_name}: {alpha_return:+.1%}\n\n"
+                    f"Raw return: {raw_str}\n"
+                    f"Alpha vs {benchmark_name}: {alpha_str}\n\n"
                     f"Final Decision:\n{final_decision}"
                 ),
             ),

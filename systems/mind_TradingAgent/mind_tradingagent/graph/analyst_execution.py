@@ -59,7 +59,7 @@ ANALYST_NODE_SPECS: dict[str, AnalystNodeSpec] = {
     ),
     "capital_flow": AnalystNodeSpec(
         key="capital_flow",
-        agent_node="Capital Flow Analyst",
+        agent_node="Capital Flow Tracker",
         clear_node="Msg Clear Capital Flow",
         tool_node="tools_capital_flow",
         report_key="capital_flow_report",

@@ -35,7 +35,7 @@ def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
     code = symbol.replace(".SS", "").replace(".SZ", "").replace(".SH", "").strip()
     if len(code) == 6 and code.isdigit():
         try:
-            from services.data_warehouse.warehouse import WarehouseReader
+            from services.data_warehouse import WarehouseReader
             reader = WarehouseReader()
             df = reader.get_daily_df(code, days=120)
             if df is not None and not df.empty:

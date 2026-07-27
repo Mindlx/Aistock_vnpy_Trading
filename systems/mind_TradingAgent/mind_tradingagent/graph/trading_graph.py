@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from services.data_warehouse.warehouse import WarehouseReader
+import yfinance as yf
 from langgraph.prebuilt import ToolNode
 
 from mind_tradingagent.llm_clients import create_llm_client
@@ -26,6 +26,7 @@ from mind_tradingagent.dataflows.config import set_config
 from mind_tradingagent.agents.utils.agent_utils import (
     build_instrument_context,
     get_balance_sheet,
+    get_capital_flows,
     get_cashflow,
     get_fundamentals,
     get_global_news,
@@ -49,24 +50,6 @@ from .setup import GraphSetup
 from .signal_processing import SignalProcessor
 
 logger = logging.getLogger(__name__)
-
-
-def _coerce_max_retries(value):
-    """Validate an ``llm_max_retries`` value to a non-negative int.
-
-    Accepts an int or a numeric string (env vars arrive as strings). Rejects
-    booleans and negatives loudly so a misconfiguration fails at startup rather
-    than silently disabling retries.
-    """
-    if isinstance(value, bool):
-        raise ValueError(f"llm_max_retries must be an integer, not a boolean: {value!r}")
-    try:
-        n = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"llm_max_retries must be an integer, got {value!r}") from exc
-    if n < 0:
-        raise ValueError(f"llm_max_retries must be >= 0, got {n}")
-    return n
 
 
 class TradingAgentsGraph:
@@ -149,9 +132,6 @@ class TradingAgentsGraph:
         self.ticker = None
         self.log_states_dict = {}  # date to full state dict
 
-        # Graph-shape-affecting run choices, kept for the checkpoint signature.
-        self.selected_analysts = tuple(selected_analysts)
-
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
         self.graph = self.workflow.compile()
@@ -183,12 +163,6 @@ class TradingAgentsGraph:
         temperature = self.config.get("temperature")
         if temperature is not None and temperature != "":
             kwargs["temperature"] = float(temperature)
-
-        # SDK retry budget is cross-provider. Forward it only when explicitly set
-        # so each provider keeps its own default (usually 2) otherwise (#1091).
-        max_retries = self.config.get("llm_max_retries")
-        if max_retries is not None and max_retries != "":
-            kwargs["max_retries"] = _coerce_max_retries(max_retries)
 
         return kwargs
 
@@ -232,6 +206,20 @@ class TradingAgentsGraph:
                     get_income_statement,
                 ]
             ),
+            "policy": ToolNode(
+                [
+                    # Policy analysis: news + fundamentals
+                    get_news,
+                    get_global_news,
+                    get_fundamentals,
+                ]
+            ),
+            "capital_flow": ToolNode(
+                [
+                    # Capital flow tracking
+                    get_capital_flows,
+                ]
+            ),
         }
 
     def _resolve_benchmark(self, ticker: str) -> str:
@@ -261,6 +249,9 @@ class TradingAgentsGraph:
     ) -> tuple[float | None, float | None, int | None]:
         """Fetch raw and alpha return for ticker over holding_days from trade_date.
 
+        Uses WarehouseReader for A-share stocks (bare 6-digit code),
+        falls back to yfinance for non-A-share symbols.
+
         ``benchmark`` is the index used as the alpha baseline (resolved by the
         caller via ``_resolve_benchmark``). Returns ``(raw_return, alpha_return,
         actual_holding_days)`` or ``(None, None, None)`` if price data is
@@ -268,33 +259,55 @@ class TradingAgentsGraph:
         """
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
-            end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
+            end = start + timedelta(days=holding_days + 7)
             end_str = end.strftime("%Y-%m-%d")
 
-            wr = WarehouseReader()
+            bare = ticker.replace(".SS", "").replace(".SZ", "").replace(".SH", "").strip()
 
-            # Fetch price data via the data warehouse (akshare/Tushare for A-shares).
-            stock = wr.get_daily_df(ticker, start=trade_date, end=end_str)
-            bench_df = wr.get_daily_df(benchmark, start=trade_date, end=end_str)
+            # A-share: use WarehouseReader
+            if len(bare) == 6 and bare.isdigit():
+                from services.data_warehouse import WarehouseReader
+                reader = WarehouseReader()
+                stock_df = reader.get_daily_df(bare, start=trade_date, end=end_str)
+                if stock_df.empty:
+                    return None, None, None
+                stock_close = stock_df["close"].values
+                stock_close_start = stock_close[0]
+                stock_close_end = stock_close[min(holding_days, len(stock_close) - 1)]
+                raw = float((stock_close_end - stock_close_start) / stock_close_start)
 
-            if stock.empty or bench_df.empty:
+                # Benchmark is a yfinance-compatible ticker (e.g. 000001.SS)
+                try:
+                    import yfinance as yf
+                    bench_ticker = yf.Ticker(benchmark)
+                    bench_data = bench_ticker.history(start=trade_date, end=end_str)
+                    if len(bench_data) >= 2:
+                        bench_days = min(holding_days, len(bench_data) - 1)
+                        bench_close = bench_data["Close"].values
+                        bench_ret = float((bench_close[bench_days] - bench_close[0]) / bench_close[0])
+                        alpha = raw - bench_ret
+                        return raw, alpha, holding_days
+                    return raw, None, holding_days
+                except Exception:
+                    return raw, None, holding_days
+
+            # Non-A-share: keep original yfinance logic
+            from mind_tradingagent.dataflows.symbol_utils import normalize_symbol
+            import yfinance as yf
+            stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
+            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
+
+            if len(stock) < 2 or len(bench) < 2:
                 return None, None, None
 
-            # Warehouse returns lowercase column names; the arithmetic below
-            # uses the original "Close" convention.
-            if "close" in stock.columns and "Close" not in stock.columns:
-                stock = stock.rename(columns={"close": "Close"})
-            if "close" in bench_df.columns and "Close" not in bench_df.columns:
-                bench_df = bench_df.rename(columns={"close": "Close"})
-
-            actual_days = min(holding_days, len(stock) - 1, len(bench_df) - 1)
+            actual_days = min(holding_days, len(stock) - 1, len(bench) - 1)
             raw = float(
                 (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0])
                 / stock["Close"].iloc[0]
             )
             bench_ret = float(
-                (bench_df["Close"].iloc[actual_days] - bench_df["Close"].iloc[0])
-                / bench_df["Close"].iloc[0]
+                (bench["Close"].iloc[actual_days] - bench["Close"].iloc[0])
+                / bench["Close"].iloc[0]
             )
             alpha = raw - bench_ret
             return raw, alpha, actual_days
@@ -357,20 +370,6 @@ class TradingAgentsGraph:
         identity = resolve_instrument_identity(ticker)
         return build_instrument_context(ticker, asset_type, identity)
 
-    def _run_signature(self, asset_type: str) -> str:
-        """Graph-shape inputs that must invalidate a checkpoint if changed.
-
-        Keyed into the checkpoint thread ID so a resume under a different analyst
-        selection, debate/risk depth, or asset mode starts fresh instead of
-        silently continuing the previous graph (#1089).
-        """
-        return "|".join([
-            "analysts=" + ",".join(self.selected_analysts),
-            f"debate={self.config['max_debate_rounds']}",
-            f"risk={self.config['max_risk_discuss_rounds']}",
-            f"asset={asset_type}",
-        ])
-
     def propagate(self, company_name, trade_date, asset_type: str = "stock"):
         """Run the trading agents graph for a company on a specific date.
 
@@ -384,7 +383,11 @@ class TradingAgentsGraph:
         self.ticker = company_name
 
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
-        self._resolve_pending_entries(company_name)
+        # ── 防御: 历史结算失败不阻断当前分析 ──
+        try:
+            self._resolve_pending_entries(company_name)
+        except Exception as _e:
+            logger.warning("Pending entry resolution failed for %s: %s (continuing)", company_name, _e)
 
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):
@@ -395,8 +398,7 @@ class TradingAgentsGraph:
             self.graph = self.workflow.compile(checkpointer=saver)
 
             step = checkpoint_step(
-                self.config["data_cache_dir"], company_name, str(trade_date),
-                self._run_signature(asset_type),
+                self.config["data_cache_dir"], company_name, str(trade_date)
             )
             if step is not None:
                 logger.info(
@@ -443,10 +445,9 @@ class TradingAgentsGraph:
         )
         args = self.propagator.get_graph_args()
 
-        # Inject thread_id so same ticker+date+graph-shape resumes; a different
-        # date or graph shape starts fresh (#1089).
+        # Inject thread_id so same ticker+date resumes, different date starts fresh.
         if self.config.get("checkpoint_enabled"):
-            tid = thread_id(company_name, str(trade_date), self._run_signature(asset_type))
+            tid = thread_id(company_name, str(trade_date))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
         if self.debug:
@@ -487,8 +488,7 @@ class TradingAgentsGraph:
         # Clear checkpoint on successful completion to avoid stale state.
         if self.config.get("checkpoint_enabled"):
             clear_checkpoint(
-                self.config["data_cache_dir"], company_name, str(trade_date),
-                self._run_signature(asset_type),
+                self.config["data_cache_dir"], company_name, str(trade_date)
             )
 
         return final_state, self.process_signal(final_state["final_trade_decision"])

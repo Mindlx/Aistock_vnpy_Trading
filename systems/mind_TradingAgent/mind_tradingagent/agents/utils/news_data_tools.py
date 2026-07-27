@@ -3,23 +3,6 @@ from typing import Annotated, Optional
 from mind_tradingagent.dataflows.interface import route_to_vendor
 
 @tool
-def get_news(
-    ticker: Annotated[str, "Ticker symbol"],
-    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
-    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
-) -> str:
-    """
-    Retrieve news data for a given ticker symbol.
-    Uses the configured news_data vendor.
-    Args:
-        ticker (str): Ticker symbol
-        start_date (str): Start date in yyyy-mm-dd format
-        end_date (str): End date in yyyy-mm-dd format
-    Returns:
-        str: A formatted string containing news data
-    """
-    return route_to_vendor("get_news", ticker, start_date, end_date)
-
 def get_capital_flows(
     ticker: Annotated[str, "Ticker symbol of the company"],
     days: Annotated[int, "Number of trading days to look back (default 30)"] = 30,
@@ -36,6 +19,24 @@ def get_capital_flows(
         str: A formatted string containing capital flow data
     """
     return route_to_vendor("get_capital_flows", ticker, days)
+
+@tool
+def get_news(
+    ticker: Annotated[str, "Ticker symbol"],
+    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
+    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+) -> str:
+    """
+    Retrieve news data for a given ticker symbol.
+    Uses the configured news_data vendor.
+    Args:
+        ticker (str): Ticker symbol
+        start_date (str): Start date in yyyy-mm-dd format
+        end_date (str): End date in yyyy-mm-dd format
+    Returns:
+        str: A formatted string containing news data
+    """
+    return route_to_vendor("get_news", ticker, start_date, end_date)
 
 @tool
 def get_global_news(

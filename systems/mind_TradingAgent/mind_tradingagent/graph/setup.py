@@ -3,6 +3,7 @@
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 from langgraph.prebuilt import ToolNode
 
 from mind_tradingagent.agents import (
@@ -26,22 +27,6 @@ from mind_tradingagent.agents.utils.agent_states import AgentState
 
 from .analyst_execution import build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
-
-# Every target a shared conditional router can return. Each edge driven by the
-# router maps all of them, so a fall-through return (e.g. under prompt/i18n/
-# refactor drift in the speaker labels) can never hit a missing path_map entry
-# and crash LangGraph mid-run (#1088).
-DEBATE_PATH_MAP = {
-    "Bull Researcher": "Bull Researcher",
-    "Bear Researcher": "Bear Researcher",
-    "Research Manager": "Research Manager",
-}
-RISK_ANALYSIS_PATH_MAP = {
-    "Aggressive Analyst": "Aggressive Analyst",
-    "Conservative Analyst": "Conservative Analyst",
-    "Neutral Analyst": "Neutral Analyst",
-    "Portfolio Manager": "Portfolio Manager",
-}
 
 
 class GraphSetup:
@@ -117,45 +102,74 @@ class GraphSetup:
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
         # Define edges
-        # Start with the first analyst
-        workflow.add_edge(START, plan.specs[0].agent_node)
+        # Fan-out: all analysts run in parallel (no data dependency between them)
+        def _route_to_all_analysts(state):
+            return [Send(spec.agent_node, state) for spec in plan.specs]
 
-        # Connect analysts in sequence
-        for i, spec in enumerate(plan.specs):
-            current_analyst = spec.agent_node
-            current_tools = spec.tool_node
-            current_clear = spec.clear_node
+        workflow.add_conditional_edges(START, _route_to_all_analysts, [spec.agent_node for spec in plan.specs])
 
-            # Add conditional edges for current analyst
+        # Each analyst: analyst → tool (optional) → analyst → clear
+        for spec in plan.specs:
             workflow.add_conditional_edges(
-                current_analyst,
+                spec.agent_node,
                 getattr(self.conditional_logic, f"should_continue_{spec.key}"),
-                [current_tools, current_clear],
+                [spec.tool_node, spec.clear_node],
             )
-            workflow.add_edge(current_tools, current_analyst)
+            workflow.add_edge(spec.tool_node, spec.agent_node)
 
-            # Connect to next analyst or to Bull Researcher if this is the last analyst
-            if i < len(plan.specs) - 1:
-                workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
-            else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+        # Fan-in: all analysts finish → aggregate → Bull Researcher
+        def _aggregate_analysts(state):
+            """Collect all analyst reports and pass to debate stage."""
+            return state
 
-        # Both research-debate edges share the complete DEBATE_PATH_MAP (#1088).
-        for debate_node in ("Bull Researcher", "Bear Researcher"):
-            workflow.add_conditional_edges(
-                debate_node,
-                self.conditional_logic.should_continue_debate,
-                DEBATE_PATH_MAP,
-            )
+        workflow.add_node("aggregate_analysts", _aggregate_analysts)
+        for spec in plan.specs:
+            workflow.add_edge(spec.clear_node, "aggregate_analysts")
+        workflow.add_edge("aggregate_analysts", "Bull Researcher")
+
+        # Add remaining edges
+        workflow.add_conditional_edges(
+            "Bull Researcher",
+            self.conditional_logic.should_continue_debate,
+            {
+                "Bear Researcher": "Bear Researcher",
+                "Research Manager": "Research Manager",
+            },
+        )
+        workflow.add_conditional_edges(
+            "Bear Researcher",
+            self.conditional_logic.should_continue_debate,
+            {
+                "Bull Researcher": "Bull Researcher",
+                "Research Manager": "Research Manager",
+            },
+        )
         workflow.add_edge("Research Manager", "Trader")
         workflow.add_edge("Trader", "Aggressive Analyst")
-        # All three risk edges share the complete RISK_ANALYSIS_PATH_MAP (#1088).
-        for risk_node in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
-            workflow.add_conditional_edges(
-                risk_node,
-                self.conditional_logic.should_continue_risk_analysis,
-                RISK_ANALYSIS_PATH_MAP,
-            )
+        workflow.add_conditional_edges(
+            "Aggressive Analyst",
+            self.conditional_logic.should_continue_risk_analysis,
+            {
+                "Conservative Analyst": "Conservative Analyst",
+                "Portfolio Manager": "Portfolio Manager",
+            },
+        )
+        workflow.add_conditional_edges(
+            "Conservative Analyst",
+            self.conditional_logic.should_continue_risk_analysis,
+            {
+                "Neutral Analyst": "Neutral Analyst",
+                "Portfolio Manager": "Portfolio Manager",
+            },
+        )
+        workflow.add_conditional_edges(
+            "Neutral Analyst",
+            self.conditional_logic.should_continue_risk_analysis,
+            {
+                "Aggressive Analyst": "Aggressive Analyst",
+                "Portfolio Manager": "Portfolio Manager",
+            },
+        )
 
         workflow.add_edge("Portfolio Manager", END)
 
