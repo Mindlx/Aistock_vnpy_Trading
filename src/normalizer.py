@@ -287,6 +287,24 @@ class SignalNormalizer:
         return 0.0
 
     @classmethod
+    def calibrate_score(cls, raw_score: int) -> int:
+        """raw 0-100 → v5.0 calibrated 0-100 (用于推送/前端显示)
+
+        先经 v5.0 映射到 L7, 再线性还原到 0-100:
+          L7=-3.0 → 0, L7=+3.0 → 100, L7=0 → 50
+
+        Args:
+            raw_score: LLM 原始评分 0-100
+        Returns:
+            calibrated_score: 校准后的 0-100
+        """
+        l7 = cls.normalize_mindlynx_score(raw_score)
+        calibrated = 50 + round(l7 * 50 / 3.0)
+        return max(0, min(100, calibrated))
+
+
+
+    @classmethod
     def normalize_tradingagent(cls, rating: str, debate_state: Optional[Dict[str, Any]] = None) -> float:
         """
         at 归一化: 5 级分类 → 连续 L7 映射（v3.2）。

@@ -266,6 +266,7 @@ class AnalysisHistory(Base):
             "name": self.name,
             "report_type": self.report_type,
             "sentiment_score": self.sentiment_score,
+            "calibrated_score": (lambda s: __import__('src.normalizer', fromlist=['SignalNormalizer']).SignalNormalizer.calibrate_score(s) if s else None)(self.sentiment_score),
             "operation_advice": self.operation_advice,
             "trend_prediction": self.trend_prediction,
             "analysis_summary": self.analysis_summary,

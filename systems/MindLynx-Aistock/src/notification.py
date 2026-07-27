@@ -1,4 +1,5 @@
 """
+from src.normalizer import SignalNormalizer
 ===================================
 A股自选股智能分析系统 - 通知层
 ===================================
@@ -759,7 +760,7 @@ class NotificationService(
                 report_lines.append(
 f"{emoji} **{self._get_display_name(r, report_language)}**: "
 f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
-f"{labels['score_label']} {r.sentiment_score} ｜ "
+f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)} ｜ "
 f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 )
         else:
@@ -1077,7 +1078,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                     f"{signal_emoji} **{display_name}**: "
                     f"¥{r.current_price:.2f} {r.change_pct:+.1f}% ｜ "
                     f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
-                    f"{labels['score_label']} {r.sentiment_score} ｜ "
+                    f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)} ｜ "
                     f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 )
             report_lines.extend(
@@ -1462,7 +1463,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 lines.append(
                     f"{signal_emoji} **{stock_name}**: "
                     f"{localize_operation_advice(r.operation_advice, report_language)}｜"
-                    f"{labels['score_label']} {r.sentiment_score}｜"
+                    f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)}｜"
                     f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 )
         else:
@@ -1642,7 +1643,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
             lines.append(f"### {emoji} **{self._get_display_name(result, report_language)}**")
             lines.append(
                 f"**{localize_operation_advice(result.operation_advice, report_language)}**｜"
-                f"{labels['score_label']}:{result.sentiment_score}｜"
+                f"{labels['score_label']}:{SignalNormalizer.calibrate_score(result.sentiment_score)}｜"
                 f"{localize_trend_prediction(result.trend_prediction, report_language)}"
             )
 
@@ -1750,7 +1751,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 f"**{name}** {emoji} "
                 f"{price_str} {change_str} ｜ "
                 f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
-                f"{labels['score_label']} {r.sentiment_score} ｜ {one}{quant_line}"
+                f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)} ｜ {one}{quant_line}"
             )
         lines.append("")
         lines.append(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -1789,7 +1790,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         lines = [
             f"{signal_emoji} **{stock_name}**",
             "",
-            f"> {report_date} ｜ ¥{result.current_price:.2f} {result.change_pct:+.1f}% ｜ {labels['score_label']}: **{result.sentiment_score}** ｜ {localize_trend_prediction(result.trend_prediction, report_language)}",
+            f"> {report_date} ｜ ¥{result.current_price:.2f} {result.change_pct:+.1f}% ｜ {labels['score_label']}: **{SignalNormalizer.calibrate_score(result.sentiment_score)}** ｜ {localize_trend_prediction(result.trend_prediction, report_language)}",
             "",
         ]
 
@@ -2279,7 +2280,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         return str(filepath)
 
 
-class NotificationBuilder:
+class NotificationManager:
     """
     通知消息构建器
 
@@ -2331,7 +2332,7 @@ class NotificationBuilder:
             name = get_localized_stock_name(r.name, r.code, report_language)
             lines.append(
                 f"{emoji} **{name}**: {localize_operation_advice(r.operation_advice, report_language)} ｜ "
-                f"{labels['score_label']} {r.sentiment_score}"
+                f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)}"
             )
 
         return "\n".join(lines)
