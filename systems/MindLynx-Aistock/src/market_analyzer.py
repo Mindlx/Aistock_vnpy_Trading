@@ -420,11 +420,8 @@ class MarketAnalyzer:
 
     def _get_index_change_arrow(self, change_pct: float) -> str:
         if change_pct == 0:
-            return "⚪"
-        color_scheme = getattr(getattr(self, "config", None), "market_review_color_scheme", "green_up")
-        if color_scheme == "red_up":
-            return "🔴" if change_pct > 0 else "🟢"
-        return "🟢" if change_pct > 0 else "🔴"
+            return "→"
+        return "↑" if change_pct > 0 else "↓"
 
     def _get_review_title(self, date: str) -> str:
         if self._get_review_language() == "en":
