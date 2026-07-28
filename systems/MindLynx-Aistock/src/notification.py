@@ -1,5 +1,4 @@
 """
-from src.normalizer import SignalNormalizer
 ===================================
 A股自选股智能分析系统 - 通知层
 ===================================
@@ -14,6 +13,8 @@ A股自选股智能分析系统 - 通知层
    - 邮件 SMTP
    - Pushover（手机/桌面推送）
 """
+
+from src.normalizer import SignalNormalizer
 
 from __future__ import annotations
 import logging
