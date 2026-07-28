@@ -576,7 +576,8 @@ class RealtimeMonitorService:
                             )
                             row = cur.fetchone()
                             if row:
-                                state.score = int(row[0])
+                                from src.normalizer import SignalNormalizer
+                                state.score = SignalNormalizer.calibrate_score(int(row[0]))
                 except Exception:
                     pass
 
