@@ -576,8 +576,20 @@ class RealtimeMonitorService:
                             )
                             row = cur.fetchone()
                             if row:
-                                from src.normalizer import SignalNormalizer
-                                state.score = SignalNormalizer.calibrate_score(int(row[0]))
+                                _raw = int(row[0])
+                                _cal = _raw
+                                try:
+                                    import importlib.util
+                                    _np = Path(__file__).resolve().parent.parent.parent.parent / "src" / "normalizer.py"
+                                    if _np.exists():
+                                        _spec = importlib.util.spec_from_file_location("_rm_norm", str(_np))
+                                        if _spec and _spec.loader:
+                                            _mod = importlib.util.module_from_spec(_spec)
+                                            _spec.loader.exec_module(_mod)
+                                            _cal = _mod.SignalNormalizer.calibrate_score(_raw)
+                                except Exception:
+                                    _cal = _raw
+                                state.score = _cal
                 except Exception:
                     pass
 
