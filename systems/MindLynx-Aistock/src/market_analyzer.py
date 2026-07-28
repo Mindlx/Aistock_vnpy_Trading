@@ -998,7 +998,6 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             f"两市成交额{overview.total_amount:.0f}亿元{vol_note}"
             f"{'，' + prev_plan_suffix.lstrip() if prev_plan_suffix else '.'}"
             f"市场呈现明确的“{tone}”格局。"
-            f"{signal_block}"
         )
 
     def _build_stats_block(self, overview: MarketOverview) -> str:
