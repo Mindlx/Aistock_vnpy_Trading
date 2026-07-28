@@ -15,8 +15,27 @@ A股自选股智能分析系统 - 通知层
 """
 
 from __future__ import annotations
-from src.normalizer import SignalNormalizer
 import logging
+
+
+def _calibrated_score(raw: int | None) -> int | None:
+    """Lazy import of SignalNormalizer.calibrate_score to avoid sys.path conflicts."""
+    if raw is None:
+        return None
+    try:
+        import importlib.util
+        from pathlib import Path
+        _p = Path(__file__).resolve().parent.parent.parent.parent / "src" / "normalizer.py"
+        if not _p.exists():
+            return raw
+        _spec = importlib.util.spec_from_file_location("_norm_bridge", str(_p))
+        if _spec and _spec.loader:
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            return _mod.SignalNormalizer.calibrate_score(raw)
+        return raw
+    except Exception:
+        return raw
 import re
 import time
 from dataclasses import dataclass, field
@@ -73,7 +92,7 @@ _SIGNAL_RANK = {
 
 def _signal_sort_key(r):
     """按信号好→差排序，同级内按 sentiment_score 降序。"""
-    _, _, tag = get_signal_level(r.operation_advice, SignalNormalizer.calibrate_score(r.sentiment_score) if r.sentiment_score else None, None)
+    _, _, tag = get_signal_level(r.operation_advice, _calibrated_score(r.sentiment_score) if r.sentiment_score else None, None)
     return _SIGNAL_RANK.get(tag, 99), -r.sentiment_score
 from src.utils.data_processing import normalize_model_used
 from src.utils.sanitize import sanitize_diagnostic_text
@@ -760,7 +779,7 @@ class NotificationService(
                 report_lines.append(
 f"{emoji} **{self._get_display_name(r, report_language)}**: "
 f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
-f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)} ｜ "
+f"{labels['score_label']} {_calibrated_score(r.sentiment_score)} ｜ "
 f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 )
         else:
@@ -1002,7 +1021,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         """Get localized signal level and color based on operation advice."""
         return get_signal_level(
             result.operation_advice,
-            SignalNormalizer.calibrate_score(result.sentiment_score) if result.sentiment_score else None,
+            _calibrated_score(result.sentiment_score) if result.sentiment_score else None,
             self._get_report_language(result),
         )
 
@@ -1078,7 +1097,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                     f"{signal_emoji} **{display_name}**: "
                     f"¥{r.current_price:.2f} {r.change_pct:+.1f}% ｜ "
                     f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
-                    f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)} ｜ "
+                    f"{labels['score_label']} {_calibrated_score(r.sentiment_score)} ｜ "
                     f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 )
             report_lines.extend(
@@ -1463,7 +1482,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 lines.append(
                     f"{signal_emoji} **{stock_name}**: "
                     f"{localize_operation_advice(r.operation_advice, report_language)}｜"
-                    f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)}｜"
+                    f"{labels['score_label']} {_calibrated_score(r.sentiment_score)}｜"
                     f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 )
         else:
@@ -1643,7 +1662,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
             lines.append(f"### {emoji} **{self._get_display_name(result, report_language)}**")
             lines.append(
                 f"**{localize_operation_advice(result.operation_advice, report_language)}**｜"
-                f"{labels['score_label']}:{SignalNormalizer.calibrate_score(result.sentiment_score)}｜"
+                f"{labels['score_label']}:{_calibrated_score(result.sentiment_score)}｜"
                 f"{localize_trend_prediction(result.trend_prediction, report_language)}"
             )
 
@@ -1751,7 +1770,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
                 f"**{name}** {emoji} "
                 f"{price_str} {change_str} ｜ "
                 f"{localize_operation_advice(r.operation_advice, report_language)} ｜ "
-                f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)} ｜ {one}{quant_line}"
+                f"{labels['score_label']} {_calibrated_score(r.sentiment_score)} ｜ {one}{quant_line}"
             )
         lines.append("")
         lines.append(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -1790,7 +1809,7 @@ f"{localize_trend_prediction(r.trend_prediction, report_language)}"
         lines = [
             f"{signal_emoji} **{stock_name}**",
             "",
-            f"> {report_date} ｜ ¥{result.current_price:.2f} {result.change_pct:+.1f}% ｜ {labels['score_label']}: **{SignalNormalizer.calibrate_score(result.sentiment_score)}** ｜ {localize_trend_prediction(result.trend_prediction, report_language)}",
+            f"> {report_date} ｜ ¥{result.current_price:.2f} {result.change_pct:+.1f}% ｜ {labels['score_label']}: **{_calibrated_score(result.sentiment_score)}** ｜ {localize_trend_prediction(result.trend_prediction, report_language)}",
             "",
         ]
 
@@ -2328,11 +2347,11 @@ class NotificationManager:
         lines = [f"📊 **{labels['summary_heading']}**", ""]
 
         for r in sorted(results, key=_signal_sort_key):
-            _, emoji, _ = get_signal_level(r.operation_advice, SignalNormalizer.calibrate_score(r.sentiment_score) if r.sentiment_score else None, report_language)
+            _, emoji, _ = get_signal_level(r.operation_advice, _calibrated_score(r.sentiment_score) if r.sentiment_score else None, report_language)
             name = get_localized_stock_name(r.name, r.code, report_language)
             lines.append(
                 f"{emoji} **{name}**: {localize_operation_advice(r.operation_advice, report_language)} ｜ "
-                f"{labels['score_label']} {SignalNormalizer.calibrate_score(r.sentiment_score)}"
+                f"{labels['score_label']} {_calibrated_score(r.sentiment_score)}"
             )
 
         return "\n".join(lines)
