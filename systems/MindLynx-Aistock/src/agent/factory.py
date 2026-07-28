@@ -335,6 +335,7 @@ def build_agent_executor(config=None, skills: list[str] | None = None):
     llm_adapter = LLMToolAdapter(config)
 
     if arch == "multi":
+        logger.warning("[AgentFactory] ARCH=multi 当前未启用，路径不可达")
         return _build_orchestrator(
             config,
             registry,
