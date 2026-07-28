@@ -938,19 +938,19 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if prev_plan_hint:
             if up_ratio < 0.35:
                 prev_plan_suffix = (
-                    f"\n\n上期策略基于偏多市场假设制定，今日{idx_note}、上涨占比仅{up_ratio:.0%}，"
-                    f"量能{'大幅萎缩' if vol_note else '偏弱'}，"
-                    f"已触发原计划失效条件，策略需紧急转向防守。"
+                    f"上期策略基于偏多市场假设制定，今日{idx_note}、上涨占比仅{up_ratio:.0%}，"
+                    f"量能{'大幅萎缩' if '萎缩' in (vol_note or '') else '偏弱'}，"
+                    f"已触发原计划失效条件，策略需紧急转向防守"
                 )
             elif up_ratio > 0.65:
                 prev_plan_suffix = (
-                    f"\n\n市场走势符合上期偏多判断，{idx_note}、上涨占比达{up_ratio:.0%}，"
-                    f"上期策略可延续执行。"
+                    f"市场走势符合上期偏多判断，{idx_note}、上涨占比达{up_ratio:.0%}，"
+                    f"上期策略可延续执行"
                 )
             else:
                 prev_plan_suffix = (
-                    f"\n\n市场走势与上期预期存在一定偏差（上涨占比{up_ratio:.0%}），"
-                    f"原计划部分条件已不满足，需结合下文调整策略方向。"
+                    f"市场走势与上期预期存在一定偏差（上涨占比{up_ratio:.0%}），"
+                    f"原计划部分条件已不满足，需结合下文调整策略方向"
                 )
 
         # 数据驱动的市场信号评分（替换 LLM 自行发挥）
@@ -995,10 +995,10 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             f"全天{up_word}{overview.up_count}家个股上涨，{overview.down_count}家下跌"
             f"（上涨占比{up_ratio:.1%}），"
             f"涨停{overview.limit_up_count}家、跌停{overview.limit_down_count}家。"
-            f"两市成交额{overview.total_amount:.0f}亿元{vol_note}，"
+            f"两市成交额{overview.total_amount:.0f}亿元{vol_note}"
+            f"{'，' + prev_plan_suffix.lstrip() if prev_plan_suffix else '.'}"
             f"市场呈现明确的“{tone}”格局。"
             f"{signal_block}"
-            f"{prev_plan_suffix}"
         )
 
     def _build_stats_block(self, overview: MarketOverview) -> str:
