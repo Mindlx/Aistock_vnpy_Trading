@@ -923,12 +923,15 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         vol_note = ""
         if prev_amount > 0 and overview.total_amount > 0:
             ratio = overview.total_amount / prev_amount
+            diff = overview.total_amount - prev_amount
+            diff_str = f"{diff:+.0f}" if diff >= 0 else f"{diff:.0f}"
             if ratio < 0.7:
-                vol_note = f"，较昨日{prev_amount:.0f}亿元{'大幅' if ratio < 0.5 else ''}萎缩"
+                vol_note = f"，较昨日{'大幅' if ratio < 0.5 else ''}萎缩{diff_str}亿元"
             elif ratio > 1.3:
-                vol_note = f"，较昨日{prev_amount:.0f}亿元{'大幅' if ratio > 1.5 else ''}放量"
+                vol_note = f"，较昨日{'大幅' if ratio > 1.5 else ''}放量{diff_str}亿元"
             else:
-                vol_note = f"，与昨日{prev_amount:.0f}亿元基本持平"
+                direction = "增加" if diff > 0 else "减少"
+                vol_note = f"，较昨日{direction}{abs(diff):.0f}亿元"
 
         # 上期策略回顾（如果存在）
         prev_plan_suffix = ""
