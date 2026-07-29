@@ -469,14 +469,22 @@ class WarehouseReader:
         logger.info("全市场回填: %d 只股票, 每只 %d 天, %d 线程", len(all_stocks), days, max_workers)
         t_start = time.time()
 
-        # 断点续传: 跳过已有缓存
+        # 断点续传: 已有数据的跳过(从 daily_ohlcv 直接查, cache_meta 可能不全)
+        import sqlite3 as _sq
+        _db_path = Path(__file__).resolve().parent.parent.parent / "data" / "data_warehouse.db"
+        _existing = set()
+        try:
+            _conn = _sq.connect(str(_db_path))
+            _existing = {r[0] for r in _conn.execute("SELECT DISTINCT stock_code FROM daily_ohlcv").fetchall()}
+            _conn.close()
+        except Exception:
+            pass
         pending = []
         for s in all_stocks:
             code = s["code"]
             if code.startswith(("8", "4", "2")):
                 continue
-            meta = self._lake.get_cache_meta(code, "daily_ohlcv")
-            if meta and self.is_fresh(code, "daily_ohlcv"):
+            if code in _existing:
                 continue
             pending.append(code)
         logger.info("需更新: %d / %d 只", len(pending), len(all_stocks))
