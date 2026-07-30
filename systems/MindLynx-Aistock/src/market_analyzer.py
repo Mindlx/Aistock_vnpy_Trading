@@ -924,11 +924,12 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if prev_amount > 0 and overview.total_amount > 0:
             ratio = overview.total_amount / prev_amount
             diff = overview.total_amount - prev_amount
-            diff_str = f"{diff:+.0f}" if diff >= 0 else f"{diff:.0f}"
             if ratio < 0.7:
-                vol_note = f"，较昨日{'大幅' if ratio < 0.5 else ''}萎缩{diff_str}亿元"
+                amount_str = f"{abs(diff):.0f}"
+                vol_note = f"，较昨日{'大幅' if ratio < 0.5 else ''}萎缩{amount_str}亿元"
             elif ratio > 1.3:
-                vol_note = f"，较昨日{'大幅' if ratio > 1.5 else ''}放量{diff_str}亿元"
+                amount_str = f"{abs(diff):.0f}"
+                vol_note = f"，较昨日{'大幅' if ratio > 1.5 else ''}放量{amount_str}亿元"
             else:
                 direction = "增加" if diff > 0 else "减少"
                 vol_note = f"，较昨日{direction}{abs(diff):.0f}亿元"
@@ -1674,16 +1675,16 @@ Output the report content directly, no extra commentary.
 ## {overview.date} 大盘复盘
 
 ### 一、盘面总览
-（系统已自动生成：含涨跌家数、成交额、上期策略评价、信号评分。
-你只需对市场整体氛围做2-3句定性解读，如资金情绪、板块分化程度等。）
+第一段（涨跌家数、成交额、上期评价、信号评分）由系统自动生成。
+你只需对市场整体氛围做2-3句定性解读，如资金情绪、板块分化程度等。
 
 ### 二、指数结构
-（系统已自动生成指数行情表。
-你只需分析：谁在护盘、谁在拖累、关键支撑/压力位在哪里，以及指数涨跌幅背后的结构含义。）
+指数行情表由系统自动生成。
+你只需分析：谁在护盘、谁在拖累、关键支撑/压力位在哪里，以及指数涨跌幅背后的结构含义。
 
 ### 三、板块主线
-（系统已自动生成板块排行表。
-你只需分析领涨/领跌板块背后的逻辑、持续性和是否形成主线。）
+板块排行表由系统自动生成。
+你只需分析领涨/领跌板块背后的逻辑、持续性和是否形成主线。
 
 ### 四、资金与情绪
 （解读成交额、涨跌停结构、市场宽度和东方财富全市场情绪数据，综合分析主力资金动向与市场情绪）
@@ -1691,8 +1692,8 @@ Output the report content directly, no extra commentary.
 {eastmoney_text or ""}
 
 ### 五、消息催化
-（系统已自动生成新闻列表。
-你只需提炼真正影响明日交易的催化或扰动，结合近三日新闻做定性判断。）
+新闻列表由系统自动生成。
+你只需提炼真正影响明日交易的催化或扰动，结合近三日新闻做定性判断。
 
 ### 六、明日交易计划
 （给出进攻/均衡/防守结论、仓位区间、关注方向、回避方向和一个触发失效条件）
