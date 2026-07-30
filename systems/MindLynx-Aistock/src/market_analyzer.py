@@ -781,7 +781,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if review:
             logger.info("[大盘] 复盘报告生成成功，长度: %d 字符", len(review))
             # Inject structured data tables into LLM prose sections
-            return self._inject_data_into_review(review, overview, news, previous_plan=previous_plan)
+            return self._inject_data_into_review(review, overview, news, previous_plan=previous_plan, session_label=session_label or "全天")
         else:
             logger.warning("[大盘] 大模型返回为空，使用模板报告")
             return self._generate_template_review(overview, news)
@@ -792,6 +792,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         overview: MarketOverview,
         news: list | None = None,
         previous_plan: str | None = None,
+        session_label: str = "全天",
     ) -> str:
         """Inject structured data tables into the corresponding LLM prose sections."""
         # Build data blocks
@@ -838,7 +839,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             and overview.total_amount > 0
             and overview.up_count > 0
             and "market_summary" in patterns):
-            summary_para = self._build_summary_paragraph(overview, prev_plan_hint=previous_plan or "")
+            summary_para = self._build_summary_paragraph(overview, prev_plan_hint=previous_plan or "", session_label=session_label)
             if summary_para:
                 combined = summary_para + "\n\n" + (stats_block or "")
                 review = self._replace_section_content(review, patterns["market_summary"], combined)
@@ -900,7 +901,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         end = start + next_heading.start() if next_heading else len(text)
         return text[:start] + "\n\n" + new_content + "\n\n" + text[end:].lstrip("\n")
 
-    def _build_summary_paragraph(self, overview: MarketOverview, prev_plan_hint: str = "") -> str:
+    def _build_summary_paragraph(self, overview: MarketOverview, prev_plan_hint: str = "", session_label: str = "全天") -> str:
         """Build a pre-built 盘面总览 paragraph with 100% accurate numbers from DB."""
         # 涨跌家数决定基调（优于指数涨跌数，因个股覆盖面更广）
         participation = overview.up_count + overview.down_count
@@ -908,7 +909,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         if up_ratio >= 0.65:
             tone = "整体偏强"
-            idx_note = "主要指数多数收涨"  # relaxed from "集体收跌"
+            idx_note = "主要指数多数收涨"
             up_word = "高达"
         elif up_ratio >= 0.35:
             tone = "震荡分化"
@@ -919,7 +920,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             idx_note = "主要指数集体收跌"
             up_word = "仅"
 
-        prev_amount = self._load_prev_market_turnover(overview.date, "全天") or 0
+        prev_amount = self._load_prev_market_turnover(overview.date, session_label) or 0
         vol_note = ""
         if prev_amount > 0 and overview.total_amount > 0:
             ratio = overview.total_amount / prev_amount
@@ -939,18 +940,18 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if prev_plan_hint:
             if up_ratio < 0.35:
                 prev_plan_suffix = (
-                    f"上期策略基于偏多市场假设制定，今日{idx_note}、上涨占比仅{up_ratio:.0%}，"
+                    f"上期策略基于偏多市场假设制定，今日{idx_note}、上涨家数明显少于下跌，"
                     f"量能{'大幅萎缩' if '萎缩' in (vol_note or '') else '偏弱'}，"
                     f"已触发原计划失效条件，策略需紧急转向防守。"
                 )
             elif up_ratio > 0.65:
                 prev_plan_suffix = (
-                    f"市场走势符合上期偏多判断，{idx_note}、上涨占比达{up_ratio:.0%}，"
+                    f"市场走势符合上期偏多判断，{idx_note}、上涨家数明显多于下跌，"
                     f"上期策略可延续执行。"
                 )
             else:
                 prev_plan_suffix = (
-                    f"市场走势与上期预期存在一定偏差（上涨占比{up_ratio:.0%}），"
+                    f"市场走势与上期预期存在一定偏差（多空胶着），"
                     f"原计划部分条件已不满足，需结合下文调整策略方向。"
                 )
 
@@ -993,8 +994,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         return (
             f"今日A股{tone}，{idx_note}。"
-            f"全天{up_word}{overview.up_count}家个股上涨，{overview.down_count}家下跌"
-            f"（上涨占比{up_ratio:.1%}），"
+            f"全天{up_word}{overview.up_count}家个股上涨，{overview.down_count}家下跌，"
+            f"上涨占比{up_ratio:.1%}，"
             f"涨停{overview.limit_up_count}家、跌停{overview.limit_down_count}家。"
             f"两市成交额{overview.total_amount:.0f}亿元{vol_note}"
             f"{'，' + prev_plan_suffix.lstrip() if prev_plan_suffix else '.'}"
