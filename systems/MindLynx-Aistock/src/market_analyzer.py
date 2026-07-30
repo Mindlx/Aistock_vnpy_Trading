@@ -878,119 +878,6 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         # Insert the block before the next heading, with spacing
         return text[:insert_pos].rstrip() + "\n\n" + block + "\n\n" + text[insert_pos:].lstrip("\n")
 
-    @staticmethod
-    def _replace_section_content(text: str, heading_pattern: str, new_content: str) -> str:
-        """Replace everything between a heading and the next ### heading."""
-        import re
-        match = re.search(heading_pattern, text)
-        if not match:
-            return text
-        start = match.end()
-        next_heading = re.search(r"\n###\s", text[start:])
-        end = start + next_heading.start() if next_heading else len(text)
-        return text[:start] + "\n\n" + new_content + "\n\n" + text[end:].lstrip("\n")
-
-    def _build_summary_paragraph(self, overview: MarketOverview, prev_plan_hint: str = "", session_label: str = "全天") -> str:
-        """Build a pre-built 盘面总览 paragraph with 100% accurate numbers from DB."""
-        # 涨跌家数决定基调（优于指数涨跌数，因个股覆盖面更广）
-        participation = overview.up_count + overview.down_count
-        up_ratio = overview.up_count / participation if participation else 0.5
-
-        if up_ratio >= 0.65:
-            tone = "整体偏强"
-            idx_note = "主要指数多数收涨"
-            up_word = "高达"
-        elif up_ratio >= 0.35:
-            tone = "震荡分化"
-            idx_note = "主要指数涨跌互现"
-            up_word = "共"
-        else:
-            tone = "全面走弱"
-            idx_note = "主要指数集体收跌"
-            up_word = "仅"
-
-        prev_amount = self._load_prev_market_turnover(overview.date, session_label) or 0
-        vol_note = ""
-        if prev_amount > 0 and overview.total_amount > 0:
-            ratio = overview.total_amount / prev_amount
-            diff = overview.total_amount - prev_amount
-            if ratio < 0.7:
-                amount_str = f"{abs(diff):.0f}"
-                vol_note = f"，较昨日{'大幅' if ratio < 0.5 else ''}萎缩{amount_str}亿元"
-            elif ratio > 1.3:
-                amount_str = f"{abs(diff):.0f}"
-                vol_note = f"，较昨日{'大幅' if ratio > 1.5 else ''}放量{amount_str}亿元"
-            else:
-                direction = "增加" if diff > 0 else "减少"
-                vol_note = f"，较昨日{direction}{abs(diff):.0f}亿元"
-
-        # 上期策略回顾（如果存在）
-        prev_plan_suffix = ""
-        if prev_plan_hint:
-            if up_ratio < 0.35:
-                prev_plan_suffix = (
-                    f"上期策略基于偏多市场假设制定，今日{idx_note}、上涨家数明显少于下跌，"
-                    f"量能{'大幅萎缩' if '萎缩' in (vol_note or '') else '偏弱'}，"
-                    f"已触发原计划失效条件，策略需紧急转向防守。"
-                )
-            elif up_ratio > 0.65:
-                prev_plan_suffix = (
-                    f"市场走势符合上期偏多判断，{idx_note}、上涨家数明显多于下跌，"
-                    f"上期策略可延续执行。"
-                )
-            else:
-                prev_plan_suffix = (
-                    f"市场走势与上期预期存在一定偏差（多空胶着），"
-                    f"原计划部分条件已不满足，需结合下文调整策略方向。"
-                )
-
-        # 数据驱动的市场信号评分（替换 LLM 自行发挥）
-        limit_diff = (overview.limit_up_count or 0) - (overview.limit_down_count or 0)
-        signal_score = int(round(up_ratio * 100))  # 基础: 上涨占比 0~100
-        signal_score += min(15, max(-15, limit_diff // 10))  # 涨跌停差: 每差10家 ±5, 上限±15
-        # 缩量下跌/放量上涨强化信号，放量下跌/缩量上涨弱化
-        if prev_amount > 0 and overview.total_amount > 0:
-            vol_ratio = overview.total_amount / prev_amount
-            if vol_ratio > 1.3 and up_ratio >= 0.65:
-                signal_score += 5  # 放量上涨 → 强化看多
-            elif vol_ratio > 1.3 and up_ratio < 0.35:
-                signal_score -= 5  # 放量下跌 → 强化看空
-            elif vol_ratio < 0.7 and up_ratio >= 0.65:
-                signal_score -= 3  # 缩量上涨 → 弱化
-            elif vol_ratio < 0.7 and up_ratio < 0.35:
-                signal_score += 3  # 缩量下跌 → 抛压释放, 弱化看空
-        signal_score = max(0, min(100, signal_score))
-
-        # 信号标签
-        if signal_score >= 70:
-            signal_label = "强势，可进攻"
-            signal_action = "关注主线延续与仓位纪律"
-        elif signal_score >= 55:
-            signal_label = "偏强，偏进攻"
-            signal_action = "控制仓位，适度参与"
-        elif signal_score >= 40:
-            signal_label = "中性，偏防守"
-            signal_action = "控制仓位，等待方向明确"
-        else:
-            signal_label = "偏弱，偏防守"
-            signal_action = "风险偏高，优先控制回撤"
-
-        signal_block = (
-            f"\n\n- **盘面信号**：{signal_score}/100（{signal_label}）\n"
-            f"- **信号依据**：上涨家数占比 {up_ratio:.0%}，涨跌停差 {limit_diff:+d}\n"
-            f"- **操作建议**：{signal_action}"
-        )
-
-        return (
-            f"今日A股{tone}，{idx_note}。"
-            f"全天{up_word}{overview.up_count}家个股上涨，{overview.down_count}家下跌，"
-            f"上涨占比{up_ratio:.1%}，"
-            f"涨停{overview.limit_up_count}家、跌停{overview.limit_down_count}家。"
-            f"两市成交额{overview.total_amount:.0f}亿元{vol_note}"
-            f"{'，' + prev_plan_suffix.lstrip() if prev_plan_suffix else '.'}"
-            f"市场呈现明确的“{tone}”格局。"
-        )
-
     def _build_stats_block(self, overview: MarketOverview) -> str:
         """Build market statistics block."""
         has_stats = overview.up_count or overview.down_count or overview.total_amount
@@ -1227,6 +1114,11 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 lines.append(
                     f"| {rank} | {sector.get('name', '-')} | {self._format_signed_pct(sector.get('change_pct'))} |"
                 )
+        if overview.hot_stocks:
+            names = [s.get("name", "?") for s in overview.hot_stocks[:5] if s.get("name")]
+            if names:
+                lines.append("")
+                lines.append("**人气股**: " + "、".join(names))
         return "\n".join(lines)
 
     def _build_concept_block(self, overview: MarketOverview) -> str:
