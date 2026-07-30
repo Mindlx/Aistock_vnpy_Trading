@@ -834,17 +834,6 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 news_block,
             )
 
-        # ── 盘面总览：用模板替换 LLM 首段，确保数字 100% 精确 ──
-        if (not self._get_review_language() == "en"
-            and overview.total_amount > 0
-            and overview.up_count > 0
-            and "market_summary" in patterns):
-            summary_para = self._build_summary_paragraph(overview, prev_plan_hint=previous_plan or "", session_label=session_label)
-            if summary_para:
-                combined = summary_para + "\n\n" + (stats_block or "")
-                review = self._replace_section_content(review, patterns["market_summary"], combined)
-                stats_block = ""  # 已包含在 combined 中，跳过后续注入
-
         # ── 后处理 ──
         if not self._get_review_language() == "en":
             import re as _re
@@ -1676,8 +1665,8 @@ Output the report content directly, no extra commentary.
 ## {overview.date} 大盘复盘
 
 ### 一、盘面总览
-第一段（涨跌家数、成交额、上期评价、信号评分）由系统自动生成。
-你只需对市场整体氛围做2-3句定性解读，如资金情绪、板块分化程度等。
+（2-3句话概括指数、涨跌家数、成交额，明确"强势/偏暖/震荡/偏弱"判断。
+如果【上期交易计划回顾】存在，请在此段末尾自然附上一句对昨日策略的验证，格式参考："上期建议为XXX，今日XX"。不存在则不写。）
 
 ### 二、指数结构
 指数行情表由系统自动生成。
