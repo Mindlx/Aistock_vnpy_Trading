@@ -13,10 +13,13 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+_tls = threading.local()
 
 import litellm
 from json_repair import repair_json
@@ -2380,6 +2383,14 @@ class GeminiAnalyzer:
                 return text
             return result
         except Exception as exc:
+            # 空响应时重试(API偶发故障), 最多重试2次
+            if "empty response" in str(exc).lower() and getattr(_tls, "empty_retry", 0) < 2:
+                _tls.empty_retry = getattr(_tls, "empty_retry", 0) + 1
+                import time as _t
+                _t.sleep(3)
+                logger.warning("[generate_text] LLM 空响应, 重试 %d/2 ...", _tls.empty_retry)
+                return self.generate_text(prompt, max_tokens=max_tokens, temperature=temperature)
+            _tls.empty_retry = 0
             logger.error("[generate_text] LLM call failed: %s", exc)
             return None
 
