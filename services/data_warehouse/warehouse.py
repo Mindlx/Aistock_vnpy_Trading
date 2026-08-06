@@ -511,7 +511,7 @@ class WarehouseReader:
             try:
                 rows = fetcher.fetch(code, days=days)
                 if rows:
-                    self._lake.upsert_daily_ohlcv(code, rows)
+                    self._lake.upsert_ohlcv(code, rows)
                 with lock:
                     done.add(code)
                 return True
