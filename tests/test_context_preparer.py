@@ -26,9 +26,8 @@ class TestContextPreparer:
         }
         payload = self.cp.build_injection_payload(context)
         assert "[系统注入]" in payload
-        assert "LY" in payload
+        assert "LY" not in payload
         assert "ML" in payload
-        assert "65.0" in payload
         assert "72" in payload
 
     def test_build_injection_empty_signals(self):

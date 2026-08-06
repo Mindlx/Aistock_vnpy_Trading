@@ -399,6 +399,7 @@ def verify_data_source(stock_code: str = "601801") -> Dict[str, Any]:
 if __name__ == "__main__":
     # 快速验证
     import pprint
+    from src.mind_stock_config import get_yfinance_ticker
     logging.basicConfig(level=logging.INFO)
 
     print("=" * 50)

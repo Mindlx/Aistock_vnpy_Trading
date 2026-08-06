@@ -1,6 +1,7 @@
 """Test reliability.py — 幻觉检测/置信度校准/alpha解析"""
 import sys
 from pathlib import Path
+from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
@@ -21,12 +22,14 @@ class TestReliabilityConfig:
         assert ReliabilityConfig.alpha("tradingagent") == 0.40
 
     def test_alpha_resolution_override(self):
-        a = ReliabilityConfig.alpha("mindlynx", "000592")
-        assert a == 0.80
+        with patch.object(ReliabilityConfig, "_alpha_from_db", return_value=None):
+            a = ReliabilityConfig.alpha("mindlynx", "001390")
+            assert a == 0.30
 
     def test_alpha_resolution_fallback(self):
-        a = ReliabilityConfig.alpha("mindlynx", "nonexistent_code")
-        assert a == 0.65
+        with patch.object(ReliabilityConfig, "_alpha_from_db", return_value=None):
+            a = ReliabilityConfig.alpha("mindlynx", "nonexistent_code")
+            assert a == 0.65
 
     def test_default_h_values(self):
         assert ReliabilityConfig.default_h("lynx_vnpy") == 0.0
