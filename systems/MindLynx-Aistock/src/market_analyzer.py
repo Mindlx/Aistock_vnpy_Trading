@@ -2013,6 +2013,8 @@ Market conditions can change quickly. The data above is for reference only and d
         """加载当日融合系统自选股分析数据，供LLM生成操盘建议。
 
         优先从融合输出文件读取（含因子信号），融合不存在时降级到实时行情。
+        含新鲜度校验：若融合文件早于今日 ML 整点分析（TA 独占/过期），
+        在块内标注告警，避免 LLM 将退化信号当作完整融合信号转述。
         """
         try:
             from pathlib import Path
@@ -2025,6 +2027,9 @@ Market conditions can change quickly. The data above is for reference only and d
                     import json
                     data = json.loads(files[-1].read_text(encoding="utf-8"))
                     lines = ["## 自选股因子数据"]
+                    stale_hint = self._check_fusion_freshness(data)
+                    if stale_hint:
+                        lines.append(f"> ⚠ {stale_hint}")
                     items = data if isinstance(data, list) else data.get("results", [])
                     if items:
                         for item in items:
@@ -2044,6 +2049,60 @@ Market conditions can change quickly. The data above is for reference only and d
             logger.debug(f"[大盘] 自选股融合数据加载失败: {e}")
 
         return self._fetch_realtime_stock_data()
+
+    def _check_fusion_freshness(self, data: dict) -> str:
+        """校验融合文件的生成来源/时间，返回过期告警文本（无异常返回空串）。
+
+        场景一: generated_by == "ta_pre_ml" —— TA timer 早间生成，ML 整点分析前，
+            融合可能已退化为 TA 独占（ML 无效时权重重归一化到 TA）。
+        场景二: 融合生成时间早于今日 ML 整点分析（report_type='full'）最新写入时间
+            —— 文件信息集小于复盘时刻可获得的信息集。
+        """
+        generated_at = data.get("generated_at", "") or ""
+        generated_by = data.get("generated_by", "") or ""
+        stale_reason = ""
+        if generated_by == "ta_pre_ml":
+            ts = generated_at[:16] if generated_at else "TA定时器早间"
+            stale_reason = f"融合文件为早间 TA 独占生成（{ts}，早于 ML 整点分析），信号可能未含最新 ML 数据"
+        elif generated_at:
+            gtime = self._parse_cn_datetime(generated_at)
+            if gtime:
+                ml_latest = self._get_latest_ml_analysis_time()
+                if ml_latest and gtime < ml_latest:
+                    stale_reason = (
+                        f"融合文件生成于 {gtime:%H:%M}，早于今日 ML 整点分析"
+                        f"（{ml_latest:%H:%M}），信号可能未含最新 ML 数据"
+                    )
+        if stale_reason:
+            logger.warning("[大盘] 自选股融合数据新鲜度告警: %s", stale_reason)
+            return stale_reason
+        return ""
+
+    @staticmethod
+    def _parse_cn_datetime(s: str):
+        """解析 CN 时区 ISO 时间串（容忍 T/空格分隔、+08:00 后缀），返回 naive datetime。"""
+        try:
+            return datetime.fromisoformat(s.replace("T", " ").split("+")[0].strip())
+        except Exception:
+            return None
+
+    def _get_latest_ml_analysis_time(self):
+        """查询今日 ML 整点分析（report_type='full'）在 stock_analysis.db 的最新写入时间。"""
+        try:
+            import sqlite3
+            db_path = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.db"
+            conn = sqlite3.connect(str(db_path))
+            row = conn.execute(
+                "SELECT MAX(created_at) FROM analysis_history "
+                "WHERE date(created_at)=? AND report_type='full'",
+                (datetime.now().strftime("%Y-%m-%d"),),
+            ).fetchone()
+            conn.close()
+            if row and row[0]:
+                return self._parse_cn_datetime(row[0])
+        except Exception as e:
+            logger.debug("[大盘] 查询 ML 整点分析时间失败: %s", e)
+        return None
 
     def _fetch_realtime_price_str(self, stock_code: str) -> str:
         """获取单只股票的实时价格字符串。"""

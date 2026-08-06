@@ -28,7 +28,12 @@ mkdir -p "$USER_SYSD"
 count=0
 for f in "$SYSD_DIR"/*.{service,timer}; do
     [ -f "$f" ] || continue
-    cp "$f" "$USER_SYSD/"
+    dest="$USER_SYSD/$(basename "$f")"
+    # 源已是软链指向目标（同一文件）时跳过，避免 cp "同一文件" 报错中止整个部署
+    if [ "$(readlink -f "$f" 2>/dev/null)" = "$(readlink -f "$dest" 2>/dev/null)" ]; then
+        continue
+    fi
+    cp "$f" "$dest"
     count=$((count + 1))
 done
 

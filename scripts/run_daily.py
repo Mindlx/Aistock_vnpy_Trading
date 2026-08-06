@@ -36,12 +36,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 STAGING_DIR = Path("data/staging")
 
+import logging
+
 import yaml
 
 from src.data_loader import UnifiedDataLoader
 from src.fusion_engine import FusionEngine
-from src.logger import FusionLogger
 from src.wecom_notifier import WeComNotifier
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -241,8 +244,16 @@ def save_fusion_output(
     date: str,
     output_dir: str,
     config: Dict[str, Any],
+    generated_by: str = "scheduled",
 ):
-    """保存融合结果到 JSON 和 CSV"""
+    """保存融合结果到 JSON 和 CSV
+
+    Args:
+        generated_by: 融合文件来源标记, 用于下游新鲜度校验。
+            - scheduled: 常规日终融合 (18:00)
+            - fusion_eval: 日间融合评估 (12:12/14:41/11:30)
+            - ta_pre_ml: TA timer 早间生成 (ML 整点分析前, 信号可能退化为 TA 独占)
+    """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -253,6 +264,7 @@ def save_fusion_output(
         json_data = {
             "date": date,
             "generated_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+            "generated_by": generated_by,
             "total_stocks": len(results),
             "results": results,
         }
@@ -625,7 +637,8 @@ def main():
     output_dir = args.output or config.get("data_paths", {}).get(
         "fusion_output", "data/fusion_output"
     )
-    save_fusion_output(results, today, output_dir, config)
+    generated_by = "ta_pre_ml" if args.run_ta else ("fusion_eval" if args.fusion_only else "scheduled")
+    save_fusion_output(results, today, output_dir, config, generated_by=generated_by)
 
     # ── 桥接：大盘复盘写入 stock_analysis.db ──
 
