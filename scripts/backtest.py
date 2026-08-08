@@ -815,6 +815,8 @@ def cmd_simulate() -> None:
     trade_count = 0
     win_count = 0
     loss_count = 0
+    win_pnl_sum = 0.0
+    loss_pnl_sum = 0.0
     nav_curve: list[tuple[str, float]] = []
     daily_returns: list[float] = []
 
@@ -834,8 +836,10 @@ def cmd_simulate() -> None:
                 day_trades += 1
                 if ret > 0:
                     win_count += 1
+                    win_pnl_sum += ret * 100
                 elif ret < 0:
                     loss_count += 1
+                    loss_pnl_sum += abs(ret) * 100
 
         total_value = cash + day_pnl
         daily_ret = day_pnl / cash if cash > 0 else 0
@@ -870,6 +874,14 @@ def cmd_simulate() -> None:
         dd = (peak - nav) / peak * 100
         max_dd = max(max_dd, dd)
 
+    # 年化收益率 (按 252 交易日)
+    trading_days = max(len(nav_curve), 1)
+    annual_return = ((total_value / INITIAL_CAPITAL) ** (252 / trading_days) - 1) * 100 if trading_days > 0 else 0.0
+
+    # 平均盈利 / 平均亏损 (基于实际模拟交易涨跌幅)
+    avg_win_pct = (win_pnl_sum / win_count) if win_count > 0 else 0.0
+    avg_loss_pct = (loss_pnl_sum / loss_count) if loss_count > 0 else 0.0
+
     # 输出
     print(f"\n{'='*55}")
     print(f"  融合系统模拟交易报告")
@@ -878,12 +890,15 @@ def cmd_simulate() -> None:
     print(f"     初始资金: ¥{INITIAL_CAPITAL:,.0f}")
     print(f"     最终净值: ¥{total_value:,.0f}")
     print(f"     总收益率: {total_return:+.2f}%")
+    print(f"     年化收益率: {annual_return:+.2f}%")
     print(f"     交易次数: {trade_count}")
     print(f"     回测天数: {len(nav_curve)} 天")
     print(f"\n  📈 绩效指标")
     print(f"     年化夏普比率: {sharpe:.2f}")
     print(f"     最大回撤: {max_dd:.2f}%")
     print(f"     胜率: {win_rate:.1f}% ({win_count}/{win_count + loss_count})")
+    print(f"     平均盈利: {avg_win_pct:.2f}%")
+    print(f"     平均亏损: {avg_loss_pct:.2f}%")
     print(f"     日均收益: {avg_ret*100:.3f}%")
     print(f"     收益波动率: {std_ret*100:.3f}%")
 

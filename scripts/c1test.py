@@ -886,18 +886,16 @@ def phase6_walkforward(timeout: int = 120) -> Dict[str, Any]:
         result["test_window"] = int(win_match.group(2))
         result["step"] = int(win_match.group(3))
 
-    # 解析各窗口
+    # 解析各窗口 (表格行格式: 窗口 ...  58.0%      47.9%     305)
     windows = []
     for line in stdout.splitlines():
-        m = re.match(r".*IS[：:]\s*([\d.]+)%\s*\((\d+)/(\d+)\)\s*[|]\s*OOS[：:]\s*([\d.]+)%\s*\((\d+)/(\d+)\)", line)
+        m = re.match(r"^\s*(\d{4}-\d{2}-\d{2}~.+?)\s+([\d.]+)%\s+([\d.]+)%\s+(\d+)", line)
         if m:
             windows.append({
-                "is_accuracy": float(m.group(1)),
-                "is_correct": int(m.group(2)),
-                "is_total": int(m.group(3)),
-                "oos_accuracy": float(m.group(4)),
-                "oos_correct": int(m.group(5)),
-                "oos_total": int(m.group(6)),
+                "window": m.group(1).strip(),
+                "is_accuracy": float(m.group(2)),
+                "oos_accuracy": float(m.group(3)),
+                "oos_total": int(m.group(4)),
             })
     if windows:
         result["windows"] = windows
@@ -907,6 +905,14 @@ def phase6_walkforward(timeout: int = 120) -> Dict[str, Any]:
         result["avg_oos_accuracy"] = round(avg_oos, 1)
         result["avg_is_accuracy"] = round(avg_is, 1)
         result["decay_ratio"] = round(avg_oos / avg_is * 100, 1) if avg_is > 0 else 0
+
+    # 兜底: 从汇总行读取 (若逐窗口解析失败)
+    if "avg_is_accuracy" not in result:
+        is_m = re.search(r"平均IS准确率[：:]\s*([\d.]+)%", stdout)
+        oos_m = re.search(r"平均OOS准确率[：:]\s*([\d.]+)%", stdout)
+        if is_m and oos_m:
+            result["avg_is_accuracy"] = float(is_m.group(1))
+            result["avg_oos_accuracy"] = float(oos_m.group(1))
 
     result["returncode"] = proc.returncode
     return result
@@ -960,16 +966,28 @@ def phase7_weight_sweep(timeout: int = 120) -> Dict[str, Any]:
     if combo_match:
         result["combo_count"] = int(combo_match.group(1))
 
-    # 解析结果表: 找最优组合
-    best_match = re.search(r"最优[：:].*?ly=([\d.]+).*?ml=([\d.]+).*?at=([\d.]+).*?(\d+)/(\d+)\s*\(([\d.]+)%\)", stdout)
-    if best_match:
+    # 解析结果表: 找最优组合 (格式: ✅ 最优: (0.20, 0.55, 0.30) → 56.5%)
+    best_match = re.search(r"最优[：:]\s*\(([\d.]+),\s*([\d.]+),\s*([\d.]+)\)\s*→\s*([\d.]+)%", stdout)
+    if not best_match:
+        # 兜底: 从结果表第一行找最高准确率行
+        best_match = re.search(r"^\s*\(([\d.]+),([\d.]+),([\d.]+)\)\s+([\d.]+)%\s+(\d+)/(\d+)", stdout, re.MULTILINE)
+        if best_match:
+            result["best_weights"] = {
+                "ly": float(best_match.group(1)),
+                "ml": float(best_match.group(2)),
+                "at": float(best_match.group(3)),
+                "accuracy": float(best_match.group(4)),
+                "correct": int(best_match.group(5)),
+                "total": int(best_match.group(6)),
+            }
+    else:
         result["best_weights"] = {
             "ly": float(best_match.group(1)),
             "ml": float(best_match.group(2)),
             "at": float(best_match.group(3)),
-            "correct": int(best_match.group(4)),
-            "total": int(best_match.group(5)),
-            "accuracy": float(best_match.group(6)),
+            "accuracy": float(best_match.group(4)),
+            "correct": 0,
+            "total": 0,
         }
 
     result["returncode"] = proc.returncode
@@ -1020,8 +1038,8 @@ def phase8_simulate(timeout: int = 120) -> Dict[str, Any]:
         ("win_rate", r"胜率[：:]\s*([\d.]+)%"),
         ("trade_count", r"交易次数[：:]\s*(\d+)"),
         ("sharpe", r"夏普比率[：:]\s*([\d.]+)"),
-        ("avg_win", r"平均盈利[：:]\s*([+-]?[\d.]+)%"),
-        ("avg_loss", r"平均亏损[：:]\s*([+-]?[\d.]+)%"),
+        ("avg_win", r"平均盈利[：:]?\s*([+-]?[\d.]+)%"),
+        ("avg_loss", r"平均亏损[：:]?\s*([+-]?[\d.]+)%"),
     ]:
         m = re.search(pattern, stdout)
         if m:
