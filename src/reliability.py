@@ -25,7 +25,7 @@ class ReliabilityConfig:
 
     α (base_alpha) 由系统本质决定，非日常调优参数：
       - ly:  0.75  — sklearn predict_proba，可回测，100% 可重复
-      - ml:  0.55  — ~40% 因子数学 + ~60% LLM，混合误差
+      - ml:  0.65  — 实测 84% directional accuracy (6/7 校准)
       - at:  0.40  — 纯 LLM 角色扮演，角色不一致 + prompt 敏感
 
     h (default_h) 是默认幻觉度（无辩论数据时的保守估计）：

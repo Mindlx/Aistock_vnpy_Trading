@@ -32,7 +32,7 @@ reliability:
   # 各系统基础可靠度（由系统本质决定，非日常调优参数）
   base_alpha:
     lynx_vnpy: 0.75       # sklearn predict_proba，可回测，100%可重复
-    mindlynx: 0.55        # ~40% 因子数学 + ~60% LLM，混合误差
+    mindlynx: 0.65        # 实测 84% directional accuracy (6/7 校准)，与 reliability.py BASE_ALPHA 一致
     tradingagent: 0.40    # 纯 LLM 角色扮演，角色不一致 + prompt 敏感
 
   # 默认幻觉度（无辩论数据时的保守估计）
@@ -112,12 +112,8 @@ features:
 backtest:
   enabled: true            # 回测功能已启用
   db_path: "data/backtest/bt_results.db"
-  initial_weights:          # 回测使用的权重起始值（与 weights 保持一致）
-    lynx_vnpy: 0.20
-    mindlynx: 0.55
-    tradingagent: 0.30
   weight_search_range:      # 网格搜索范围（含历史搜索点，当前实际值见上方 weights）
-    lynx_vnpy: [0.2, 0.3, 0.37, 0.4]
+    lynx_vnpy: [0.0, 0.2, 0.3, 0.37, 0.4]
     mindlynx: [0.3, 0.4, 0.50, 0.55]
   report:
     weekly_cron: "30 17 * * 5"   # 每周五17:30推送周报
