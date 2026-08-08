@@ -719,21 +719,7 @@ def main():
 
             notifier.push_daily_decision(results, today, extra_sections=extra_sections or None)
 
-            # ── 东方财富评级 PDF 报告（独立推送，延迟 60s 避免与融合决策同时涌入）──
-            # (主推送已被上层 not args.run_ta 拦截，此仅做双重保险)
-            if not args.run_ta and fc.get("xueqiu", {}).get("enabled") and not args.dry_run:
-                time.sleep(60)
-                _root = Path(__file__).resolve().parent.parent
-                _venv = _root / "systems/MindLynx-Aistock/.venv/bin/python"
-                _script = _root / "systems/MindLynx-Aistock/scripts/generate_rating_report.py"
-                try:
-                    bt_rating = subprocess.run(
-                        [str(_venv), str(_script)], capture_output=True, text=True, timeout=300,
-                    )
-                    if bt_rating.returncode != 0:
-                        print(f"  ⚠️ 东方财富评级 PDF 推送失败: {bt_rating.stderr[:200]}")
-                except Exception as e:
-                    print(f"  ⚠️ 东方财富评级 PDF 推送异常: {e}")
+            # 东方财富评级简讯+PDF 由 eastmoney-rating-pdf.service (18:01) 独立推送，此处不再冗余触发
         else:
             print("\n⚠️  企业微信 webhook 未配置，请先更新 config/settings.yaml")
     else:

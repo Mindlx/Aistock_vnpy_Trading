@@ -1,10 +1,10 @@
 [Unit]
-Description=Aistock_vnpy_Trading — 准实时融合定时启动（工作日 09:33，开盘后即扫描）
+Description=Aistock_vnpy_Trading — 准实时融合定时启动（工作日 09:33，开盘后即扫描；Persistent=true 防重启后错过）
 Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
 
 [Timer]
 OnCalendar=Mon..Fri 09:33:00
-Persistent=false
+Persistent=true
 
 [Install]
 WantedBy=timers.target
