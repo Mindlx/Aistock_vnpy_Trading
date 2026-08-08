@@ -1,10 +1,16 @@
 [Unit]
-Description=Aistock_vnpy_Trading — 准实时融合定时启动（工作日 09:33，开盘后即扫描；Persistent=true 防重启后错过）
+Description=Aistock_vnpy_Trading — 准实时融合定时启动（工作日交易时段多点触发，防重启后 daemon 缺席）
 Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
 
 [Timer]
+# 多点触发：任一点拉起 daemon。若系统重启错过早盘触发，后续时段点仍会拉起。
+# 不启用 Persistent：避免开机立即补跑推送过时信号（冷启动静默建基线，见 realtime_fusion.py）。
 OnCalendar=Mon..Fri 09:33:00
-Persistent=true
+OnCalendar=Mon..Fri 10:30:00
+OnCalendar=Mon..Fri 11:00:00
+OnCalendar=Mon..Fri 13:03:00
+OnCalendar=Mon..Fri 14:00:00
+Persistent=false
 
 [Install]
 WantedBy=timers.target

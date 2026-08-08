@@ -343,8 +343,16 @@ class RealtimeFusion:
         return 0.0
 
     def run_daemon(self, interval: int = 300):
-        """守护模式 — 仅在交易日交易时段运行，周末和盘后自动跳过。"""
+        """守护模式 — 仅在交易日交易时段运行，周末和盘后自动跳过。
+
+        冷启动策略:
+        - 09:33-09:45 开盘窗口启动 → 首轮正常推送基线信号（每天开盘用户期望全量）。
+        - 其他交易时段启动（如系统重启错过 09:33，由 10:30/11:00/13:03/14:00 触发点拉起）
+          → 首轮静默建 _last_scores 基线不推送，避免把重启前的过时信号当"变化"炸屏；
+            此后仅真实变化才推送。
+        """
         print(f"[realtime-fusion] daemon started, interval={interval}s", flush=True)
+        first_scan = True
         while True:
             # 非交易日跳过
             if not self._is_trading_day():
@@ -381,7 +389,20 @@ class RealtimeFusion:
                 continue
 
             try:
-                changes = self.run_once()
+                if first_scan:
+                    now = datetime.now()
+                    in_morning_window = (now.hour == 9 and 33 <= now.minute <= 45)
+                    if in_morning_window:
+                        changes = self.run_once()
+                    else:
+                        # 重启恢复：静默建基线，不推送过时信号
+                        self.scan_and_fuse()
+                        changes = []
+                        print(f"[realtime-fusion] {datetime.now().isoformat()} "
+                              f"冷启动静默建基线 (不推送，此后仅推送变化)", flush=True)
+                    first_scan = False
+                else:
+                    changes = self.run_once()
                 if changes:
                     print(f"[realtime-fusion] {datetime.now().isoformat()} "
                           f"{len(changes)} changes pushed", flush=True)
