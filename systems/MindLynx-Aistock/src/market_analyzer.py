@@ -776,7 +776,22 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point — never access private analyzer attributes.
-        review = self.analyzer.generate_text(prompt, max_tokens=8192, temperature=0.7)
+        # max_tokens=16384: deepseek-v4-flash 为推理模型, reasoning_tokens 占输出预算约 25%,
+        # 8192 时正文预算不足导致第八段(自选股)偶发被截断, 提高到 16384 给 reasoning 让出空间。
+        review = self.analyzer.generate_text(prompt, max_tokens=16384, temperature=0.7)
+
+        # 完整性校验: 有自选股数据时必须含"自选股操盘建议"章节 + 结尾免责声明, 否则视为截断重试。
+        # 实证: 8/7/8/11 午盘 LLM 提前 stop (finish_reason=stop, 非 length), 输出缺第八段。
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            if review and self._is_review_complete(review, stock_data):
+                break
+            if attempt < max_attempts - 1:
+                logger.warning(
+                    "[大盘] 复盘报告不完整 (第 %d 次尝试, 长度 %s), 重试...",
+                    attempt + 1, f"{len(review)} 字符" if review else "空",
+                )
+                review = self.analyzer.generate_text(prompt, max_tokens=16384, temperature=0.7)
 
         if review:
             logger.info("[大盘] 复盘报告生成成功，长度: %d 字符", len(review))
@@ -785,6 +800,22 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         else:
             logger.warning("[大盘] 大模型返回为空，使用模板报告")
             return self._generate_template_review(overview, news)
+
+    def _is_review_complete(self, review: str, stock_data: str | None) -> bool:
+        """完整性检测: 大盘复盘 LLM 偶发提前 stop 截断, 输出缺末尾章节。
+
+        实证 (2026-08-11): 8/7/8/11 午盘 LLM 提前 stop, 报告只到"七、风险提示"半句,
+        第八段"自选股操盘建议"整体丢失。数据已加载但 LLM 输出不完整。
+        """
+        if not review:
+            return False
+        # 结尾必须有免责声明 (第 7 段 prompt 明确要求, 缺失即视为截断)
+        if "不构成投资建议" not in review:
+            return False
+        # 有自选股数据时必须包含第八段
+        if stock_data and "自选股操盘建议" not in review:
+            return False
+        return True
 
     def _inject_data_into_review(
         self,
