@@ -340,11 +340,8 @@ def _llm_provider_table() -> list[tuple[str, str, str | None]]:
 
     Shared by the interactive picker and by env-driven configuration so an
     env-set provider resolves to the same default endpoint the menu uses.
-    Ollama users can point at a remote ollama-serve via OLLAMA_BASE_URL
-    (convention from the broader Ollama ecosystem); falls back to the
-    localhost default when unset.
+    Local provider (2026-08-18, 原 ollama 职责) 指向本机 SGLang GPU0.
     """
-    ollama_url = os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434/v1"
     return [
         ("OpenAI", "openai", "https://api.openai.com/v1"),
         ("Google", "google", None),
@@ -361,7 +358,7 @@ def _llm_provider_table() -> list[tuple[str, str, str | None]]:
         ("NVIDIA NIM", "nvidia", "https://integrate.api.nvidia.com/v1"),
         ("Azure OpenAI", "azure", None),
         ("Amazon Bedrock", "bedrock", None),
-        ("Ollama", "ollama", ollama_url),
+        ("Local SGLang (GPU0)", "local", "http://localhost:11434/v1"),
         ("OpenAI-compatible (vLLM, LM Studio, llama.cpp, custom relay)", "openai_compatible", None),
     ]
 
@@ -570,33 +567,17 @@ def ask_minimax_region() -> tuple[str, str]:
     ).ask()
 
 
-def confirm_ollama_endpoint(url: str) -> None:
-    """Show the resolved Ollama endpoint after provider selection.
+def confirm_local_endpoint(url: str) -> None:
+    """Show the resolved local SGLang endpoint after provider selection.
 
-    Surfaces three things the user benefits from seeing before model
-    selection: which URL we'll actually hit, where it came from
-    (`OLLAMA_BASE_URL` vs default), and a soft warning if the URL is
-    missing the scheme/port that ollama-serve expects. The warning is
-    advisory only — we don't reject malformed input, since the user may
-    be doing something deliberately unusual (e.g. a reverse-proxy path).
+    Advisory only — we don't reject malformed input.
     """
-    from_env = os.environ.get("OLLAMA_BASE_URL")
-    origin = " (from OLLAMA_BASE_URL)" if from_env and from_env == url else ""
-    console.print(f"[green]✓ Using Ollama at {url}{origin}[/green]")
+    console.print(f"[green]✓ Using local SGLang at {url}[/green]")
 
     if not url.startswith(("http://", "https://")):
         console.print(
             f"[yellow]Note: {url!r} is missing a scheme. "
-            f"Ollama-serve typically expects a URL like "
-            f"http://<host>:11434/v1.[/yellow]"
-        )
-    elif ":11434" not in url and "://localhost" not in url and "://127.0.0.1" not in url:
-        # Soft hint when the port differs from the ollama-serve default
-        # and the host isn't local (where users sometimes proxy on :80).
-        console.print(
-            f"[yellow]Note: {url!r} doesn't include port 11434. "
-            f"Make sure your remote ollama-serve listens on the port "
-            f"shown above.[/yellow]"
+            f"Expected a URL like http://<host>:11434/v1.[/yellow]"
         )
 
 
@@ -608,12 +589,12 @@ def ensure_api_key(provider: str) -> str | None:
     .env file via python-dotenv's set_key (creating .env if needed), and
     exports it into os.environ so the current process picks it up.
 
-    Returns None for providers that do not require a key (e.g. ollama)
+    Returns None for providers that do not require a key (e.g. local)
     and for providers not found in the canonical mapping.
     """
     env_var = get_api_key_env(provider)
     if env_var is None:
-        return None  # ollama / unknown — no key check possible
+        return None  # local / unknown — no key check possible
 
     # Key-optional providers (generic OpenAI-compatible / local servers) read the
     # key when present but must never force an interactive prompt.

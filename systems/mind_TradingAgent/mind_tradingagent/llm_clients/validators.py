@@ -6,7 +6,7 @@ from .model_catalog import get_known_models
 # OpenAI-compatible endpoints serving many models), so any model string is
 # accepted without warning.
 _ANY_MODEL_PROVIDERS = (
-    "ollama", "openrouter", "openai_compatible",
+    "local", "openrouter", "openai_compatible",
     "mistral", "kimi", "groq", "nvidia", "bedrock",
 )
 
@@ -20,7 +20,7 @@ VALID_MODELS = {
 def validate_model(provider: str, model: str) -> bool:
     """Check if model name is valid for the given provider.
 
-    For ollama, openrouter, and openai_compatible - any model is accepted.
+    For local, openrouter, and openai_compatible - any model is accepted.
     """
     provider_lower = provider.lower()
 

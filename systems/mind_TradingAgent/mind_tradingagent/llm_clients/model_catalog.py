@@ -154,24 +154,16 @@ MODEL_OPTIONS: ProviderModeOptions = {
     "minimax": _MINIMAX_MODELS,
     "minimax-cn": _MINIMAX_MODELS,
     # OpenRouter: fetched dynamically. Azure: any deployed model name.
-    # Ollama display labels intentionally omit a "local" marker — the
-    # endpoint is now configurable via OLLAMA_BASE_URL, so the same labels
-    # apply whether the user runs ollama-serve on localhost or against a
-    # remote host. The actual resolved endpoint is surfaced separately by
-    # cli.utils.confirm_ollama_endpoint() right after provider selection.
-    # "Custom model ID" lets users pick any model they have pulled via
-    # `ollama pull` beyond the three suggested defaults.
-    "ollama": {
+    # Local SGLang (2026-08-18, 原 ollama 职责): 本机 GPU0 SGLang, OpenAI 兼容,
+    # SGLang 宽容任意 model 名。SGLang 服务地址由 cli.utils.confirm_local_endpoint()
+    # 在选择后展示。
+    "local": {
         "quick": [
-            ("Qwen3:latest (8B)", "qwen3:latest"),
-            ("GPT-OSS:latest (20B)", "gpt-oss:latest"),
-            ("GLM-4.7-Flash:latest (30B)", "glm-4.7-flash:latest"),
+            ("RedHatAI Qwen3.8-27B INT4 (GPU0)", "/models/RedHatAI-Qwen3.8-27B-INT4"),
             ("Custom model ID", "custom"),
         ],
         "deep": [
-            ("GLM-4.7-Flash:latest (30B)", "glm-4.7-flash:latest"),
-            ("GPT-OSS:latest (20B)", "gpt-oss:latest"),
-            ("Qwen3:latest (8B)", "qwen3:latest"),
+            ("RedHatAI Qwen3.8-27B INT4 (GPU0)", "/models/RedHatAI-Qwen3.8-27B-INT4"),
             ("Custom model ID", "custom"),
         ],
     },
