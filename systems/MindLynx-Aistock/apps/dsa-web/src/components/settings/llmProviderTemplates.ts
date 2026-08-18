@@ -1,4 +1,4 @@
-export type ChannelProtocol = 'openai' | 'deepseek' | 'gemini' | 'anthropic' | 'vertex_ai' | 'ollama';
+export type ChannelProtocol = 'openai' | 'deepseek' | 'gemini' | 'anthropic' | 'vertex_ai';
 export type LLMProviderCapability =
   | 'openai-compatible'
   | 'aggregator'
@@ -190,16 +190,6 @@ export const LLM_PROVIDER_TEMPLATES: LLMProviderTemplate[] = [
     officialSources: [{ label: 'OpenAI Models', url: 'https://platform.openai.com/docs/models' }],
   },
   {
-    channelId: 'ollama',
-    label: 'Ollama（本地）',
-    protocol: 'ollama',
-    baseUrl: 'http://127.0.0.1:11434',
-    placeholderModels: 'llama3.2,qwen2.5',
-    capabilities: ['local-runtime'],
-    configHint: '需要本机、Docker 或 self-hosted runner 能访问 Ollama 服务。',
-    officialSources: [{ label: 'Ollama API', url: 'https://github.com/ollama/ollama/blob/main/docs/api.md' }],
-  },
-  {
     channelId: 'custom',
     label: '自定义渠道',
     protocol: 'openai',
@@ -231,5 +221,4 @@ export const MODEL_PLACEHOLDERS_BY_PROTOCOL: Record<ChannelProtocol, string> = {
   gemini: 'gemini-3.1-pro-preview,gemini-3-flash-preview',
   anthropic: 'claude-sonnet-4-6,claude-opus-4-7',
   vertex_ai: 'gemini-3.1-pro-preview',
-  ollama: 'llama3.2,qwen2.5',
 };
