@@ -1,6 +1,6 @@
 # OpenCode 配置
 
-> 最后更新: 2026-07-22
+> 最后更新: 2026-07-22（⚠️ 已过期；权威配置以 ~/.config/opencode/opencode.jsonc 为准）
 
 ## 版本
 
@@ -12,10 +12,10 @@
 
 | 插件 | 用途 |
 |:-----|:------|
-| `opencode-morph-plugin` | 代码编辑 |
 | `opencode-pty` | 终端执行 |
-| `opencode-shell-strategy` | Shell 执行策略优化 |
 | `opencode-dynamic-context-pruning` | 上下文自动裁剪 |
+
+> 注：`opencode-morph-plugin` 已于 2026-09-29 移除（云端外发 + compact 99.5% 失败，本地 `edit`/`grep`/`codebase-memory`/DCP 已覆盖）。`opencode-shell-strategy` 已并入配置 instructions。
 
 ## Provider
 
