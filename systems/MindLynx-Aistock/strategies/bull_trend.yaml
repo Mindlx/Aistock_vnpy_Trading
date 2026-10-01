@@ -70,8 +70,8 @@ instructions: |
   - 若无清晰优势，明确写"暂不出手"，避免过度交易。
 
   评分调整建议：
-  - 多头排列 + 趋势强度良好：`sentiment_score +12`
-  - 回踩关键均线后企稳：`sentiment_score +8`
-  - 放量突破关键阻力：`sentiment_score +10`
+  - 多头排列 + 趋势强度良好：`sentiment_score +8`
+  - 回踩关键均线后企稳：`sentiment_score +3`
+  - 放量突破关键阻力：`sentiment_score +5`
   - 跌破 MA20 或趋势转弱：`sentiment_score -12`
   - 买入条件满足 5 项以上：额外 `+5`
