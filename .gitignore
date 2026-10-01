@@ -68,3 +68,7 @@ data/stock_analysis.db-wal
 systems/MindLynx-Aistock/data/stock_analysis.db
 systems/MindLynx-Aistock/.env
 data/full_market_progress.json
+
+# Coverage / local backups (not tracked)
+.coverage
+data_warehouse_backup_*.tar.gz
