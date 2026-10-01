@@ -42,6 +42,7 @@ import yaml
 
 from src.data_loader import UnifiedDataLoader
 from src.fusion_engine import FusionEngine
+from src.trading_calendar import should_skip_run
 from src.wecom_notifier import WeComNotifier
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--confirm", action="store_true",
         help="确认staging中的融合结果并推送（需配合--date或自动读取最新staging）",
+    )
+    parser.add_argument(
+        "--force-run", action="store_true",
+        help="跳过交易日检查，强制执行（默认非交易日自动跳过）",
     )
     return parser.parse_args()
 
@@ -531,6 +536,11 @@ def main():
     tz_cn = timezone(timedelta(hours=8))
     today = args.date or datetime.now(tz_cn).strftime("%Y-%m-%d")
     print(f"📅 日期: {today}")
+
+    # ── 交易日门禁: 非交易日直接跳过，避免节假日空跑全量分析 ──
+    if should_skip_run(today, force_run=args.force_run):
+        print(f"⏸️  {today} 非交易日（休市），跳过执行。可使用 --force-run 强制执行。")
+        return
 
     # ── 可选: 运行 mind_TradingAgent 批量分析 ──
     if args.run_ta:

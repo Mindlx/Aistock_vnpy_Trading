@@ -11,7 +11,13 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import datetime
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.trading_calendar import should_skip_warmup
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,7 +49,15 @@ def main():
     parser.add_argument("--full-market", action="store_true", help="全A股历史数据回填(首次/断点续传)")
     parser.add_argument("--days", type=int, default=365, help="回填天数(默认365)")
     parser.add_argument("--workers", type=int, default=8, help="并发线程数(默认8)")
+    parser.add_argument("--force-run", action="store_true", help="跳过交易日检查, 强制执行(默认非交易日自动跳过)")
     args = parser.parse_args()
+
+    # ── 交易日门禁: 非交易日跳过例行预热, 避免节假日空跑 (全市场回填不受限) ──
+    tz_cn = timezone(timedelta(hours=8))
+    today = datetime.now(tz_cn).strftime("%Y-%m-%d")
+    if should_skip_warmup(today, full_market=args.full_market, force_run=args.force_run):
+        logger.info("⏸️ %s 非交易日(休市), 跳过仓库预热。可使用 --force-run 强制执行。", today)
+        return
 
     from services.data_warehouse.warehouse import WarehouseReader
     wr = WarehouseReader()
