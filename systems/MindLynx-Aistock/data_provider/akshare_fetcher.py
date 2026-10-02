@@ -802,6 +802,10 @@ class AkshareFetcher(BaseFetcher):
         # 重命名列
         df = df.rename(columns=column_mapping)
 
+        # 成交量: akshare 返回「手」→ 规范单位「股」(×100)，与 TushareFetcher 对齐
+        if "volume" in df.columns:
+            df["volume"] = pd.to_numeric(df["volume"], errors="coerce") * 100
+
         # 添加股票代码列
         df["code"] = stock_code
 

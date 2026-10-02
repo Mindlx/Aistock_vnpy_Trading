@@ -13,6 +13,7 @@ from typing import Any
 
 from services.data_warehouse.config import DataWarehouseConfig
 from services.data_warehouse.limiter import TokenBucketLimiter
+from services.data_warehouse.units import normalize_rows, normalize_volume_amount
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ class DailyFetcher:
                     "high": float(d.get("high", 0)),
                     "low": float(d.get("low", 0)),
                     "close": float(d.get("close", 0)),
-                    "volume": float(d.get("volume", 0)),
+                    "volume": float(d.get("vol", d.get("volume", 0))),
                     "amount": float(d.get("amount", 0)),
                     "pct_chg": 0.0,
                     "turnover": 0.0,
@@ -133,8 +134,8 @@ class DailyFetcher:
                 "high": float(item[3] or 0),
                 "low": float(item[4] or 0),
                 "close": float(item[5] or 0),
-                "volume": float(item[6] or 0),
-                "amount": float(item[7] or 0),
+                "volume": float(item[9] or 0),
+                "amount": float(item[10] or 0),
                 "pct_chg": float(item[8] or 0),
                 "turnover": 0.0,
                 "source": "tushare",
@@ -197,7 +198,7 @@ class DailyFetcher:
                 rows = method(code, days)
                 if rows:
                     logger.info("[DailyFetcher] %s ← %s: %d rows", code, name, len(rows))
-                    return rows
+                    return normalize_rows(rows)
             except Exception:
                 continue
         return []
@@ -298,7 +299,7 @@ class IndexFetcher:
                         })
             except Exception as exc:
                 logger.debug("[IndexFetcher] %s 获取失败: %s", code, exc)
-        return rows
+        return normalize_rows(rows)
 
     @staticmethod
     def _df_to_rows(df, code: str, source: str) -> list[dict]:
@@ -364,6 +365,10 @@ class RealtimeFetcher:
                     "pre_close": float(row.get("昨收", 0)),
                     "source": "tencent",
                 }
+        for v in result.values():
+            v["volume"], v["amount"] = normalize_volume_amount(
+                v["volume"], v["amount"], v.get("source", "")
+            )
         return result
 
     @_get_limiter().retry("sina")

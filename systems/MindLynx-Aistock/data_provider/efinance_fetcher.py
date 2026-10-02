@@ -578,6 +578,10 @@ class EfinanceFetcher(BaseFetcher):
         # 重命名列
         df = df.rename(columns=column_mapping)
 
+        # 成交量: efinance 返回「手」→ 规范单位「股」(×100)，与 TushareFetcher 对齐
+        if "volume" in df.columns:
+            df["volume"] = pd.to_numeric(df["volume"], errors="coerce") * 100
+
         # Fallback: if OHLC columns are missing (e.g. very old data path), fill from close
         if "close" in df.columns and "open" not in df.columns:
             df["open"] = df["close"]
