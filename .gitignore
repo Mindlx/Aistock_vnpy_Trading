@@ -72,3 +72,4 @@ data/full_market_progress.json
 # Coverage / local backups (not tracked)
 .coverage
 data_warehouse_backup_*.tar.gz
+data/backup/

@@ -35,6 +35,21 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+
+def _norm_date_iso(d: Any) -> str:
+    """规范化日期为 ISO 'YYYY-MM-DD', 消除多源格式漂移 (2026-10-02 修复)。
+
+    混存 'YYYYMMDD' 与 'YYYY-MM-DD' 会致 ORDER BY date 失真。非法/空值原样返回。
+    """
+    s = str(d or "").strip()
+    if not s:
+        return s
+    digits = s[:10].replace("-", "").replace("/", "")
+    if len(digits) != 8 or not digits.isdigit():
+        return s
+    return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+
+
 # ── Standard column names (matches MindLynx data_provider/base.py) ──
 STANDARD_COLUMNS = ["date", "open", "high", "low", "close", "volume", "amount", "pct_chg"]
 
@@ -251,7 +266,7 @@ class UnifiedCache:
 
                 rows.append((
                     stock_code,
-                    date_val,
+                    _norm_date_iso(date_val),
                     self._safe_float(row.get(col_map.get("open", ""))),
                     self._safe_float(row.get(col_map.get("high", ""))),
                     self._safe_float(row.get(col_map.get("low", ""))),

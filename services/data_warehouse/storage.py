@@ -17,6 +17,23 @@ from services.data_warehouse.config import DataWarehouseConfig
 
 logger = logging.getLogger(__name__)
 
+
+def _norm_date_cn(d: Any, sep: str = "") -> str:
+    """规范化 A 股日期字符串, 消除多源格式漂移 (2026-10-02 修复)。
+
+    不同数据源返回 'YYYYMMDD' 或 'YYYY-MM-DD', 混存致 SQL 字符串排序/范围查询失真
+    ('20260930' > '2026-09-30')。本函数统一为 sep='' → YYYYMMDD, sep='-' → YYYY-MM-DD。
+    非法/空值原样返回, 不破坏数据。
+    """
+    s = str(d or "").strip()
+    if not s:
+        return s
+    digits = s[:10].replace("-", "").replace("/", "")
+    if len(digits) != 8 or not digits.isdigit():
+        return s
+    return f"{digits[:4]}{sep}{digits[4:6]}{sep}{digits[6:8]}"
+
+
 # ── 建表 DDL ──
 _SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
@@ -248,7 +265,7 @@ class DataLake:
                    (stock_code, date, open, high, low, close, volume, amount,
                     pct_chg, turnover, source, fetched_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (code, r["date"], r.get("open"), r.get("high"), r.get("low"),
+                (code, _norm_date_cn(r["date"]), r.get("open"), r.get("high"), r.get("low"),
                  r.get("close"), r.get("volume"), r.get("amount", 0.0),
                  r.get("pct_chg", 0.0), r.get("turnover", 0.0),
                  r.get("source", "warehouse"), time.time()),
@@ -276,7 +293,7 @@ class DataLake:
         for date_str, turnover_val in date_turnover_pairs:
             conn.execute(
                 "UPDATE daily_ohlcv SET turnover=?, fetched_at=? WHERE stock_code=? AND date=?",
-                (turnover_val, time.time(), code, date_str),
+                (turnover_val, time.time(), code, _norm_date_cn(date_str)),
             )
             count += 1
         conn.commit()
@@ -288,7 +305,7 @@ class DataLake:
         if start and end:
             rows = conn.execute(
                 "SELECT * FROM daily_ohlcv WHERE stock_code=? AND date>=? AND date<=? ORDER BY date",
-                (code, start, end),
+                (code, _norm_date_cn(start), _norm_date_cn(end)),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -386,7 +403,7 @@ class DataLake:
                    (stock_code, date, main_net_flow, super_large_net, large_net,
                     medium_net, small_net, north_flow, north_hold_pct, source, fetched_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (code, r["date"], r.get("main_net_flow"), r.get("super_large_net"),
+                (code, _norm_date_cn(r["date"], "-"), r.get("main_net_flow"), r.get("super_large_net"),
                  r.get("large_net"), r.get("medium_net"), r.get("small_net"),
                  r.get("north_flow"), r.get("north_hold_pct"),
                  r.get("source", "warehouse"), now),
@@ -521,7 +538,7 @@ class DataLake:
         conn.execute("""INSERT OR REPLACE INTO chip_distribution
             (stock_code, date, profit_ratio, avg_cost, concentration, source, fetched_at)
             VALUES (?,?,?,?,?,?,?)""", (
-            code, date,
+            code, _norm_date_cn(date),
             data.get("profit_ratio", 0), data.get("avg_cost", 0),
             data.get("concentration", 0), data.get("source", "akshare"), time.time(),
         ))
@@ -538,7 +555,7 @@ class DataLake:
             conn.execute("""INSERT OR REPLACE INTO chip_distribution
                 (stock_code, date, profit_ratio, avg_cost, concentration, source, fetched_at)
                 VALUES (?,?,?,?,?,?,?)""", (
-                code, r.get("date", ""),
+                code, _norm_date_cn(r.get("date", "")),
                 r.get("profit_ratio", 0), r.get("avg_cost", 0),
                 r.get("concentration", 0), r.get("source", "akshare"), time.time(),
             ))
@@ -574,7 +591,7 @@ class DataLake:
                 conn.execute("""INSERT OR REPLACE INTO index_ohlcv
                     (index_code, date, open, high, low, close, volume, amount, pct_chg, source, fetched_at)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (
-                    index_code, row.get("date", ""),
+                    index_code, _norm_date_cn(row.get("date", "")),
                     row.get("open", 0), row.get("high", 0), row.get("low", 0),
                     row.get("close", 0), row.get("volume", 0), row.get("amount", 0),
                     row.get("pct_chg", 0), row.get("source", "akshare"), time.time(),
