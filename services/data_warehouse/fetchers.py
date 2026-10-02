@@ -270,12 +270,53 @@ INDEX_MAP = {
     "000905": "中证500", "399852": "中证1000",
 }
 
+# 指数代码 → tushare ts_code (后缀区分沪/深)
+INDEX_TS_CODE = {
+    "000001": "000001.SH", "399001": "399001.SZ", "399006": "399006.SZ",
+    "000688": "000688.SH", "000300": "000300.SH", "000016": "000016.SH",
+    "000905": "000905.SH", "399852": "399852.SZ",
+}
+
 class IndexFetcher:
-    """指数日K线, 降级链: akshare EM → akshare Sina"""
+    """指数日K线, 降级链: tushare → akshare EM → akshare Sina"""
+
+    @_get_limiter().retry("tushare")
+    def _fetch_tushare(self) -> list[dict]:
+        """tushare index_daily — 东财被封时的稳定源.
+
+        index_daily 字段序: ts_code(0),trade_date(1),close(2),open(3),high(4),
+        low(5),pre_close(6),change(7),pct_chg(8),vol(9,手),amount(10,千元)
+        """
+        start = (datetime.now() - timedelta(days=1500)).strftime("%Y%m%d")
+        end = datetime.now().strftime("%Y%m%d")
+        rows: list[dict] = []
+        for code, ts_code in INDEX_TS_CODE.items():
+            try:
+                _, items = _ts_post("index_daily", {
+                    "ts_code": ts_code, "start_date": start, "end_date": end,
+                })
+                for item in items or []:
+                    if len(item) < 11:
+                        continue
+                    rows.append({
+                        "index_code": code,
+                        "date": str(item[1]),
+                        "close": float(item[2] or 0),
+                        "open": float(item[3] or 0),
+                        "high": float(item[4] or 0),
+                        "low": float(item[5] or 0),
+                        "pct_chg": float(item[8] or 0),
+                        "volume": float(item[9] or 0),
+                        "amount": float(item[10] or 0),
+                        "source": "tushare",
+                    })
+            except Exception as exc:
+                logger.debug("[IndexFetcher] tushare %s 获取失败: %s", code, exc)
+        return rows
 
     @_get_limiter().retry("eastmoney")
-    def fetch_all(self) -> list[dict]:
-        """批量获取全部指数日K线"""
+    def _fetch_akshare_em(self) -> list[dict]:
+        """akshare EM 源 (东财, 可能被封)"""
         import akshare as ak
         rows = []
         for code, _name in INDEX_MAP.items():
@@ -298,7 +339,14 @@ class IndexFetcher:
                             "source": "akshare",
                         })
             except Exception as exc:
-                logger.debug("[IndexFetcher] %s 获取失败: %s", code, exc)
+                logger.debug("[IndexFetcher] akshare %s 获取失败: %s", code, exc)
+        return rows
+
+    def fetch_all(self) -> list[dict]:
+        """批量获取全部指数日K线 (tushare 优先, 失败降级 akshare EM)"""
+        rows = self._fetch_tushare()
+        if not rows:
+            rows = self._fetch_akshare_em()
         return normalize_rows(rows)
 
     @staticmethod

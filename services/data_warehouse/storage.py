@@ -208,13 +208,19 @@ class DataLake:
         self._ensure_schema()
 
     def _get_conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(self._db_path, timeout=10)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=5000")
-            self._local.conn = conn
-        return self._local.conn
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.execute("SELECT 1")  # 自愈: 部分方法误 close 了缓存连接
+                return conn
+            except sqlite3.ProgrammingError:
+                conn = None
+        conn = sqlite3.connect(self._db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        self._local.conn = conn
+        return conn
 
     def close(self) -> None:
         if hasattr(self._local, "conn") and self._local.conn is not None:
