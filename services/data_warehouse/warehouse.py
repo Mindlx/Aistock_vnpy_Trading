@@ -491,22 +491,16 @@ class WarehouseReader:
 
         fetcher = DailyFetcher()
         progress_path = Path(__file__).resolve().parent.parent.parent / "data" / "full_market_progress.json"
-        done = set()
-        if progress_path.exists():
-            try:
-                done = set(json.load(open(progress_path)))
-                logger.info("断点续传: 已有 %d 只完成", len(done))
-            except Exception:
-                pass
 
-        res = {"total": len(all_stocks), "success": len(done), "failed": 0, "skipped": (len(all_stocks) - len(pending))}
+        # 注: 进度文件仅作日志记录, 续跑以 DB 实际数据(_existing)为准.
+        # 历史教训: 进度文件可能陈旧(数据被清理但文件残留) → 曾致 5000 只被误跳过.
+        res = {"total": len(all_stocks), "success": 0, "failed": 0, "skipped": (len(all_stocks) - len(pending))}
         rlimiter = _RateLimiter(max_calls_per_min, 60)
         lock = threading.Lock()
         batch_count = 0
+        done: set[str] = set()
 
         def _fetch_one(code: str) -> bool:
-            if code in done:
-                return True
             rlimiter.wait()
             try:
                 rows = fetcher.fetch(code, days=days)
@@ -520,7 +514,7 @@ class WarehouseReader:
                 return False
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_fetch_one, code): code for code in pending if code not in done}
+            futures = {pool.submit(_fetch_one, code): code for code in pending}
             for fut in as_completed(futures):
                 code = futures[fut]
                 ok = fut.result()
