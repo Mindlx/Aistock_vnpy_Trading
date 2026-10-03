@@ -385,6 +385,18 @@ def phase2_ly(timeout: int = 180) -> Dict[str, Any]:
 # Phase 3: ML 独立回测
 # ══════════════════════════════════════════════════════════════
 
+ML_PROD_VIEW_SQL = """
+    CREATE TEMP VIEW ml_prod AS
+    SELECT base.* FROM analysis_history AS base
+    WHERE base.sentiment_score IS NOT NULL
+      AND base.created_at = (
+          SELECT MAX(a2.created_at) FROM analysis_history a2
+          WHERE a2.code = base.code
+            AND substr(a2.created_at,1,10) = substr(base.created_at,1,10)
+            AND a2.sentiment_score IS NOT NULL)
+"""
+
+
 def phase3_ml() -> Dict[str, Any]:
     """收集 ML 回测数据.
 
@@ -402,6 +414,15 @@ def phase3_ml() -> Dict[str, Any]:
     conn = sqlite3.connect(str(ML_DB))
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+
+    # ── 生产对齐去重 (2026-10-03): 每 (code, day) 取最新一条 ──
+    # 同一 (code, day) 存在多条盘中重复分析 (可达 29 条, 共享同一 T+1 收益),
+    # 生产融合 services/ml_factor_service.py:138 用 ORDER BY created_at DESC LIMIT 1
+    # 取每股票最新一条。用 TEMP VIEW 还原同一口径, 避免样本虚增/准确率高估。
+    try:
+        cursor.execute(ML_PROD_VIEW_SQL)
+    except sqlite3.OperationalError:
+        pass
 
     # ── 1. operation_advice → 方向准确率 (T+1, 与 sentiment 完全一致口径) ──
     # 使用与 sentiment_score 完全相同的条件:
@@ -426,7 +447,7 @@ def phase3_ml() -> Dict[str, Any]:
     try:
         cursor.execute("""
             SELECT ah.sentiment_score, ah.operation_advice, sp.pct_chg
-            FROM analysis_history ah
+            FROM ml_prod ah
             JOIN stock_daily sp ON sp.code = ah.code
                 AND sp.date = date(ah.created_at, '+1 day')
             WHERE ah.sentiment_score IS NOT NULL
@@ -462,10 +483,14 @@ def phase3_ml() -> Dict[str, Any]:
             if pred == actual:
                 op_correct += 1
 
+        op_dir_total = op_total - op_neutral
         result["operation_advice"] = {
             "direction_accuracy": round(op_correct / op_total * 100, 1) if op_total > 0 else 0.0,
+            # 仅"有方向"子集准确率 (剥掉 flat-zone 中性计对, 避免语义差距高估)
+            "direction_accuracy_directional": round((op_correct - op_neutral) / op_dir_total * 100, 1) if op_dir_total > 0 else 0.0,
             "correct": op_correct,
             "total": op_total,
+            "directional_total": op_dir_total,
             "neutral": op_neutral,
             "no_direction": op_no_dir,
             "source": "analysis_history T+1 (与 sentiment 完全一致口径)",
@@ -485,7 +510,7 @@ def phase3_ml() -> Dict[str, Any]:
                            WHEN ah.sentiment_score BETWEEN 49 AND 51 THEN 1  -- 中性视为正确
                            ELSE 0
                        END as direction_correct
-                FROM analysis_history ah
+                FROM ml_prod ah
                 JOIN stock_daily sp ON sp.code = ah.code
                     AND sp.date = date(ah.created_at, '+1 day')
                 WHERE ah.sentiment_score IS NOT NULL
@@ -512,7 +537,7 @@ def phase3_ml() -> Dict[str, Any]:
     try:
         cursor.execute("""
             SELECT ah.sentiment_score, sp.pct_chg
-            FROM analysis_history ah
+            FROM ml_prod ah
             JOIN stock_daily sp ON sp.code = ah.code
                 AND sp.date = date(ah.created_at, '+1 day')
             WHERE ah.sentiment_score IS NOT NULL
@@ -597,7 +622,7 @@ def phase3_ml() -> Dict[str, Any]:
     try:
         cursor.execute("""
             SELECT ah.sentiment_score, ah.operation_advice, sp.pct_chg
-            FROM analysis_history ah
+            FROM ml_prod ah
             JOIN stock_daily sp ON sp.code = ah.code
                 AND sp.date = date(ah.created_at, '+1 day')
             WHERE ah.sentiment_score IS NOT NULL
@@ -1195,7 +1220,9 @@ def detect_changes(report: Dict[str, Any]) -> Dict[str, Any]:
 
     # 警示: ML 语意差距
     ml = report.get("ml", {})
-    op_acc = ml.get("operation_advice", {}).get("direction_accuracy", 0)
+    _op = ml.get("operation_advice", {})
+    # 用"仅方向性"准确率, 否则 flat-zone 中性计对会把差距假性放大
+    op_acc = _op.get("direction_accuracy_directional", _op.get("direction_accuracy", 0))
     fe_acc = ml.get("fusion_equivalent", {}).get("accuracy", 0)
     if op_acc > 0 and fe_acc > 0:
         gap = abs(fe_acc - op_acc)
@@ -1313,7 +1340,8 @@ def render_markdown(report: Dict[str, Any]) -> str:
             lines.append(f"")
             lines.append(f"| 指标 | 数值 |")
             lines.append(f"|------|------|")
-            lines.append(f"| 方向准确率 | **{op.get('direction_accuracy', 'N/A')}%** |")
+            lines.append(f"| 方向准确率 (中性计对) | **{op.get('direction_accuracy', 'N/A')}%** |")
+            lines.append(f"| 方向准确率 (仅方向性) | **{op.get('direction_accuracy_directional', 'N/A')}%** (n={op.get('directional_total', 0)}) |")
             lines.append(f"| 样本量 | {op.get('total', 0)} |")
             lines.append(f"| 其中中性(flat zone) | {op.get('neutral', 0)} 条 |")
             lines.append(f"| 数据源 | {op.get('source', '')} |")
@@ -1338,9 +1366,9 @@ def render_markdown(report: Dict[str, Any]) -> str:
             lines.append(f"| 方向准确率 | **{fe.get('accuracy', 'N/A')}%** |")
             lines.append(f"| 样本量 | {fe.get('total', 0)} |")
             lines.append(f"| 中性跳过 | {fe.get('neutral', 0)} |")
-            if op.get("direction_accuracy") and fe.get("accuracy"):
-                gap = abs(fe["accuracy"] - op["direction_accuracy"])
-                lines.append(f"| 语义差距 | **{gap:.1f}%** |")
+            if op.get("direction_accuracy_directional") and fe.get("accuracy"):
+                gap = abs(fe["accuracy"] - op["direction_accuracy_directional"])
+                lines.append(f"| 语义差距 (仅方向性) | **{gap:.1f}%** |")
             lines.append(f"")
 
         # 策略级准确率

@@ -23,6 +23,10 @@
     - ML 方向 = fusion_equivalent 口径 (norm_v4(score)*0.8 -> _sign(0.1)), 与 c1test 一致
     - regime = 分析日之前 20 交易日等权市场收益 (ex-ante, 无前视)
     - 中性 (_sign==0) 不计入准确率分母, 单独报告
+    - 去重 (默认 --dedup latest): 生产 fusion 口径 = 每股票取最新一条
+      (services/ml_factor_service.py:138-142 ORDER BY created_at DESC LIMIT 1);
+      不dedup 会因盘中重复分析 (同 code/day 可达 29 条, 共享同一 T+1 收益)
+      虚增样本并高估准确率
 
 输出: /tmp/opencode/ml_regime_alpha_<date>.json + 终端摘要
 """
@@ -138,11 +142,27 @@ def load_data():
         for d, p, _cl in rows:
             mkt_by_day[d].append(p)
     analyses = conn.execute(
-        """SELECT code, substr(created_at,1,10) AS d, sentiment_score
+        """SELECT code, substr(created_at,1,10) AS d, sentiment_score, created_at
            FROM analysis_history WHERE sentiment_score IS NOT NULL"""
     ).fetchall()
     conn.close()
     return daily, mkt_by_day, analyses
+
+
+def dedup_analyses(analyses, mode):
+    """生产口径: services/ml_factor_service.py 每股票取最新一条 (ORDER BY created_at DESC LIMIT 1).
+
+    同一 (code, day) 存在多条盘中重复分析 (可达 29 条, 共享同一 T+1 收益),
+    不dedup 会把 n 虚增约 3 倍并高估准确率。mode: latest|first|none。
+    """
+    if mode == "none":
+        return [(c, d, s) for c, d, s, _t in analyses]
+    pick = {}
+    for c, d, s, t in analyses:
+        key = (c, d)
+        if key not in pick or (mode == "latest" and t > pick[key][0]) or (mode == "first" and t < pick[key][0]):
+            pick[key] = (t, s)
+    return [(c, d, s) for (c, d), (_t, s) in pick.items()]
 
 
 def build_market_series(mkt_by_day):
@@ -193,10 +213,13 @@ def regime_of(r):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--dedup", choices=["latest", "first", "none"], default="latest",
+                    help="每(code,day)保留口径; latest=生产对齐 (默认), none=含盘中重复")
     args = ap.parse_args()
 
     assert_design()
-    daily, mkt_by_day, analyses = load_data()
+    daily, mkt_by_day, raw = load_data()
+    analyses = dedup_analyses(raw, args.dedup)
     days, mkt_daily = build_market_series(mkt_by_day)
     daily_dates = {c: [r[0] for r in rows] for c, rows in daily.items()}
 
@@ -267,6 +290,7 @@ def main():
         "meta": {
             "horizons": list(HORIZONS), "regime_window": REGIME_WINDOW,
             "regime_thresh_pct": REGIME_THRESH * 100, "n_analyses": n_rows,
+            "dedup": args.dedup, "n_raw": len(raw),
             "date_range": [min(kept_dates), max(kept_dates)] if kept_dates else None,
         },
         "golden_ref_T1_production": {"checked": golden_checked, "ok": golden_ok,
@@ -301,7 +325,8 @@ def main():
     print(bar)
     print("ML 方向信号 regime 分层审计  (fusion_equivalent 口径, 基准在'有方向'子集上)")
     print(bar)
-    print("分析日 %d 个 | 区间 %s..%s" % (len(kept_dates), *out["meta"]["date_range"]))
+    print("分析日 %d 个 | 区间 %s..%s | dedup=%s (raw=%d -> %d)" % (
+        len(kept_dates), *out["meta"]["date_range"], args.dedup, out["meta"]["n_raw"], n_rows))
     print("黄金参考[T+1 生产口径, 硬门禁]: checked=%d ok=%d all_match=%s" % (
         golden_checked, golden_ok, out["golden_ref_T1_production"]["all_match"]))
     print("参考[close 路径, 仅提示]: %s : checked=%d ok=%d" % (
