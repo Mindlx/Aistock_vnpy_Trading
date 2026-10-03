@@ -3,7 +3,7 @@
 > 触发: 用户质疑 "印象中 ML 子系统准确率应该更高" (c1test 2026-10-03 报告 ML 46.4%)
 > 方法论: c1skill Stage 0-7 + 铁律#8 实测优先 / #11 多方法交叉 / #12 实验审计 / #13 采样独立性
 > 结论: **46.4% 是市场 regime beta, 非 ML 退化; ML 无稳健方向 alpha; 不构成调整融合权重的依据 → HOLD 权重**
-> 版本: 2026-10-03 v2 (含脚本审计更正 — 见 Stage 1b)
+> 版本: 2026-10-03 v3 (含脚本审计更正 + c1test 口径修复 — 见 Stage 1b)
 
 ---
 
@@ -134,7 +134,7 @@ WHERE code=? AND sentiment_score>0 ORDER BY created_at DESC LIMIT 1
 - **决策**: **HOLD** 权重 (lynx=0 / mindlynx=0.65 / tradingagent=0.35)。
 - **脚本修复**: `scripts/exp_ml_regime_alpha.py` 默认 `--dedup latest` (生产对齐)。
 - **Stage 7**: 未削弱架构; 补全了原权重决策缺失的 regime 校正 + 口径校正环节。
-- **遗留**: `c1test.py:phase3_ml` 仍按未去重口径统计 (与生产不一致) → 待修复。
+- **c1test 修复 (2026-10-03 v3)**: `phase3_ml` 已改为去重 + T+1 取"下一交易日"; `phase4_at` 修正"同日取数"为下一交易日; 子系统表补 AT 独立口径覆写。修复后报告三系统统一 ≈50% (Lynx 50.1% / MindLynx 49.9% / TradingAgent 49.9%)。
 
 复现:
 ```bash
@@ -150,4 +150,4 @@ WHERE code=? AND sentiment_score>0 ORDER BY created_at DESC LIMIT 1
 - Q2 T+1 58.4% (n=89) vs 混比 59.9% → **Δ−1.5 (纯 beta)**; Q3 49.8% vs 49.3% → +0.5
 - 看多命中 49.2% / 看空命中 51.6% (T+1)
 - 原口径 (含重复) ML T+1 53.9% / 看空 58% → 重复计数假象
-- 报告 46.4% 是滚动 90 天窗口 (仅 Q3) 的 regime beta
+- 报告 46.4% 是滚动 90 天窗口 (仅 Q3) 的 regime beta (修复去重+交易日口径后 c1test 报 49.9%)

@@ -449,7 +449,7 @@ def phase3_ml() -> Dict[str, Any]:
             SELECT ah.sentiment_score, ah.operation_advice, sp.pct_chg
             FROM ml_prod ah
             JOIN stock_daily sp ON sp.code = ah.code
-                AND sp.date = date(ah.created_at, '+1 day')
+                AND sp.date = (SELECT MIN(s2.date) FROM stock_daily s2 WHERE s2.code = ah.code AND s2.date > substr(ah.created_at,1,10))
             WHERE ah.sentiment_score IS NOT NULL
               AND ah.operation_advice IS NOT NULL
               AND ah.operation_advice != ''
@@ -512,7 +512,7 @@ def phase3_ml() -> Dict[str, Any]:
                        END as direction_correct
                 FROM ml_prod ah
                 JOIN stock_daily sp ON sp.code = ah.code
-                    AND sp.date = date(ah.created_at, '+1 day')
+                    AND sp.date = (SELECT MIN(s2.date) FROM stock_daily s2 WHERE s2.code = ah.code AND s2.date > substr(ah.created_at,1,10))
                 WHERE ah.sentiment_score IS NOT NULL
                   AND sp.pct_chg IS NOT NULL
                   AND ah.created_at >= date('now', '-90 days')
@@ -539,7 +539,7 @@ def phase3_ml() -> Dict[str, Any]:
             SELECT ah.sentiment_score, sp.pct_chg
             FROM ml_prod ah
             JOIN stock_daily sp ON sp.code = ah.code
-                AND sp.date = date(ah.created_at, '+1 day')
+                AND sp.date = (SELECT MIN(s2.date) FROM stock_daily s2 WHERE s2.code = ah.code AND s2.date > substr(ah.created_at,1,10))
             WHERE ah.sentiment_score IS NOT NULL
               AND sp.pct_chg IS NOT NULL
               AND ah.created_at >= date('now', '-90 days')
@@ -624,7 +624,7 @@ def phase3_ml() -> Dict[str, Any]:
             SELECT ah.sentiment_score, ah.operation_advice, sp.pct_chg
             FROM ml_prod ah
             JOIN stock_daily sp ON sp.code = ah.code
-                AND sp.date = date(ah.created_at, '+1 day')
+                AND sp.date = (SELECT MIN(s2.date) FROM stock_daily s2 WHERE s2.code = ah.code AND s2.date > substr(ah.created_at,1,10))
             WHERE ah.sentiment_score IS NOT NULL
               AND ah.operation_advice IS NOT NULL AND ah.operation_advice != ''
               AND sp.pct_chg IS NOT NULL
@@ -760,10 +760,12 @@ def phase4_at() -> Dict[str, Any]:
                 continue  # 中性跳过, 与 backtest._sign 一致
             at_bullish = at_score > 0
 
-            # 查 T+1 涨跌
+            # 查 T+1 涨跌 (fusion CSV 日期=预测日, 结果取下一交易日;
+            # 与 backtest.py cmd_record/cmd_check 口径一致)
             cursor.execute(
-                "SELECT pct_chg FROM stock_daily WHERE code = ? AND date = ?",
-                (code, date_str),
+                "SELECT pct_chg FROM stock_daily WHERE code = ? AND date = "
+                "(SELECT MIN(date) FROM stock_daily WHERE code = ? AND date > ?)",
+                (code, code, date_str),
             )
             row = cursor.fetchone()
             if row is None or row[0] is None:
@@ -1166,6 +1168,12 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
         report.setdefault("subsystems", {}).setdefault("ml", {})["accuracy_pct"] = fe["accuracy"]
         report.setdefault("subsystems", {}).setdefault("ml", {})["correct"] = fe["correct"]
         report.setdefault("subsystems", {}).setdefault("ml", {})["total"] = fe["total"]
+    # AT 用独立回测 (phase4 CSV 交易日口径) 替代融合层面子集数据 (与 LY/ML 一致)
+    at_ind = report.get("at_fusion_level", {})
+    if at_ind.get("accuracy"):
+        report.setdefault("subsystems", {}).setdefault("at", {})["accuracy_pct"] = at_ind["accuracy"]
+        report.setdefault("subsystems", {}).setdefault("at", {})["correct"] = at_ind.get("correct")
+        report.setdefault("subsystems", {}).setdefault("at", {})["total"] = at_ind.get("total")
 
     return report
 
