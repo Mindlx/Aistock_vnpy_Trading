@@ -1377,7 +1377,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
 
         fe = ml.get("fusion_equivalent", {})
         if fe:
-            lines.append(f"### 融合等效 (fusion_equivalent, 全量管线回放)")
+            lines.append(f"### 融合等效 (fusion_equivalent, ML子系统行 + v5.0映射 + 去重)")
             lines.append(f"")
             lines.append(f"| 指标 | 数值 |")
             lines.append(f"|------|------|")
