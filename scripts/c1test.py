@@ -1151,11 +1151,9 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
         if p.get("status") == "ok" or p.get("status") == "skipped":
             report[key] = p
 
-    # ── 变化检测 ──
-    changes = detect_changes(report)
-    report["changes"] = changes
-
-    # ── 子系统准确率覆写（独立回测口径） ──
+    # ── 子系统准确率覆写（独立回测口径）──
+    # 必须在 detect_changes 之前: 否则 cur(融合层面) 会与 last_run(已覆写的独立口径)
+    # 跨口径对比, 产生虚假变化告警 (LY/ML 历史遗留, AT 于 2026-10-03 修复时一并前移)。
     # LY 用独立回测 L7 口径替代融合层面的子集数据
     l7 = report.get("ly_independent_l7", {})
     if l7.get("accuracy"):
@@ -1174,6 +1172,10 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
         report.setdefault("subsystems", {}).setdefault("at", {})["accuracy_pct"] = at_ind["accuracy"]
         report.setdefault("subsystems", {}).setdefault("at", {})["correct"] = at_ind.get("correct")
         report.setdefault("subsystems", {}).setdefault("at", {})["total"] = at_ind.get("total")
+
+    # ── 变化检测 (在覆写之后, 与 last_run 同口径) ──
+    changes = detect_changes(report)
+    report["changes"] = changes
 
     return report
 
