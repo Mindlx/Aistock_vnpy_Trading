@@ -89,6 +89,7 @@ class MindLynxDataLoader:
                     FROM analysis_history
                     WHERE date(created_at) = ?
                       AND code IS NOT NULL AND code != '' AND code != 'MARKET'
+                      AND report_type IN ('full', 'simple')
                     GROUP BY code
                 ) latest ON ah.code = latest.code AND ah.created_at = latest.max_created
                 ORDER BY ah.code

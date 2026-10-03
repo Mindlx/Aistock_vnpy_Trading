@@ -53,6 +53,7 @@ def main():
     query = """SELECT code, sentiment_score, operation_advice, raw_result, created_at
                FROM analysis_history
                WHERE sentiment_score IS NOT NULL AND operation_advice IS NOT NULL
+               AND report_type IN ('full','simple')
                AND code NOT IN ('MARKET', '') AND code IS NOT NULL"""
     params = []
     if args.code:

@@ -51,6 +51,7 @@ def compute_skill_accuracy(db_path: str, min_samples: int = 30, days: int = 90) 
         JOIN stock_daily sp ON sp.code = ah.code
             AND sp.date = date(ah.created_at, '+1 day')
         WHERE ah.sentiment_score IS NOT NULL
+          AND ah.report_type IN ('full','simple')
           AND sp.pct_chg IS NOT NULL
           AND ah.created_at >= date('now', ?)
     """, (f'-{days} days',)).fetchall()

@@ -36,6 +36,7 @@ def validate_llm_accuracy(
     rows = conn.execute(
         "SELECT id, code, sentiment_score, operation_advice, created_at "
         "FROM analysis_history WHERE sentiment_score IS NOT NULL "
+        "AND report_type IN ('full','simple') "
         "ORDER BY code, created_at"
     ).fetchall()
 

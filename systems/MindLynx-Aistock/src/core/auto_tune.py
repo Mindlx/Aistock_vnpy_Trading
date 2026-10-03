@@ -172,7 +172,8 @@ class FactorLabelTuner:
         conn = sqlite3.connect(self.db_path)
         rows = conn.execute(
             "SELECT ah.sentiment_score FROM analysis_history ah "
-            "WHERE ah.sentiment_score IS NOT NULL ORDER BY ah.id DESC LIMIT 200"
+            "WHERE ah.sentiment_score IS NOT NULL "
+            "AND ah.report_type IN ('full','simple') ORDER BY ah.id DESC LIMIT 200"
         ).fetchall()
         conn.close()
 

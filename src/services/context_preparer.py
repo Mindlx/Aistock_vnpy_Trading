@@ -160,7 +160,8 @@ class ContextPreparer:
             row = conn.execute(
                 "SELECT operation_advice, sentiment_score, trend_prediction, "
                 "analysis_summary, created_at FROM analysis_history "
-                "WHERE code=? ORDER BY created_at DESC LIMIT 1",
+                "WHERE code=? AND report_type IN ('full','simple') "
+                "ORDER BY created_at DESC LIMIT 1",
                 (stock_code,),
             ).fetchone()
             conn.close()

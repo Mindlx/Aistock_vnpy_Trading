@@ -41,6 +41,7 @@ def load_analysis_scores() -> list[dict]:
     rows = conn.execute(
         "SELECT code, sentiment_score, report_type, operation_advice, created_at "
         "FROM analysis_history WHERE sentiment_score IS NOT NULL "
+        "AND report_type IN ('full','simple') "
         "ORDER BY created_at"
     ).fetchall()
     conn.close()

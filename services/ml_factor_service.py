@@ -138,6 +138,7 @@ class MLFactorService:
                     row = _ml_conn.execute(
                         "SELECT sentiment_score FROM analysis_history "
                         "WHERE code=? AND sentiment_score>0 "
+                        "AND report_type IN ('full','simple') "
                         "ORDER BY created_at DESC LIMIT 1", (code,)
                     ).fetchone()
                     if row and row[0]:

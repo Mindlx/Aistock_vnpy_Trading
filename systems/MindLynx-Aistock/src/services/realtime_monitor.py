@@ -571,7 +571,9 @@ class RealtimeMonitorService:
                         with sqlite3.connect(str(db_path)) as db_con:
                             cur = db_con.execute(
                                 "SELECT sentiment_score FROM analysis_history "
-                                "WHERE code=? AND sentiment_score IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+                                "WHERE code=? AND sentiment_score IS NOT NULL "
+                                "AND report_type IN ('full','simple') "
+                                "ORDER BY created_at DESC LIMIT 1",
                                 (code,),
                             )
                             row = cur.fetchone()

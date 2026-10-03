@@ -36,6 +36,7 @@ def main():
         LEFT JOIN stock_daily sp ON sp.code = ah.code
             AND sp.date = date(ah.created_at, '+1 day')
         WHERE ah.sentiment_score IS NOT NULL
+          AND ah.report_type IN ('full','simple')
           AND sp.pct_chg IS NOT NULL
           AND ah.created_at >= date('now', '-90 days')
         ORDER BY ah.created_at DESC

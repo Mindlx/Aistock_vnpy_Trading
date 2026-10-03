@@ -75,6 +75,9 @@ ML (ZhuLinsen) 上游 271 commits: 跳过批量合并。
 | `strategies/elevated_double_bottom.yaml` | **新增** 高中间峰双底策略 | 2026-07-23 |
 | `strategies/chip_concentration.yaml` | **新增** 筹码集中度策略 | 2026-07-23 |
 | `strategies/emotion_cycle.yaml` | 评分校准 +5/+10（基于 A3/A6 证伪） | 2026-07-23 |
+| `src/services/realtime_monitor.py` | sentiment 读取加 `report_type IN ('full','simple')`（防读到融合管线写回的 'fusion' 行） | 2026-10-03 |
+| `src/core/llm_validation.py` | 同上：准确率验证排除 'fusion' 行 | 2026-10-03 |
+| `src/core/auto_tune.py` | 同上：评分调优排除 'fusion' 行 | 2026-10-03 |
 
 ### AT 子系统 — 高风险文件
 

@@ -48,6 +48,7 @@ def main():
         cur.execute('''
             SELECT COALESCE(skill_id, 'consensus') as sid, COUNT(*)
             FROM analysis_history
+            WHERE report_type IN ('full','simple')
             GROUP BY sid
             ORDER BY COUNT(*) DESC
         ''')
@@ -113,6 +114,7 @@ def main():
     cur.execute('''
         SELECT COUNT(DISTINCT COALESCE(skill_id, 'consensus'))
         FROM analysis_history
+        WHERE report_type IN ('full','simple')
     ''')
     n = cur.fetchone()[0] if has_skill else 0
     print(f"\n  已追踪策略数: {n}")
