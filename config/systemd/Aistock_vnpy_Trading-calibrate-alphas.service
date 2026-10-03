@@ -5,6 +5,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+ExecCondition=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python /home/bluekuma/workspace/Aistock_vnpy_Trading/scripts/trading_day_gate.py
 Type=oneshot
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
 ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/calibrate_alphas.py

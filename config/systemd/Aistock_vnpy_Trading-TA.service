@@ -5,6 +5,7 @@ After=network-online.target Aistock_vnpy_Trading-realtime-fusion.service
 Wants=network-online.target
 
 [Service]
+ExecCondition=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python /home/bluekuma/workspace/Aistock_vnpy_Trading/scripts/trading_day_gate.py
 Type=oneshot
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
 EnvironmentFile=/home/bluekuma/workspace/Aistock_vnpy_Trading/.env

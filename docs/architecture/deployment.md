@@ -96,6 +96,25 @@ bash scripts/deploy-systemd.sh --restart-daemons
 | `c1test-weekly.timer` | 周日 **10:30** | c1test 全量回测 |
 | `ic-monitor.timer` | 周五 **19:30** | IC 监控 |
 
+### 交易日门禁（非 A 股交易日自动跳过）
+
+为避免法定节假日/调休（`Mon..Fri` 日历仍会触发）空跑，所有**工作日 / 每日**触发的一次性服务均加了 systemd `ExecCondition=` 门禁：
+
+- 门禁脚本：`scripts/trading_day_gate.py`（复用 `src/trading_calendar.is_trading_day` + `exchange_calendars` 的 XSHG 官方日历，识别周末/法定节假日/调休）。
+- 交易日 → 退出码 `0`（放行）；非交易日 → 退出码 `1`，systemd **跳过剩余命令且不标记单元失败**（官方语义：退出 1–254 = 跳过）。
+- 覆盖：alpha158、realtime-fusion、TA、eastmoney-rating、warehouse-warmup、fusion-eval、lynx-signal、retrain-lgb、fusion、eastmoney-rating-pdf、c1test-daily、diagnose-agreement、calibrate-alphas。
+- **常驻 daemon**（alpha158 / realtime-fusion / data-warehouse / scheduler）的日检查已升级为节假日感知，因为长驻进程跨节日无法靠启动门禁拦截：`realtime_fusion._is_trading_day`、`alpha158_service.run_daemon`、`data_warehouse/scheduler._is_trading_day` 均调用 `src.trading_calendar.is_trading_day`。
+- **不在门禁内**（设计上就在非交易日运行）：`lynx-backtest`（周日）、`c1test-weekly`（周日）、`ic-monitor`（周五）、`eastmoney-calibrate`（每月 1 日）、`trace-collect`（运维类）。
+
+手工强制放行：
+
+```bash
+# systemd 层：临时改环境变量无法作用于 ExecCondition，直接运行脚本即可
+FORCE_TRADING_DAY=1 python3 scripts/trading_day_gate.py   # 门禁放行（调试）
+python3 scripts/run_daily.py --force-run                  # 已有入口自带的强制开关
+python3 scripts/warmup_warehouse.py --force-run
+```
+
 ### 启用全部服务
 
 ```bash

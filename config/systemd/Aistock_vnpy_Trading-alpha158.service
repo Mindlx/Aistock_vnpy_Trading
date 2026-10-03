@@ -4,6 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+ExecCondition=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python /home/bluekuma/workspace/Aistock_vnpy_Trading/scripts/trading_day_gate.py
 Type=simple
 ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python3 services/alpha158_service.py --daemon
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading

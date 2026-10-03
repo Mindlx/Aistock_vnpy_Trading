@@ -4,6 +4,7 @@ Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
 After=Aistock_vnpy_Trading-fusion.service
 
 [Service]
+ExecCondition=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python /home/bluekuma/workspace/Aistock_vnpy_Trading/scripts/trading_day_gate.py
 Type=oneshot
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading/systems/MindLynx-Aistock
 ExecStartPre=/bin/sleep 60
