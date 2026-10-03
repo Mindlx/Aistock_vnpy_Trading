@@ -49,7 +49,7 @@ def compute_skill_accuracy(db_path: str, min_samples: int = 30, days: int = 90) 
         SELECT ah.sentiment_score, ah.skill_id, sp.pct_chg
         FROM analysis_history ah
         JOIN stock_daily sp ON sp.code = ah.code
-            AND sp.date = date(ah.created_at, '+1 day')
+            AND sp.date = (SELECT MIN(s2.date) FROM stock_daily s2 WHERE s2.code = ah.code AND s2.date > substr(ah.created_at,1,10))
         WHERE ah.sentiment_score IS NOT NULL
           AND ah.report_type IN ('full','simple')
           AND sp.pct_chg IS NOT NULL

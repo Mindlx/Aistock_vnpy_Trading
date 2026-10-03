@@ -70,7 +70,7 @@
 | `_is_correct` | `backtest.py:457` 中性排除，纯符号判断，无 band | ✅ 与报告一致 |
 | LY `_l7_score` | `lynx_signal.py:316` 锚点表 + 线性插值 | ✅ 与报告一致 |
 | LY walk-forward | `lynx_signal.py` 逐日滑动窗口，60 根 K 线起步 | ✅ 与报告一致 |
-| ML fusion_equivalent | `c1test.py:510-568` sentiment×0.8 + advice×0.2 → _sign(0.1) → T+1 | ✅ 与报告一致（注意 ML 独立口径用 threshold=0.1） |
+| ML fusion_equivalent | `c1test.py` sentiment → **v5.0** L7 ×0.8 → _sign(0.1) → T+1 (仅 ML 子系统行 `report_type IN ('full','simple')`, 每 code/day 去重) | ⚠️ 原描述 "sentiment×0.8 + advice×0.2" 有误 (实际仅 sentiment); 已于 2026-10-03 更正 |
 | AT 独立回测 | `c1test.py:675-742` 从 fusion CSV 读 tradingagent_score → _sign(0.1) → stock_daily T+1 | ✅ 与报告一致 |
 | `_alpha_from_db` | `src/reliability.py` 查询 bt_results.ml_correct | ✅ commit e658fd6 已验证 |
 
