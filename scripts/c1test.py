@@ -389,12 +389,37 @@ ML_PROD_VIEW_SQL = """
     CREATE TEMP VIEW ml_prod AS
     SELECT base.* FROM analysis_history AS base
     WHERE base.sentiment_score IS NOT NULL
+      AND base.report_type IN ('full', 'simple')
       AND base.created_at = (
           SELECT MAX(a2.created_at) FROM analysis_history a2
           WHERE a2.code = base.code
             AND substr(a2.created_at,1,10) = substr(base.created_at,1,10)
-            AND a2.sentiment_score IS NOT NULL)
+            AND a2.sentiment_score IS NOT NULL
+            AND a2.report_type IN ('full', 'simple'))
 """
+
+
+def normalize_ml_sentiment_l7(score: int, threshold_bull: int = 52, threshold_bear: int = 49) -> float:
+    """ML sentiment_score → L7 (v5.0), 与生产 SignalNormalizer.normalize_mindlynx_score 一致.
+
+    生产: src/fusion/linear.py:57 调用 src/normalizer.py::normalize_mindlynx_score (v5.0, 2026-07-27 校准).
+    本函数为其等价复刻, 由 tests/test_c1test_parsing.py::TestMlL7Mapping 对 0..100 全值交叉校验,
+    防止 c1test 再次漂移 (曾用 v4.0 旧映射, 与生产不一致)。
+    """
+    s = score
+    if threshold_bear < s < threshold_bull:      # 50/51 → 中性
+        return 0.0
+    if s <= threshold_bear:                       # 看空区
+        if s <= 19:
+            return -2.5
+        if s <= 39:
+            return -1.5
+        return -2.0
+    if s >= 80:                                   # 看多区
+        return 1.5
+    if s >= 60:
+        return 1.0
+    return 0.5
 
 
 def phase3_ml() -> Dict[str, Any]:
@@ -556,27 +581,10 @@ def phase3_ml() -> Dict[str, Any]:
                 return -1
             return 0
 
-        def _normalize_v4(score: int) -> float:
-            if score <= 19:
-                return -3.0
-            if score <= 30:
-                return -2.5
-            if score <= 40:
-                return -2.0
-            if score <= 48:
-                return -1.5
-            if score <= 51:
-                return 0.0
-            if score <= 59:
-                return 0.8
-            if score <= 79:
-                return 1.0
-            return 1.5
-
         correct, total, neutral = 0, 0, 0
         for score, pct_chg in rows:
-            l7 = _normalize_v4(score) * 0.8          # fusion 管线
-            ml_dir = _ml_sign(l7)                     # 与 backtest._sign 一致
+            l7 = normalize_ml_sentiment_l7(score) * 0.8   # fusion 管线 (v5.0)
+            ml_dir = _ml_sign(l7)                          # 与 backtest._sign 一致
             if ml_dir == 0:
                 neutral += 1
                 continue
@@ -590,7 +598,7 @@ def phase3_ml() -> Dict[str, Any]:
             "total": total,
             "neutral": neutral,
             "accuracy": round(correct / total * 100, 1) if total > 0 else 0.0,
-            "source": "analysis_history → v4.0 L7 ×0.8 → _sign(0.1) → T+1",
+            "source": "analysis_history(ML子系统行) → v5.0 L7 ×0.8 → _sign(0.1) → T+1",
         }
 
     # ── 3. 策略级准确率 (从 backtest_results.skill_id) ──

@@ -20,7 +20,8 @@
 口径声明 (铁律#12):
     - 持有期语义 = 交易日; 用 stock_daily 排序确定 T+N (修正生产 calendar-day join)
     - 前向收益 = 未来 N 个交易日 pct_chg 累积复利 (pct_chg 单位=%)
-    - ML 方向 = fusion_equivalent 口径 (norm_v4(score)*0.8 -> _sign(0.1)), 与 c1test 一致
+    - ML 方向 = fusion_equivalent 口径 (norm_v5(score)*0.8 -> _sign(0.1)), v5.0=生产映射
+    - 仅取 ML 子系统行 report_type IN ('full','simple'), 排除 'fusion'(融合管线自身写回)/'MARKET'
     - regime = 分析日之前 20 交易日等权市场收益 (ex-ante, 无前视)
     - 中性 (_sign==0) 不计入准确率分母, 单独报告
     - 去重 (默认 --dedup latest): 生产 fusion 口径 = 每股票取最新一条
@@ -61,22 +62,21 @@ def assert_design() -> None:
     print("[assert_design] OK: 多持有期/多时段/regime/三基准/独立性/黄金参考 均在设计中")
 
 
-def norm_v4(score: int) -> float:
-    if score <= 19:
-        return -3.0
-    if score <= 30:
-        return -2.5
-    if score <= 40:
-        return -2.0
-    if score <= 48:
-        return -1.5
-    if score <= 51:
+def norm_v5(score: int) -> float:
+    """生产 ML L7 映射 (v5.0), 等价 src/normalizer.py::normalize_mindlynx_score."""
+    if 49 < score < 52:
         return 0.0
-    if score <= 59:
-        return 0.8
-    if score <= 79:
+    if score <= 49:
+        if score <= 19:
+            return -2.5
+        if score <= 39:
+            return -1.5
+        return -2.0
+    if score >= 80:
+        return 1.5
+    if score >= 60:
         return 1.0
-    return 1.5
+    return 0.5
 
 
 def _sign(x: float, t: float = 0.1) -> int:
@@ -88,7 +88,7 @@ def _sign(x: float, t: float = 0.1) -> int:
 
 
 def ml_dir(score: int) -> int:
-    return _sign(norm_v4(score) * 0.8)
+    return _sign(norm_v5(score) * 0.8)
 
 
 def new_bucket():
@@ -143,7 +143,9 @@ def load_data():
             mkt_by_day[d].append(p)
     analyses = conn.execute(
         """SELECT code, substr(created_at,1,10) AS d, sentiment_score, created_at
-           FROM analysis_history WHERE sentiment_score IS NOT NULL"""
+           FROM analysis_history
+           WHERE sentiment_score IS NOT NULL
+             AND report_type IN ('full', 'simple')"""  # 仅 ML 子系统行; 排除 'fusion'(融合自身)/MARKET
     ).fetchall()
     conn.close()
     return daily, mkt_by_day, analyses

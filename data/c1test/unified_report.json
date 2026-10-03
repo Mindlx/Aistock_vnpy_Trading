@@ -1,6 +1,6 @@
 {
-  "run_id": "c1test-2026-10-03-101956",
-  "timestamp": "2026-10-03 10:19:56",
+  "run_id": "c1test-2026-10-03-102753",
+  "timestamp": "2026-10-03 10:27:53",
   "mode": "full",
   "fusion": {
     "accuracy_pct": 46.4,
@@ -16,9 +16,9 @@
       "total": 1028
     },
     "ml": {
-      "accuracy_pct": 49.9,
-      "correct": 480,
-      "total": 962
+      "accuracy_pct": 46.5,
+      "correct": 310,
+      "total": 666
     },
     "at": {
       "accuracy_pct": 49.9,
@@ -56,27 +56,27 @@
   },
   "ml": {
     "operation_advice": {
-      "direction_accuracy": 94.2,
-      "direction_accuracy_directional": 55.6,
-      "correct": 129,
-      "total": 137,
-      "directional_total": 18,
-      "neutral": 119,
-      "no_direction": 944,
+      "direction_accuracy": 77.7,
+      "direction_accuracy_directional": 51.8,
+      "correct": 94,
+      "total": 121,
+      "directional_total": 56,
+      "neutral": 65,
+      "no_direction": 606,
       "source": "analysis_history T+1 (与 sentiment 完全一致口径)"
     },
     "sentiment_score": {
-      "correct": 599,
-      "total": 1081,
-      "accuracy": 55.4,
+      "correct": 373,
+      "total": 727,
+      "accuracy": 51.3,
       "source": "analysis_history + stock_daily T+1"
     },
     "fusion_equivalent": {
-      "correct": 480,
-      "total": 962,
-      "neutral": 119,
-      "accuracy": 49.9,
-      "source": "analysis_history → v4.0 L7 ×0.8 → _sign(0.1) → T+1"
+      "correct": 310,
+      "total": 666,
+      "neutral": 61,
+      "accuracy": 46.5,
+      "source": "analysis_history(ML子系统行) → v5.0 L7 ×0.8 → _sign(0.1) → T+1"
     },
     "strategy_breakdown": [
       {
@@ -87,18 +87,18 @@
       }
     ],
     "internal_divergence": {
-      "agree_accuracy": 55.9,
-      "agree_total": 34,
+      "agree_accuracy": 48.5,
+      "agree_total": 99,
       "diverge_rate": 0.0,
       "diverge_total": 0,
       "diverge_sentiment_accuracy": 0,
       "diverge_op_accuracy": 0,
-      "sent_diverge_op_neutral": 928
+      "sent_diverge_op_neutral": 563
     }
   },
   "at_fusion_level": {
     "status": "ok",
-    "timestamp": "2026-10-03 10:19:56",
+    "timestamp": "2026-10-03 10:27:53",
     "fusion_level_note": "融合层面 AT 数据见 fusion.subsystems.at",
     "correct": 421,
     "total": 844,
@@ -217,7 +217,7 @@
   },
   "factor": {
     "status": "ok",
-    "timestamp": "2026-10-03 10:15:54",
+    "timestamp": "2026-10-03 10:23:52",
     "accuracy": 53.3,
     "total_evaluations": 1026,
     "stocks_evaluated": 25,
@@ -228,7 +228,7 @@
   },
   "walkforward": {
     "status": "ok",
-    "timestamp": "2026-10-03 10:15:38",
+    "timestamp": "2026-10-03 10:23:35",
     "date_range": "2026-05-30 ~ 2026-10-01",
     "trading_days": 89,
     "train_window": 20,
@@ -315,7 +315,7 @@
   },
   "weight_sweep": {
     "status": "ok",
-    "timestamp": "2026-10-03 10:15:38",
+    "timestamp": "2026-10-03 10:23:35",
     "ly_range": [
       0.0,
       0.2,
@@ -346,7 +346,7 @@
   },
   "simulate": {
     "status": "ok",
-    "timestamp": "2026-10-03 10:15:38",
+    "timestamp": "2026-10-03 10:23:35",
     "total_return": 128.34,
     "annual_return": 754.23,
     "max_drawdown": 10.28,
@@ -364,7 +364,7 @@
     "vs_previous": {
       "fusion_accuracy": "+0.0%",
       "ly_accuracy": "+0.0%",
-      "ml_accuracy": "+0.0%",
+      "ml_accuracy": "-3.4%",
       "at_accuracy": "+0.0%"
     },
     "alert_count": 0,
@@ -373,7 +373,7 @@
   },
   "fusion_raw": {
     "status": "ok",
-    "timestamp": "2026-10-03 10:15:38",
+    "timestamp": "2026-10-03 10:23:35",
     "total_predictions": 1461,
     "total_matched": 1268,
     "total_unmatched": 193,

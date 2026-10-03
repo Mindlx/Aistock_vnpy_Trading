@@ -65,19 +65,20 @@ class TestMlProdDedup:
         conn = sqlite3.connect(":memory:")
         conn.execute(
             "CREATE TABLE analysis_history "
-            "(code TEXT, created_at TEXT, sentiment_score INTEGER, operation_advice TEXT)"
+            "(code TEXT, created_at TEXT, sentiment_score INTEGER, "
+            " operation_advice TEXT, report_type TEXT)"
         )
-        conn.executemany("INSERT INTO analysis_history VALUES (?,?,?,?)", rows)
+        conn.executemany("INSERT INTO analysis_history VALUES (?,?,?,?,?)", rows)
         conn.execute(c1test.ML_PROD_VIEW_SQL)
         return conn
 
     def test_keeps_only_latest_per_code_day(self):
         conn = self._view([
-            ("001", "2026-09-01 09:03", 40, ""),
-            ("001", "2026-09-01 15:04", 55, ""),   # 同日最新 → 保留
-            ("001", "2026-09-02T11:00", 60, ""),   # 次日 → 保留
-            ("002", "2026-09-01 10:00", 30, ""),
-            ("002", "2026-09-01 22:00", 35, ""),   # 同日最新 → 保留
+            ("001", "2026-09-01 09:03", 40, "", "full"),
+            ("001", "2026-09-01 15:04", 55, "", "full"),   # 同日最新 → 保留
+            ("001", "2026-09-02 11:00", 60, "", "full"),
+            ("002", "2026-09-01 10:00", 30, "", "full"),
+            ("002", "2026-09-01 22:00", 35, "", "full"),   # 同日最新 → 保留
         ])
         got = conn.execute(
             "SELECT code, substr(created_at,1,10), sentiment_score FROM ml_prod "
@@ -91,9 +92,34 @@ class TestMlProdDedup:
 
     def test_null_sentiment_rows_excluded_and_not_selected_as_latest(self):
         conn = self._view([
-            ("001", "2026-09-01 09:00", None, ""),
-            ("001", "2026-09-01 15:00", 50, ""),
-            ("001", "2026-09-01 22:00", None, ""),  # 更晚但 NULL → 不参与
+            ("001", "2026-09-01 09:00", None, "", "full"),
+            ("001", "2026-09-01 15:00", 50, "", "full"),
+            ("001", "2026-09-01 22:00", None, "", "full"),  # 更晚但 NULL → 不参与
         ])
         got = conn.execute("SELECT sentiment_score FROM ml_prod").fetchall()
         assert got == [(50,)]
+
+    def test_excludes_fusion_and_market_report_types(self):
+        conn = self._view([
+            ("001", "2026-09-01 11:04", 55, "", "full"),      # ML 行 → 保留
+            ("001", "2026-09-01T11:00", 73, "", "fusion"),    # 字符串最大但非 ML → 排除
+            ("MARKET", "2026-09-01 15:00", 60, "", "market_review"),  # → 排除
+            ("002", "2026-09-01 15:00", 40, "", "simple"),    # ML(simple) → 保留
+        ])
+        got = conn.execute(
+            "SELECT code, sentiment_score FROM ml_prod ORDER BY code"
+        ).fetchall()
+        assert got == [("001", 55), ("002", 40)]
+
+
+class TestMlL7Mapping:
+    """c1test 的 ML L7 映射必须与生产 SignalNormalizer 全值一致 (防再次漂移)."""
+
+    def test_matches_production_normalizer_for_all_scores(self):
+        from src.normalizer import SignalNormalizer
+        mismatches = [
+            (s, c1test.normalize_ml_sentiment_l7(s), SignalNormalizer.normalize_mindlynx_score(s))
+            for s in range(0, 101)
+            if c1test.normalize_ml_sentiment_l7(s) != SignalNormalizer.normalize_mindlynx_score(s)
+        ]
+        assert mismatches == [], f"与生产映射不一致: {mismatches[:5]}"
