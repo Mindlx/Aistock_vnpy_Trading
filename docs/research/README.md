@@ -11,6 +11,7 @@
 | `skill-accuracy-tracking.md` | 策略级准确率追踪（`research_skill_accuracy.py`） | 2026-07-23 |
 | `chip-concentration-factor.md` | 筹码集中度横截面因子（IC=-0.111, 已因子化 #14） | 2026-07-23 |
 | `ml-scoring-asymmetry.md` | ML评分方向不对称 — 14因子看多85% vs LLM看空69% | 2026-07-27 | 已结案 |
+| `c1skill-ml-regime-alpha-2026-10-03.md` | ML 准确率 regime beta 分解 — 高准确率=下跌市场 beta, 无稳健 alpha; ML 权重 HOLD | 2026-10-03 | ✅ |
 
 ---
 

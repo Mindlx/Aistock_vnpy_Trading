@@ -2,6 +2,12 @@
 
 # ML 系统回测文档
 
+> ⚠️ **regime beta 告警 (2026-10-03, c1skill 论证)**: 本文下方 "sentiment_score 65.0% / fusion_equivalent 64.1%"
+> 是 **2026Q2 期间** 的测量值。该季度市场同子集下跌率高达 68.5% (ML 净空头 82%), 高准确率主要是**市场 beta**
+> 而非 alpha。校正 beta/方向偏好后 ML 无稳健正 alpha (按日聚类 Δ 为负; cluster CI 跨 50%)。
+> 近期 (2026Q3) fusion_equivalent 已回落至 ~47%。**报告数字受 regime 主导, 不可作为调权依据。**
+> 详见 `docs/research/c1skill-ml-regime-alpha-2026-10-03.md`。
+
 > 最后更新: 2026-07-06 (含 op 纠偏史 + 分歧追踪 + 评测统一终版)
 > 子文档，与 `docs/backtest.md` 配套阅读
 
