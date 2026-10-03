@@ -19,6 +19,7 @@ from typing import Any
 
 from services.data_warehouse.config import DataWarehouseConfig
 from services.data_warehouse.warehouse import WarehouseReader
+from src.trading_calendar import is_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,8 @@ def _is_trading_hour() -> bool:
 
 
 def _is_trading_day() -> bool:
-    return datetime.now().isoweekday() <= 5
+    """A股交易日判断（周末/法定节假日/调休均排除，fail-open）。"""
+    return is_trading_day(_now_cn().strftime("%Y-%m-%d"), market="cn")
 
 
 def _now_cn() -> datetime:

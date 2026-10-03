@@ -31,6 +31,8 @@ import pandas as pd
 
 from vnpy_bridge.alpha_predictor import _compute_alpha_factors, _normalize
 
+from src.trading_calendar import is_trading_day
+
 DB_PATH = PROJECT_ROOT / "systems" / "MindLynx-Aistock" / "data" / "stock_analysis.db"
 MODEL_PATH = PROJECT_ROOT / "systems" / "lynx_vnpy" / "models" / "alpha_lgb_model.txt"
 OUTPUT_PATH = Path("data/realtime/alpha158_signal.json")
@@ -128,6 +130,11 @@ class Alpha158Service:
         """守护模式"""
         print(f"[alpha158] daemon started, interval={interval}s")
         while True:
+            now = datetime.now()
+            if not is_trading_day(now.strftime("%Y-%m-%d"), market="cn"):
+                print(f"[alpha158] {now.isoformat()} 非A股交易日（休市），跳过")
+                time.sleep(interval)
+                continue
             try:
                 data = self.run_once()
                 if data is not None:

@@ -32,6 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.wecom_notifier import WeComNotifier
 from src.normalizer import SignalNormalizer, L7_SIGNAL_NAMES, MAX_POSITION_DISAGREEMENT, L7_POSITION, L7_EMOJI
+from src.trading_calendar import is_trading_day
 
 REALTIME_DIR = Path("data/realtime")
 
@@ -270,10 +271,10 @@ class RealtimeFusion:
 
     @staticmethod
     def _is_trading_day(d: datetime | None = None) -> bool:
-        """检查是否为交易日（跳过周六日）。"""
+        """检查是否为A股交易日（周末/法定节假日/调休均排除）。"""
         if d is None:
             d = datetime.now()
-        return d.isoweekday() <= 5  # 1=Mon ... 5=Fri
+        return is_trading_day(d.strftime("%Y-%m-%d"), market="cn")
 
     @staticmethod
     def _is_trading_hour(d: datetime | None = None) -> bool:
