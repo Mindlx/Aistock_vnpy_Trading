@@ -5,9 +5,9 @@ c1test — 统一回测编排器 (Phase 1)
 单入口执行全系统回测，输出统一 JSON + Markdown 报告。
 
 用法:
-    python scripts/c1test.py                    # quick: 融合回测 + 缓存子系统数据
-    python scripts/c1test.py --full             # 全面: 融合 + LY + ML + AT 全量回测
-    python scripts/c1test.py --quick            # 同默认 (快速)
+    python scripts/c1test.py                    # 全量 (默认): 融合 + LY + 因子 + ML + AT + WalkForward + 权重网格 + 模拟
+    python scripts/c1test.py --quick            # 快速: 仅融合 + WalkForward + 权重网格 + 模拟 (跳过独立回测)
+    python scripts/c1test.py --full             # (已废弃, 等同默认全量)
     python scripts/c1test.py --report           # 只看上次报告，不重跑
     python scripts/c1test.py --push             # 跑完后推送企业微信
 
@@ -966,8 +966,12 @@ def phase7_weight_sweep(timeout: int = 120) -> Dict[str, Any]:
     if combo_match:
         result["combo_count"] = int(combo_match.group(1))
 
-    # 解析结果表: 找最优组合 (格式: ✅ 最优: (0.20, 0.55, 0.30) → 56.5%)
-    best_match = re.search(r"最优[：:]\s*\(([\d.]+),\s*([\d.]+),\s*([\d.]+)\)\s*→\s*([\d.]+)%", stdout)
+    # 解析结果表: 找最优组合 (格式: ✅ 最优: (0.20, 0.55, 0.30) → 56.5% (612/1249))
+    best_match = re.search(
+        r"最优[：:]\s*\(([\d.]+),\s*([\d.]+),\s*([\d.]+)\)\s*→\s*([\d.]+)%"
+        r"(?:\s*\((\d+)/(\d+)\))?",
+        stdout,
+    )
     if not best_match:
         # 兜底: 从结果表第一行找最高准确率行
         best_match = re.search(r"^\s*\(([\d.]+),([\d.]+),([\d.]+)\)\s+([\d.]+)%\s+(\d+)/(\d+)", stdout, re.MULTILINE)
@@ -986,8 +990,8 @@ def phase7_weight_sweep(timeout: int = 120) -> Dict[str, Any]:
             "ml": float(best_match.group(2)),
             "at": float(best_match.group(3)),
             "accuracy": float(best_match.group(4)),
-            "correct": 0,
-            "total": 0,
+            "correct": int(best_match.group(5)) if best_match.group(5) else 0,
+            "total": int(best_match.group(6)) if best_match.group(6) else 0,
         }
 
     result["returncode"] = proc.returncode
@@ -1059,7 +1063,7 @@ def generate_unified_report(phases: Dict[str, Any]) -> Dict[str, Any]:
     report: Dict[str, Any] = {
         "run_id": f"c1test-{_today_str()}-{datetime.now().strftime('%H%M%S')}",
         "timestamp": _now(),
-        "mode": "quick" if "--quick" in sys.argv or len(sys.argv) == 1 else "full",
+        "mode": "quick" if "--quick" in sys.argv else "full",
     }
 
     # 从融合阶段提取关键指标

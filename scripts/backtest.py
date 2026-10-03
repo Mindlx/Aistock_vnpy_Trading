@@ -1340,7 +1340,7 @@ def cmd_weight_sweep() -> None:
             print(f"      {dim_name}={dv:.2f}: {avg:.1f}%{mark}")
 
     best = results[0]
-    print(f"\n  ✅ 最优: ({best[0][0]:.2f}, {best[0][1]:.2f}, {best[0][2]:.2f}) → {best[1]:.1f}%")
+    print(f"\n  ✅ 最优: ({best[0][0]:.2f}, {best[0][1]:.2f}, {best[0][2]:.2f}) → {best[1]:.1f}% ({best[2]}/{best[3]})")
 
 
 # ── CLI ───────────────────────────────────────────────────
