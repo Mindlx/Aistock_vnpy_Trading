@@ -1435,15 +1435,41 @@ def _run_schedule_mode(config, args, stock_codes):
     additional_daily = []
     additional_weekly = []
 
+    def _is_cn_holiday_period(check_date) -> bool:
+        """法定节假日(含与周末相连的假期): 今日 CN 休市 且 附近 ±3 天存在休市的工作日。
+
+        普通周末: 前后工作日都开市 → False (周末情报照常周六日推送)。
+        国庆/春节等: 附近存在休市工作日 → True (跳过推送)。
+        """
+        try:
+            from src.core.trading_calendar import is_market_open
+            if is_market_open("cn", check_date):
+                return False
+            for off in range(-3, 4):
+                dd = check_date + timedelta(days=off)
+                if dd.weekday() < 5 and not is_market_open("cn", dd):
+                    return True
+        except Exception:
+            return False
+        return False
+
     def _sched_market_review():
         try:
-            if datetime.now().isoweekday() >= 6:
-                return
+            cfg = _reload_runtime_config()
+            # 交易日门禁 (2026-10-07): 目标市场休市(含国庆等节假日) → 跳过, 不推送
+            effective = None
+            if getattr(cfg, "trading_day_check_enabled", True):
+                from src.core.trading_calendar import compute_effective_region, get_open_markets_today
+                effective = compute_effective_region(
+                    getattr(cfg, "market_review_region", "cn") or "cn", get_open_markets_today())
+                if effective == "":
+                    logger.info("今日大盘复盘相关市场均为非交易日，跳过执行。")
+                    return
             from src.core.market_review import run_market_review
             from src.core.market_review_runtime import build_market_review_runtime
-            cfg = _reload_runtime_config()
             n, a, s = build_market_review_runtime(cfg)
-            _run_market_review_with_shared_lock(cfg, run_market_review, notifier=n, analyzer=a, search_service=s, send_notification=True)
+            _run_market_review_with_shared_lock(cfg, run_market_review, notifier=n, analyzer=a,
+                                                search_service=s, send_notification=True, override_region=effective)
         except Exception as e:
             logger.exception("大盘复盘失败: %s", e)
 
@@ -1474,6 +1500,9 @@ def _run_schedule_mode(config, args, stock_codes):
 
     def _sched_weekend_intel():
         try:
+            if _is_cn_holiday_period(datetime.now().date()):
+                logger.info("今日属法定节假日, 跳过周末情报推送。")
+                return
             _run_weekend_intel(_reload_runtime_config(), is_refresh=False, no_push=False)
         except Exception as e:
             logger.exception("周末情报失败: %s", e)

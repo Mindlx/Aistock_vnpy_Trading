@@ -78,6 +78,7 @@ ML (ZhuLinsen) 上游 271 commits: 跳过批量合并。
 | `src/services/realtime_monitor.py` | sentiment 读取加 `report_type IN ('full','simple')`（防读到融合管线写回的 'fusion' 行） | 2026-10-03 |
 | `src/core/llm_validation.py` | 同上：准确率验证排除 'fusion' 行 | 2026-10-03 |
 | `src/core/auto_tune.py` | 同上：评分调优排除 'fusion' 行 | 2026-10-03 |
+| `main.py` | 调度器交易日门禁：`_sched_market_review` 加 CN 交易日检查(原仅判周末, 国庆等节假日误推送)；`_sched_weekend_intel` 加法定节假日检查(保留普通周末) | 2026-10-07 |
 
 ### AT 子系统 — 高风险文件
 
