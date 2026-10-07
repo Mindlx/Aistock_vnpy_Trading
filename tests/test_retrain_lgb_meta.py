@@ -41,3 +41,31 @@ def test_write_model_meta_hash_changes_with_content(tmp_path):
     m2.write_bytes(b"B")
     h2 = json.loads(retrain.write_model_meta(m2, n_samples=1, n_features=1).read_text())["sha256"]
     assert h1 != h2
+
+
+def test_verify_model_meta_ok(tmp_path):
+    model = tmp_path / "alpha_lgb_model.txt"
+    model.write_bytes(b"tree\nversion=v4\n")
+    retrain.write_model_meta(model, n_samples=3, n_features=58)
+    ok, msg = retrain.verify_model_meta(model)
+    assert ok, msg
+
+
+def test_verify_model_meta_detects_sha_drift(tmp_path):
+    model = tmp_path / "alpha_lgb_model.txt"
+    model.write_bytes(b"tree\n")
+    retrain.write_model_meta(model, n_samples=3, n_features=58)
+    model.write_bytes(b"tampered\n")
+    ok, msg = retrain.verify_model_meta(model)
+    assert not ok and "sha256" in msg
+
+
+def test_verify_model_meta_missing(tmp_path):
+    ok, msg = retrain.verify_model_meta(tmp_path / "nope.txt")
+    assert not ok and "缺失" in msg
+
+
+def test_repo_committed_model_matches_meta():
+    """已提交模型 == meta.json (强制溯源同步: 本地重训后必须提交 meta)。"""
+    ok, msg = retrain.verify_model_meta()
+    assert ok, msg

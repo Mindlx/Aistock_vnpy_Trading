@@ -253,3 +253,16 @@ LY 的 `prob_up_ensemble`、`signal_rf`、`strength` 等信息通过 `pipeline.p
 | `systems/lynx_vnpy/vnpy_bridge/run_alpha_pipeline.py` | Alpha158 因子管线+IC分析 |
 | `systems/lynx_vnpy/models/` | per-stock RF模型 + scaler |
 | `systems/lynx_vnpy/models/alpha_lgb_model.txt` | 全局 LGB 模型 |
+| `systems/lynx_vnpy/models/alpha_lgb_model.meta.json` | LGB 模型溯源 sidecar（时间/样本/特征/超参/sha256） |
+
+**模型溯源与漂移检查（2026-10-07 增设）**：`retrain_lgb.py` 每次重训会同时写
+`alpha_lgb_model.txt` 与 `alpha_lgb_model.meta.json`（含超参、样本数、`sha256`）。
+LGB 在当前固定超参（默认 seed，`num_boost_round=200`）下对同一数据**确定性可复现**
+（实测强制重训与产物逐字节一致）。校验命令：
+
+```bash
+.venv/bin/python systems/lynx_vnpy/vnpy_bridge/retrain_lgb.py --verify   # exit 0=一致
+```
+
+模型或 meta 任一变更后必须同步提交（`tests/test_retrain_lgb_meta.py::test_repo_committed_model_matches_meta`
+会强制此约束）。

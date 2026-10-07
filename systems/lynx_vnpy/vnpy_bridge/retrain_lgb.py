@@ -68,6 +68,27 @@ def should_retrain() -> bool:
     return (datetime.datetime.now() - last).days >= MIN_DAYS
 
 
+def verify_model_meta(model_path=MODEL) -> tuple[bool, str]:
+    """校验模型与 meta sidecar 一致 (sha256 + 特征数/超参) — 检测未溯源漂移。"""
+    import hashlib
+    import json
+    p = Path(model_path)
+    meta_path = p.parent / (p.stem + ".meta.json")
+    if not p.exists():
+        return False, f"模型缺失: {p}"
+    if not meta_path.exists():
+        return False, f"meta 缺失: {meta_path}"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    actual = hashlib.sha256(p.read_bytes()).hexdigest()
+    if meta.get("sha256") != actual:
+        return False, f"sha256 漂移: meta={meta.get('sha256')} actual={actual}"
+    if meta.get("params") != PARAMS:
+        return False, "超参漂移: meta 与当前 PARAMS 不一致"
+    if meta.get("num_boost_round") != NUM_BOOST_ROUND:
+        return False, "num_boost_round 漂移"
+    return True, f"OK (样本={meta.get('n_samples')}, 特征={meta.get('n_features')}, sha256={actual[:12]}…)"
+
+
 def main():
     import datetime
     print(f"[retrain_lgb] {datetime.datetime.now().isoformat()}")
@@ -115,4 +136,9 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys as _sys
+    if "--verify" in _sys.argv[1:]:
+        _ok, _msg = verify_model_meta()
+        print(f"[verify_lgb] {_msg}")
+        _sys.exit(0 if _ok else 1)
     main()
