@@ -1,0 +1,22 @@
+{
+  "model_file": "alpha_lgb_model.txt",
+  "generated_at": "2026-10-07T19:54:55",
+  "n_samples": 5412,
+  "n_features": 58,
+  "num_boost_round": 200,
+  "params": {
+    "objective": "binary",
+    "verbosity": -1,
+    "num_leaves": 8,
+    "max_depth": 4,
+    "min_data_in_leaf": 20,
+    "feature_fraction": 0.4,
+    "bagging_fraction": 0.7,
+    "bagging_freq": 5,
+    "lambda_l1": 0.5,
+    "lambda_l2": 1.0,
+    "learning_rate": 0.03
+  },
+  "lgb_version": "4.6.0",
+  "sha256": "dd70a951d7f3279bc7d706d4e3aa584c7b4a7cd0715af628d66f7be602c08025"
+}

@@ -28,6 +28,37 @@ LAST_RETRAIN = _PROJ / "data/vnpy_lab/.last_lgb_retrain"
 
 MIN_DAYS = 20  # 至少20天才重训一次
 
+# 固定超参 (默认 seed → 确定性, 同数据可复现一致)
+PARAMS = {
+    "objective": "binary", "verbosity": -1,
+    "num_leaves": 8, "max_depth": 4, "min_data_in_leaf": 20,
+    "feature_fraction": 0.4, "bagging_fraction": 0.7, "bagging_freq": 5,
+    "lambda_l1": 0.5, "lambda_l2": 1.0, "learning_rate": 0.03,
+}
+NUM_BOOST_ROUND = 200
+MODEL_META = MODEL.parent / (MODEL.stem + ".meta.json")
+
+
+def write_model_meta(model_path, *, n_samples, n_features) -> Path:
+    """写模型溯源 sidecar (时间/样本/特征/超参/版本/sha256), 供漂移审计。"""
+    import datetime
+    import hashlib
+    import json
+    p = Path(model_path)
+    meta = {
+        "model_file": p.name,
+        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "n_samples": int(n_samples),
+        "n_features": int(n_features),
+        "num_boost_round": NUM_BOOST_ROUND,
+        "params": PARAMS,
+        "lgb_version": getattr(lgb, "__version__", "unknown"),
+        "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+    }
+    meta_path = p.parent / (p.stem + ".meta.json")
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return meta_path
+
 
 def should_retrain() -> bool:
     if not MODEL.exists() or not LAST_RETRAIN.exists():
@@ -72,18 +103,15 @@ def main():
     y_all = np.concatenate(y_list)
     print(f"   样本: {len(X_all)}, 特征: {X_all.shape[1]}")
 
-    model = lgb.train({
-        "objective": "binary", "verbosity": -1,
-        "num_leaves": 8, "max_depth": 4, "min_data_in_leaf": 20,
-        "feature_fraction": 0.4, "bagging_fraction": 0.7, "bagging_freq": 5,
-        "lambda_l1": 0.5, "lambda_l2": 1.0, "learning_rate": 0.03,
-    }, lgb.Dataset(X_all, label=y_all), num_boost_round=200)
+    model = lgb.train(PARAMS, lgb.Dataset(X_all, label=y_all), num_boost_round=NUM_BOOST_ROUND)
 
     MODEL.parent.mkdir(parents=True, exist_ok=True)
     model.save_model(str(MODEL))
     LAST_RETRAIN.parent.mkdir(parents=True, exist_ok=True)
     LAST_RETRAIN.touch()
+    meta_path = write_model_meta(MODEL, n_samples=len(X_all), n_features=X_all.shape[1])
     print(f"   ✅ 模型已保存 ({MODEL})")
+    print(f"   ✅ 溯源已写 ({meta_path})")
 
 
 if __name__ == "__main__":
