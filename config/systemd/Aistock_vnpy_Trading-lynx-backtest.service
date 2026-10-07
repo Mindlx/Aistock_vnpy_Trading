@@ -6,6 +6,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# 法定节假日门禁 (普通周末照常运行)
+ExecCondition=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python /home/bluekuma/workspace/Aistock_vnpy_Trading/scripts/holiday_gate.py
 WorkingDirectory=/home/bluekuma/workspace/Aistock_vnpy_Trading
 ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python systems/lynx_vnpy/lynx_signal.py --backtest
 ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python scripts/backtest_lgb.py

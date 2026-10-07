@@ -4,6 +4,8 @@ Documentation=https://github.com/Mindlx/Aistock_vnpy_Trading
 
 [Service]
 Type=oneshot
+# 法定节假日门禁 (普通周末照常运行)
+ExecCondition=/home/bluekuma/workspace/Aistock_vnpy_Trading/.venv/bin/python /home/bluekuma/workspace/Aistock_vnpy_Trading/scripts/holiday_gate.py
 ExecStart=/home/bluekuma/workspace/Aistock_vnpy_Trading/scripts/ic_monitor.sh
 User=bluekuma
 Group=bluekuma

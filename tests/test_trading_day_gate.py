@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import trading_day_gate as gate
+import holiday_gate as hgate
 
 
 class TestTradingDayGate:
@@ -27,6 +28,42 @@ class TestTradingDayGate:
         monkeypatch.setattr(gate, "is_trading_day", lambda *a, **k: False)
         monkeypatch.setenv("FORCE_TRADING_DAY", "1")
         assert gate.main() == 0
+
+
+class TestHolidayGate:
+    """holiday_gate: 仅法定节假日跳过, 普通周末放行."""
+
+    @staticmethod
+    def _fake_calendar(closed):
+        # 未在 closed 集合中的日期视为开市
+        return lambda d, market="cn": d not in closed
+
+    def test_normal_sunday_not_holiday(self, monkeypatch):
+        from datetime import date
+        monkeypatch.setattr(hgate, "is_trading_day", self._fake_calendar({"2026-09-20"}))
+        assert hgate.is_holiday_period(date(2026, 9, 20)) is False
+
+    def test_holiday_sunday_is_holiday(self, monkeypatch):
+        from datetime import date
+        # 10-04 周日, 附近 10-02(五)/10-05(一) 休市 → 属国庆
+        monkeypatch.setattr(hgate, "is_trading_day",
+                            self._fake_calendar({"2026-10-02", "2026-10-04", "2026-10-05"}))
+        assert hgate.is_holiday_period(date(2026, 10, 4)) is True
+
+    def test_weekday_holiday_is_holiday(self, monkeypatch):
+        from datetime import date
+        monkeypatch.setattr(hgate, "is_trading_day", self._fake_calendar({"2026-10-07"}))
+        assert hgate.is_holiday_period(date(2026, 10, 7)) is True
+
+    def test_main_skips_in_holiday_period(self, monkeypatch):
+        monkeypatch.setattr(hgate, "is_holiday_period", lambda d: True)
+        monkeypatch.delenv("FORCE_TRADING_DAY", raising=False)
+        assert hgate.main() == 1
+
+    def test_main_runs_normal_weekend(self, monkeypatch):
+        monkeypatch.setattr(hgate, "is_holiday_period", lambda d: False)
+        monkeypatch.delenv("FORCE_TRADING_DAY", raising=False)
+        assert hgate.main() == 0
 
 
 class TestRealtimeFusionHolidayAware:

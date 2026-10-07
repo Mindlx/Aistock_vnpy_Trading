@@ -100,11 +100,12 @@ bash scripts/deploy-systemd.sh --restart-daemons
 
 为避免法定节假日/调休（`Mon..Fri` 日历仍会触发）空跑，所有**工作日 / 每日**触发的一次性服务均加了 systemd `ExecCondition=` 门禁：
 
-- 门禁脚本：`scripts/trading_day_gate.py`（复用 `src/trading_calendar.is_trading_day` + `exchange_calendars` 的 XSHG 官方日历，识别周末/法定节假日/调休）。
-- 交易日 → 退出码 `0`（放行）；非交易日 → 退出码 `1`，systemd **跳过剩余命令且不标记单元失败**（官方语义：退出 1–254 = 跳过）。
-- 覆盖：alpha158、realtime-fusion、TA、eastmoney-rating、warehouse-warmup、fusion-eval、lynx-signal、retrain-lgb、fusion、eastmoney-rating-pdf、c1test-daily、diagnose-agreement、calibrate-alphas。
+- 门禁脚本：`scripts/trading_day_gate.py`（工作日任务：非交易日即跳过）+ `scripts/holiday_gate.py`（周/月任务：**仅法定节假日跳过, 普通周末照常运行**）。均复用 `src/trading_calendar.is_trading_day` + `exchange_calendars` 的 XSHG 官方日历（识别周末/法定节假日/调休）。
+- 交易日 → 退出码 `0`（放行）；非交易日/节假日 → 退出码 `1`，systemd **跳过剩余命令且不标记单元失败**（官方语义：退出 1–254 = 跳过）。
+- 覆盖（工作日/每日，`trading_day_gate`）：alpha158、realtime-fusion、TA、eastmoney-rating、warehouse-warmup、fusion-eval、lynx-signal、retrain-lgb、fusion、eastmoney-rating-pdf、c1test-daily、diagnose-agreement、calibrate-alphas。
+- 覆盖（周/月，`holiday_gate`）：`lynx-backtest`（周日）、`c1test-weekly`（周日）、`ic-monitor`（周五）、`eastmoney-calibrate`（每月 1 日）——它们在非交易日运行本是设计行为，但法定节假日应停。
 - **常驻 daemon**（alpha158 / realtime-fusion / data-warehouse / scheduler）的日检查已升级为节假日感知，因为长驻进程跨节日无法靠启动门禁拦截：`realtime_fusion._is_trading_day`、`alpha158_service.run_daemon`、`data_warehouse/scheduler._is_trading_day` 均调用 `src.trading_calendar.is_trading_day`。
-- **不在门禁内**（设计上就在非交易日运行）：`lynx-backtest`（周日）、`c1test-weekly`（周日）、`ic-monitor`（周五）、`eastmoney-calibrate`（每月 1 日）、`trace-collect`（运维类）。
+- **不在门禁内**：`trace-collect`（运维类兜底扫描, 无副作用）。
 
 手工强制放行：
 
